@@ -24,6 +24,7 @@ final class BrowserTab: Identifiable {
             ?? "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0"
         configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
         page = WebPage(configuration: configuration)
+        page.isInspectable = true
     }
 
     var title: String {
@@ -68,6 +69,7 @@ final class BrowserTab: Identifiable {
 @Observable
 final class BrowserModel {
     private(set) var tabs: [BrowserTab] = []
+    private var closedTabURLs: [URL?] = []
     var activeTabID: UUID?
     var addressFocusRequest = 0
 
@@ -93,12 +95,39 @@ final class BrowserModel {
 
     func closeTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        closedTabURLs.append(tabs[index].page.url)
+        if closedTabURLs.count > 10 { closedTabURLs.removeFirst() }
         tabs.remove(at: index)
         if tabs.isEmpty {
             addTab()
         } else if activeTabID == id {
             activeTabID = tabs[min(index, tabs.count - 1)].id
         }
+    }
+
+    func reopenClosedTab() {
+        guard let url = closedTabURLs.popLast() else { return }
+        addTab()
+        if let url, let tab = activeTab {
+            tab.isNewTab = false
+            _ = tab.page.load(url)
+        }
+    }
+
+    func selectTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        activeTabID = tabs[index].id
+    }
+
+    func selectLastTab() {
+        guard !tabs.isEmpty else { return }
+        selectTab(at: tabs.count - 1)
+    }
+
+    func switchTab(by offset: Int) {
+        guard let currentIndex = tabs.firstIndex(where: { $0.id == activeTabID }),
+              !tabs.isEmpty else { return }
+        selectTab(at: (currentIndex + offset + tabs.count) % tabs.count)
     }
 
     func navigate(to input: String) {
@@ -124,6 +153,13 @@ final class BrowserModel {
 
     func requestAddressFocus() {
         addressFocusRequest += 1
+    }
+
+    func showWebInspector() {
+        guard activeTab?.isNewTab == false,
+              let contentView = NSApp.keyWindow?.contentView,
+              let webView = WebInspector.findWebView(in: contentView) else { return }
+        WebInspector.show(for: webView)
     }
 }
 
