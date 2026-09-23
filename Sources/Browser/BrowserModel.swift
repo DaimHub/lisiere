@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import WebKit
@@ -6,7 +7,17 @@ import WebKit
 @Observable
 final class BrowserTab: Identifiable {
     let id = UUID()
-    let page = WebPage()
+    let page: WebPage
+
+    init() {
+        var configuration = WebPage.Configuration()
+        let safariURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
+        let safariVersion = safariURL.flatMap { Bundle(url: $0)?
+            .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+            ?? "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0"
+        configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
+        page = WebPage(configuration: configuration)
+    }
 
     var title: String {
         if !page.title.isEmpty { return page.title }
