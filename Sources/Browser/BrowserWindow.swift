@@ -15,38 +15,24 @@ struct BrowserWindow: View {
                 tabStrip
                 navigationBar
             }
-            .background(.bar)
 
             if let tab = browser.activeTab {
-                WebView(tab.page)
-                    .webViewBackForwardNavigationGestures(.enabled)
-                    .webViewLinkPreviews(.enabled)
-                    .webViewTextSelection(.enabled)
-                    .webViewMagnificationGestures(.enabled)
-                    .webViewElementFullscreenBehavior(.enabled)
-                    .id(tab.id)
-                    .overlay(alignment: .top) {
-                        if tab.page.isLoading {
-                            ProgressView(value: tab.page.estimatedProgress)
-                                .progressViewStyle(.linear)
-                                .tint(accent)
-                        }
+                Group {
+                    if tab.isNewTab {
+                        NewTabView { browser.requestAddressFocus() }
+                    } else {
+                        webView(for: tab)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                    }
-                    .padding(8)
-                    .onChange(of: tab.page.url) { _, url in
-                        if !addressIsFocused { address = url?.absoluteString ?? "" }
-                    }
-                    .onAppear {
-                        if !addressIsFocused { address = tab.page.url?.absoluteString ?? "" }
-                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+                .padding(8)
             }
         }
-        .background(.windowBackground)
+        .background(WindowGlassBackground())
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
@@ -56,6 +42,41 @@ struct BrowserWindow: View {
         .onChange(of: browser.addressFocusRequest) { _, _ in
             addressIsFocused = true
         }
+        .onAppear {
+            if browser.activeTab?.isNewTab == true {
+                addressIsFocused = true
+            }
+        }
+    }
+
+    private func webView(for tab: BrowserTab) -> some View {
+        WebView(tab.page)
+            .webViewBackForwardNavigationGestures(.enabled)
+            .webViewLinkPreviews(.enabled)
+            .webViewTextSelection(.enabled)
+            .webViewMagnificationGestures(.enabled)
+            .webViewElementFullscreenBehavior(.enabled)
+            .id(tab.id)
+            .overlay(alignment: .topLeading) {
+                if tab.page.isLoading {
+                    GeometryReader { geometry in
+                        Capsule()
+                            .fill(accent.opacity(0.5))
+                            .frame(width: max(18, geometry.size.width * tab.page.estimatedProgress),
+                                   height: 2)
+                    }
+                    .frame(height: 2)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 3)
+                    .animation(.easeOut(duration: 0.18), value: tab.page.estimatedProgress)
+                }
+            }
+            .onChange(of: tab.page.url) { _, url in
+                if !addressIsFocused { address = url?.absoluteString ?? "" }
+            }
+            .onAppear {
+                if !addressIsFocused { address = tab.page.url?.absoluteString ?? "" }
+            }
     }
 
     private var tabStrip: some View {
@@ -108,9 +129,19 @@ struct BrowserWindow: View {
         return HStack(spacing: 4) {
             Button { browser.activeTabID = tab.id } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isActive ? Color.primary : Color.secondary)
+                    Group {
+                        if let favicon = tab.favicon {
+                            favicon
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Image(systemName: "globe")
+                                .resizable()
+                                .scaledToFit()
+                        }
+                    }
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(isActive ? Color.primary : Color.secondary)
                     Text(tab.title)
                         .font(.system(size: 13, weight: .medium))
                         .tracking(-0.15)
@@ -143,6 +174,9 @@ struct BrowserWindow: View {
                 .strokeBorder(isActive ? Color.primary.opacity(0.08) : Color.clear, lineWidth: 1)
         }
         .onHover { hoveredTabID = $0 ? tab.id : nil }
+        .task(id: tab.page.url) {
+            await tab.updateFavicon()
+        }
     }
 
     private var navigationBar: some View {
@@ -163,6 +197,7 @@ struct BrowserWindow: View {
                 Button { browser.reload() } label: {
                     Image(systemName: "arrow.clockwise")
                 }
+                .disabled(browser.activeTab?.isNewTab ?? true)
                 .help("Reload (⌘R)")
             }
             .buttonStyle(ChromeIconButtonStyle())

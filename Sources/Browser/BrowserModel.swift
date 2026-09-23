@@ -1,13 +1,20 @@
 import AppKit
 import Foundation
+import LinkPresentation
 import Observation
+import SwiftUI
 import WebKit
 
 @MainActor
 @Observable
 final class BrowserTab: Identifiable {
+    private static var faviconCache: [String: Image] = [:]
+
     let id = UUID()
     let page: WebPage
+    var isNewTab = true
+    var favicon: Image?
+    private var faviconHost: String?
 
     init() {
         var configuration = WebPage.Configuration()
@@ -22,6 +29,38 @@ final class BrowserTab: Identifiable {
     var title: String {
         if !page.title.isEmpty { return page.title }
         return page.url?.host() ?? "New Tab"
+    }
+
+    func updateFavicon() async {
+        guard let url = page.url, let host = url.host() else {
+            favicon = nil
+            faviconHost = nil
+            return
+        }
+        guard faviconHost != host else { return }
+
+        favicon = Self.faviconCache[host]
+        if favicon != nil {
+            faviconHost = host
+            return
+        }
+
+        let provider = LPMetadataProvider()
+        provider.timeout = 10
+        guard let metadata = try? await provider.startFetchingMetadata(for: url),
+              let iconProvider = metadata.iconProvider,
+              let icon = await withCheckedContinuation({ continuation in
+                  _ = iconProvider.loadObject(ofClass: NSImage.self) { image, _ in
+                      continuation.resume(returning: image as? NSImage)
+                  }
+              }),
+              !Task.isCancelled,
+              page.url?.host() == host else { return }
+
+        let image = Image(nsImage: icon)
+        Self.faviconCache[host] = image
+        faviconHost = host
+        favicon = image
     }
 }
 
@@ -44,7 +83,7 @@ final class BrowserModel {
         let tab = BrowserTab()
         tabs.append(tab)
         activeTabID = tab.id
-        _ = tab.page.load(URL(string: "https://www.apple.com"))
+        requestAddressFocus()
     }
 
     func closeActiveTab() {
@@ -63,8 +102,9 @@ final class BrowserModel {
     }
 
     func navigate(to input: String) {
-        guard let url = BrowserAddress.url(for: input), let page = activeTab?.page else { return }
-        _ = page.load(url)
+        guard let url = BrowserAddress.url(for: input), let tab = activeTab else { return }
+        tab.isNewTab = false
+        _ = tab.page.load(url)
     }
 
     func reload() {
