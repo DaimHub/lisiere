@@ -7,7 +7,7 @@ struct BrowserApp: App {
             BrowserWindow()
                 .frame(minWidth: 680, minHeight: 440)
         }
-        .windowToolbarStyle(.unified)
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             BrowserCommands()
         }

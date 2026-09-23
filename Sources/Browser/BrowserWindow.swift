@@ -8,7 +8,6 @@ struct BrowserWindow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tabStrip
             navigationBar
 
             if let tab = browser.activeTab {
@@ -35,6 +34,11 @@ struct BrowserWindow: View {
             }
         }
         .background(.windowBackground)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                tabStrip
+            }
+        }
         .focusedSceneValue(\.browserModel, browser)
         .onChange(of: browser.activeTabID) { _, _ in
             address = browser.activeTab?.page.url?.absoluteString ?? ""
@@ -52,7 +56,6 @@ struct BrowserWindow: View {
                         tabButton(for: tab)
                     }
                 }
-                .padding(.horizontal, 10)
             }
             .scrollIndicators(.hidden)
 
@@ -63,10 +66,8 @@ struct BrowserWindow: View {
             .buttonStyle(.plain)
             .help("New Tab (⌘T)")
             .accessibilityLabel("New Tab")
-            .padding(.trailing, 12)
         }
-        .frame(height: 39)
-        .background(.bar)
+        .frame(minWidth: 240, idealWidth: 640, maxWidth: 900, maxHeight: 32)
     }
 
     private func tabButton(for tab: BrowserTab) -> some View {
