@@ -37,7 +37,7 @@ struct BrowserWindow: View {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                     }
-                    .padding(10)
+                    .padding(8)
                     .onChange(of: tab.page.url) { _, url in
                         if !addressIsFocused { address = url?.absoluteString ?? "" }
                     }
@@ -98,7 +98,7 @@ struct BrowserWindow: View {
             .padding(.trailing, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(height: 46)
+        .frame(height: 34)
     }
 
     private func tabButton(for tab: BrowserTab) -> some View {
@@ -146,7 +146,7 @@ struct BrowserWindow: View {
     }
 
     private var navigationBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             HStack(spacing: 2) {
                 Button { browser.goBack() } label: {
                     Image(systemName: "chevron.left")
@@ -194,7 +194,7 @@ struct BrowserWindow: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 50)
+        .frame(height: 44)
     }
 }
 
