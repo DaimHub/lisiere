@@ -11,7 +11,11 @@ struct BrowserWindow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            navigationBar
+            VStack(spacing: 0) {
+                tabStrip
+                navigationBar
+            }
+            .background(.bar)
 
             if let tab = browser.activeTab {
                 WebView(tab.page)
@@ -28,6 +32,12 @@ struct BrowserWindow: View {
                                 .tint(accent)
                         }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    }
+                    .padding(10)
                     .onChange(of: tab.page.url) { _, url in
                         if !addressIsFocused { address = url?.absoluteString ?? "" }
                     }
@@ -37,12 +47,8 @@ struct BrowserWindow: View {
             }
         }
         .background(.windowBackground)
+        .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                tabStrip
-            }
-        }
         .focusedSceneValue(\.browserModel, browser)
         .onChange(of: browser.activeTabID) { _, _ in
             address = browser.activeTab?.page.url?.absoluteString ?? ""
@@ -53,24 +59,46 @@ struct BrowserWindow: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(browser.tabs) { tab in
-                        tabButton(for: tab)
+        GeometryReader { geometry in
+            let tabWidth = CGFloat(browser.tabs.count) * 190
+                + CGFloat(max(browser.tabs.count - 1, 0)) * 6
+            let availableWidth = max(190, geometry.size.width - 180)
+
+            HStack(spacing: 8) {
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 6) {
+                            ForEach(browser.tabs) { tab in
+                                tabButton(for: tab)
+                                    .id(tab.id)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: browser.tabs.count) { _, _ in
+                        if let activeTabID = browser.activeTabID {
+                            scrollProxy.scrollTo(activeTabID, anchor: .trailing)
+                        }
                     }
                 }
-            }
-            .scrollIndicators(.hidden)
+                .frame(width: min(tabWidth, availableWidth))
 
-            Button { browser.addTab() } label: {
-                Image(systemName: "plus")
+                Button { browser.addTab() } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("New Tab (⌘T)")
+                .accessibilityLabel("New Tab")
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
             }
-            .buttonStyle(ChromeIconButtonStyle())
-            .help("New Tab (⌘T)")
-            .accessibilityLabel("New Tab")
+            .padding(.leading, 80)
+            .padding(.trailing, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 240, idealWidth: 640, maxWidth: 900, maxHeight: 36)
+        .frame(height: 46)
     }
 
     private func tabButton(for tab: BrowserTab) -> some View {
@@ -167,10 +195,6 @@ struct BrowserWindow: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Color.primary.opacity(0.07).frame(height: 1)
-        }
     }
 }
 
