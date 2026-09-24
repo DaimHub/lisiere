@@ -52,6 +52,8 @@ final class BrowserTab: Identifiable {
         self.url = url
         pageTitle = title
         suspendedState = interactionState
+        favicon = FaviconStore.cachedIcon(for: url)
+        faviconHost = url?.host()
         pageDelegate.tab = self
     }
 
