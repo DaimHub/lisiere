@@ -3,10 +3,11 @@ import SwiftUI
 @main
 struct BrowserApp: App {
     @State private var bookmarks = BookmarkStore()
+    @State private var library = GeneratedViewLibrary()
 
     var body: some Scene {
         WindowGroup {
-            BrowserWindow(bookmarks: bookmarks)
+            BrowserWindow(bookmarks: bookmarks, library: library)
                 .frame(minWidth: 680, minHeight: 440)
         }
         .windowStyle(.hiddenTitleBar)
@@ -32,6 +33,7 @@ private struct BrowserCommands: Commands {
     @FocusedValue(\.browserModel) private var browser
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
+    @AppStorage(BrowserModel.studioVisibilityKey) private var studioIsVisible = false
 
     private var bookmarkableTab: BrowserTab? {
         guard let tab = browser?.activeTab, !tab.isNewTab, tab.page.url != nil else { return nil }
@@ -81,6 +83,8 @@ private struct BrowserCommands: Commands {
                 tabLayout = tabLayout.toggled
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+            Button(studioIsVisible ? "Hide Studio" : "Show Studio") { studioIsVisible.toggle() }
+                .keyboardShortcut("\\", modifiers: .command)
             Divider()
             Picker("Bookmarks Bar", selection: $bookmarksBarVisibility) {
                 ForEach(BookmarksBarVisibility.allCases) { visibility in

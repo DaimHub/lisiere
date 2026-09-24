@@ -3,15 +3,24 @@ import WebKit
 
 struct BrowserWindow: View {
     let bookmarks: BookmarkStore
+    let library: GeneratedViewLibrary
     @State private var browser = BrowserModel()
+    @State private var studio: StudioSession
     @State private var address = ""
     @State private var hoverCardTabID: UUID?
     @State private var isFullScreen = false
     @FocusState private var addressIsFocused: Bool
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
+    @AppStorage(BrowserModel.studioVisibilityKey) private var studioIsVisible = false
 
     private let accent = Color(red: 0.38, green: 0.49, blue: 0.54)
+
+    init(bookmarks: BookmarkStore, library: GeneratedViewLibrary) {
+        self.bookmarks = bookmarks
+        self.library = library
+        _studio = State(initialValue: StudioSession(library: library))
+    }
 
     var body: some View {
         // The main column keeps one identity across layouts. Rebuilding it would briefly show the
@@ -38,6 +47,7 @@ struct BrowserWindow: View {
         .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
         .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
         .animation(.snappy(duration: 0.25), value: tabLayout)
+        .animation(.snappy(duration: 0.25), value: studioIsVisible)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background(WindowGlassBackground())
         .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
@@ -73,22 +83,31 @@ struct BrowserWindow: View {
                     .transition(.opacity)
             }
 
-            if let tab = browser.activeTab {
-                Group {
-                    if tab.isNewTab {
-                        NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
-                    } else {
-                        webView(for: tab)
+            // The page keeps its place in the hierarchy when the Studio pane opens or closes.
+            HStack(spacing: BrowserChrome.edgeInset) {
+                if let tab = browser.activeTab {
+                    Group {
+                        if tab.isNewTab {
+                            NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
+                        } else {
+                            webView(for: tab)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+
+                if studioIsVisible {
+                    StudioPane(session: studio) { studioIsVisible = false }
+                        .frame(width: StudioPane.width)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .padding(.leading, leadingInset)
-                .padding([.trailing, .bottom], BrowserChrome.edgeInset)
             }
+            .padding(.leading, leadingInset)
+            .padding([.trailing, .bottom], BrowserChrome.edgeInset)
         }
     }
 
@@ -214,6 +233,13 @@ struct BrowserWindow: View {
                     .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
             }
 
+            Button { studioIsVisible.toggle() } label: {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(studioIsVisible ? Color.accentColor : Color.primary)
+            }
+            .buttonStyle(ChromeIconButtonStyle(size: 34))
+            .help(studioIsVisible ? "Hide Studio (⌘\\)" : "Show Studio (⌘\\)")
+            .accessibilityLabel(studioIsVisible ? "Hide Studio" : "Show Studio")
         }
         .padding(.trailing, BrowserChrome.edgeInset)
         .frame(height: BrowserChrome.navigationBarHeight)

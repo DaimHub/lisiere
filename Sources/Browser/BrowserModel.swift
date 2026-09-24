@@ -74,6 +74,8 @@ final class BrowserTab: Identifiable {
 @MainActor
 @Observable
 final class BrowserModel {
+    static let studioVisibilityKey = "studioVisible"
+
     private(set) var tabs: [BrowserTab] = []
     private var closedTabURLs: [URL?] = []
     var activeTabID: UUID? {
