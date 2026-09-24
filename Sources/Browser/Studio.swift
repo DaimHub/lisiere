@@ -95,31 +95,42 @@ final class GeneratedViewLibrary {
 }
 
 /// Serves `athas-view://<view id>/<path>` from that view's folder.
-struct GeneratedViewSchemeHandler: URLSchemeHandler {
+final class GeneratedViewSchemeHandler: NSObject, WKURLSchemeHandler {
     let rootURL: URL
 
-    func reply(for request: URLRequest) -> AsyncThrowingStream<URLSchemeTaskResult, Error> {
-        AsyncThrowingStream { continuation in
-            guard let url = request.url, let host = url.host(), UUID(uuidString: host) != nil else {
-                continuation.finish(throwing: URLError(.badURL))
-                return
-            }
-            let directory = rootURL.appending(path: host).standardizedFileURL
-            let path = url.path().isEmpty || url.path() == "/" ? "index.html" : String(url.path().dropFirst())
-            let fileURL = directory.appending(path: path).standardizedFileURL
-            guard fileURL.path.hasPrefix(directory.path + "/"),
-                  let data = try? Data(contentsOf: fileURL) else {
-                continuation.finish(throwing: URLError(.fileDoesNotExist))
-                return
-            }
-            let mimeType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                                           headerFields: ["Content-Type": mimeType, "Cache-Control": "no-store"])!
-            continuation.yield(.response(response))
-            continuation.yield(.data(data))
-            continuation.finish()
+    init(rootURL: URL) {
+        self.rootURL = rootURL
+    }
+
+    /// Reads a file inside the view's folder. Paths that lead anywhere else fail.
+    func response(for url: URL) throws -> (HTTPURLResponse, Data) {
+        guard let host = url.host(), UUID(uuidString: host) != nil else { throw URLError(.badURL) }
+        let directory = rootURL.appending(path: host).standardizedFileURL
+        let path = url.path().isEmpty || url.path() == "/" ? "index.html" : String(url.path().dropFirst())
+        let fileURL = directory.appending(path: path).standardizedFileURL
+        guard fileURL.path.hasPrefix(directory.path + "/"),
+              let data = try? Data(contentsOf: fileURL) else {
+            throw URLError(.fileDoesNotExist)
+        }
+        let mimeType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": mimeType, "Cache-Control": "no-store"])!
+        return (response, data)
+    }
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+        do {
+            guard let url = urlSchemeTask.request.url else { throw URLError(.badURL) }
+            let (response, data) = try response(for: url)
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(data)
+            urlSchemeTask.didFinish()
+        } catch {
+            urlSchemeTask.didFailWithError(error)
         }
     }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
 }
 
 /// The Studio pane's state in one window: which view is showing and any generation in progress.
@@ -133,7 +144,7 @@ final class StudioSession {
     }
 
     let library: GeneratedViewLibrary
-    let page: WebPage
+    let webView: WKWebView
     private(set) var selectedViewID: UUID?
     private(set) var generation: Generation?
     private(set) var lastReply: String?
@@ -142,11 +153,12 @@ final class StudioSession {
 
     init(library: GeneratedViewLibrary) {
         self.library = library
-        var configuration = WebPage.Configuration()
-        configuration.urlSchemeHandlers[URLScheme(GeneratedViewLibrary.scheme)!] =
-            GeneratedViewSchemeHandler(rootURL: library.rootURL)
-        page = WebPage(configuration: configuration)
-        page.isInspectable = true
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(GeneratedViewSchemeHandler(rootURL: library.rootURL),
+                                          forURLScheme: GeneratedViewLibrary.scheme)
+        WebInspector.enableDeveloperExtras(in: configuration)
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isInspectable = true
     }
 
     var selectedView: GeneratedView? { library.view(withID: selectedViewID) }
@@ -245,7 +257,7 @@ final class StudioSession {
 
     private func reloadPreview() {
         guard let selectedViewID, library.hasContent(selectedViewID) else { return }
-        _ = page.load(URLRequest(url: library.url(for: selectedViewID), cachePolicy: .reloadIgnoringLocalCacheData))
+        webView.load(URLRequest(url: library.url(for: selectedViewID), cachePolicy: .reloadIgnoringLocalCacheData))
     }
 
     private static func fallbackTitle(for request: String) -> String {

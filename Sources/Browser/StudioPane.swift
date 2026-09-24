@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 struct StudioPane: View {
     let session: StudioSession
@@ -21,8 +20,7 @@ struct StudioPane: View {
             Divider().opacity(0.5)
             ZStack(alignment: .bottom) {
                 if session.showsPreview {
-                    WebView(session.page)
-                        .webViewTextSelection(.enabled)
+                    PageHost(content: session.webView)
                         .transition(.opacity)
                 } else {
                     emptyState

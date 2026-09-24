@@ -44,29 +44,35 @@ final class StudioTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.directory(for: id).path))
     }
 
-    func testSchemeHandlerServesFilesInsideTheViewOnly() async throws {
+    func testSchemeHandlerServesFilesInsideTheViewOnly() throws {
         let library = try makeLibrary()
         let id = UUID()
         try writeEntry("<h1>hi</h1>", for: id, in: library)
         try "secret".write(to: library.rootURL.appending(path: "views.json"), atomically: true, encoding: .utf8)
         let handler = GeneratedViewSchemeHandler(rootURL: library.rootURL)
 
-        var body = Data()
-        var mimeType: String?
-        for try await result in handler.reply(for: URLRequest(url: library.url(for: id))) {
-            switch result {
-            case .response(let response): mimeType = response.mimeType
-            case .data(let data): body.append(data)
-            @unknown default: break
-            }
-        }
+        let (response, body) = try handler.response(for: library.url(for: id))
         XCTAssertEqual(String(data: body, encoding: .utf8), "<h1>hi</h1>")
-        XCTAssertEqual(mimeType, "text/html")
+        XCTAssertEqual(response.mimeType, "text/html")
+        XCTAssertEqual(response.value(forHTTPHeaderField: "Cache-Control"), "no-store")
 
         let escape = URL(string: "athas-view://\(id.uuidString.lowercased())/../views.json")!
-        do {
-            for try await _ in handler.reply(for: URLRequest(url: escape)) {}
-            XCTFail("Served a file outside the view's folder")
-        } catch {}
+        XCTAssertThrowsError(try handler.response(for: escape))
+        XCTAssertThrowsError(try handler.response(for: URL(string: "athas-view://not-a-view/index.html")!))
+    }
+
+    func testSessionShowsTheSelectedViewThroughItsScheme() async throws {
+        let library = try makeLibrary()
+        let id = UUID()
+        try writeEntry("<title>Tasks</title><p>hi</p>", for: id, in: library)
+        library.save(GeneratedView(id: id, title: "Tasks", prompts: ["A todo list"]))
+        let session = StudioSession(library: library)
+
+        session.select(id)
+
+        try await waitUntil { !session.webView.isLoading && session.webView.title == "Tasks" }
+        XCTAssertEqual(session.webView.url, library.url(for: id))
+        let text = try await session.webView.evaluateJavaScript("document.body.innerText") as? String
+        XCTAssertEqual(text, "hi")
     }
 }

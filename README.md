@@ -1,6 +1,6 @@
 # Browser
 
-A first macOS browser built with SwiftUI and Apple's WebKit for SwiftUI. Requires macOS 26 or later and Xcode 26 or later.
+A first macOS browser built with SwiftUI and WebKit. Requires macOS 26 or later and Xcode 26 or later.
 
 ## Run
 
@@ -10,7 +10,7 @@ xcodebuild -project Browser.xcodeproj -scheme Browser -configuration Debug -deri
 open DerivedData/Build/Products/Debug/Browser.app
 ```
 
-The first version supports tabs, address entry and web search, back and forward navigation, reload, and standard keyboard shortcuts. Each tab owns a `WebPage`, so switching tabs keeps its page and navigation history alive. WebKit manages page rendering and persistent website data.
+The first version supports tabs, address entry and web search, back and forward navigation, reload, and standard keyboard shortcuts. Each tab owns a `WKWebView`, shown in a view the app owns while SwiftUI draws the rest of the window, so switching tabs or layouts keeps its page and navigation history alive. WebKit manages page rendering and persistent website data.
 
 Each tab adds the installed Safari version to WebKit's user agent. Sites such as Google otherwise serve an older layout to the embedded WebKit default user agent.
 
@@ -18,7 +18,13 @@ Each tab adds the installed Safari version to WebKit's user agent. Sites such as
 
 Tabs share the strip width and shrink to icons when many are open. Hover a tab for a card with its title, address, and a preview of background pages. Drag tabs to reorder them. Right-click a tab to reload, duplicate, copy its link, or close other tabs and tabs to the right. Right-click the back or forward button to jump through history.
 
+Pop-ups and links that open a new window become a tab next to the page that opened them. ⌘-click or middle-click a link to open it in a background tab.
+
 The window controls are repositioned to sit centered in the taller tab row. AppKit resets them during layout, so they are placed again after resizes and full screen changes.
+
+## Downloads
+
+Downloads are saved to your Downloads folder, numbered instead of replacing a file with the same name, and marked as downloaded from the web so Gatekeeper checks them. The downloads button in the navigation bar shows their progress and lists them to open, show in Finder, cancel, or clear.
 
 ## Vertical tabs
 
