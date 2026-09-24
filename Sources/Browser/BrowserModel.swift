@@ -42,8 +42,14 @@ final class BrowserModel {
         return tabs.first { $0.id == id }
     }
 
+    private func makeTab(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration()) -> BrowserTab {
+        let tab = BrowserTab(configuration: configuration)
+        tab.browser = self
+        return tab
+    }
+
     func addTab() {
-        let tab = BrowserTab()
+        let tab = makeTab()
         tabs.append(tab)
         activeTabID = tab.id
         requestAddressFocus()
@@ -52,7 +58,7 @@ final class BrowserModel {
     func duplicateTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let original = tabs[index]
-        let tab = BrowserTab()
+        let tab = makeTab()
         if original.url != nil {
             tab.isNewTab = false
             tab.webView.interactionState = original.webView.interactionState
@@ -124,6 +130,26 @@ final class BrowserModel {
         }
     }
 
+    /// Opens a tab after the opener and any tabs it opened before, like a page's pop-up or a ⌘-clicked link.
+    /// Pass WebKit's configuration for a pop-up, or a request to load.
+    @discardableResult
+    func openChildTab(of opener: BrowserTab, configuration: WKWebViewConfiguration? = nil,
+                      loading request: URLRequest? = nil, select: Bool) -> BrowserTab {
+        let tab = configuration.map(makeTab) ?? makeTab()
+        tab.isNewTab = false
+        tab.openerID = opener.id
+        // Background tabs lay out at the size they'll be shown at.
+        tab.contentView.frame = opener.contentView.frame
+        var index = (tabs.firstIndex { $0.id == opener.id } ?? tabs.count - 1) + 1
+        while tabs.indices.contains(index), tabs[index].openerID == opener.id {
+            index += 1
+        }
+        tabs.insert(tab, at: index)
+        if let request { tab.webView.load(request) }
+        if select { activeTabID = tab.id }
+        return tab
+    }
+
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         activeTabID = tabs[index].id
@@ -142,7 +168,7 @@ final class BrowserModel {
 
     func open(_ url: URL, inNewTab: Bool = false) {
         if inNewTab || activeTab == nil {
-            let tab = BrowserTab()
+            let tab = makeTab()
             tabs.append(tab)
             activeTabID = tab.id
         }

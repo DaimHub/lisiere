@@ -46,6 +46,44 @@ final class BrowserTabTests: XCTestCase {
         try await waitUntil { reopened.pageTitle == "Second" && reopened.canGoBack }
     }
 
+    func testPopUpsOpenAsSelectedTabsNextToTheirOpener() async throws {
+        let browser = BrowserModel()
+        let opener = try XCTUnwrap(browser.activeTab)
+        browser.addTab()
+        let lastTabID = browser.activeTabID
+        browser.activeTabID = opener.id
+        browser.open(page(titled: "Opener"))
+        try await waitUntil { !opener.isLoading && opener.pageTitle == "Opener" }
+
+        _ = try await opener.webView.evaluateJavaScript("window.popup = window.open('about:blank'); 0")
+
+        try await waitUntil { browser.tabs.count == 3 }
+        let popUp = browser.tabs[1]
+        XCTAssertEqual(browser.activeTabID, popUp.id)
+        XCTAssertEqual(browser.tabs.last?.id, lastTabID)
+        XCTAssertFalse(popUp.isNewTab)
+        let hasOpener = try await popUp.webView.evaluateJavaScript("window.opener !== null") as? Bool
+        XCTAssertEqual(hasOpener, true)
+
+        _ = try await opener.webView.evaluateJavaScript("window.popup.close(); 0")
+        try await waitUntil { browser.tabs.count == 2 }
+        XCTAssertNil(browser.tab(withID: popUp.id))
+    }
+
+    func testChildTabsKeepTheOrderTheyWereOpenedIn() throws {
+        let browser = BrowserModel()
+        let opener = try XCTUnwrap(browser.activeTab)
+        browser.addTab()
+        let otherID = browser.activeTabID
+
+        let first = browser.openChildTab(of: opener, loading: URLRequest(url: page(titled: "A")), select: false)
+        let second = browser.openChildTab(of: opener, loading: URLRequest(url: page(titled: "B")), select: false)
+
+        XCTAssertEqual(browser.tabs.map(\.id), [opener.id, first.id, second.id, otherID])
+        XCTAssertEqual(browser.activeTabID, otherID)
+        XCTAssertFalse(first.isNewTab)
+    }
+
     func testClosedTabsAreReleased() async throws {
         let browser = BrowserModel()
         weak var closedTab: BrowserTab?

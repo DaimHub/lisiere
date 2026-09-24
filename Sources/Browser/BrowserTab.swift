@@ -11,6 +11,9 @@ final class BrowserTab: Identifiable {
     /// Hosts the web view, and the Web Inspector when it's docked, so both move together between windows and tabs.
     let contentView = NSView()
     var isNewTab = true
+    /// The tab whose page opened this one, so its links and pop-ups open next to each other.
+    @ObservationIgnored var openerID: UUID?
+    @ObservationIgnored weak var browser: BrowserModel?
     var favicon: Image?
     var thumbnail: Image?
 
@@ -24,6 +27,7 @@ final class BrowserTab: Identifiable {
     private(set) var backList: [WKBackForwardListItem] = []
     private(set) var forwardList: [WKBackForwardListItem] = []
 
+    @ObservationIgnored private let pageDelegate = PageDelegate()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
     private var faviconHost: String?
@@ -37,6 +41,9 @@ final class BrowserTab: Identifiable {
         webView.allowsLinkPreview = true
         webView.autoresizingMask = [.width, .height]
         contentView.addSubview(webView)
+        webView.navigationDelegate = pageDelegate
+        webView.uiDelegate = pageDelegate
+        pageDelegate.tab = self
 
         observe(\.url) { $0.url = $1.url }
         observe(\.title) { $0.pageTitle = $1.title ?? "" }
