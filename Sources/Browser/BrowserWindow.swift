@@ -23,8 +23,7 @@ struct BrowserWindow: View {
     }
 
     var body: some View {
-        // The main column keeps one identity across layouts. Rebuilding it would briefly show the
-        // active page in two WebViews at once, which WebKit treats as a fatal error.
+        // The main column keeps one identity across layouts, so switching layouts doesn't rebuild the page host.
         HStack(spacing: 0) {
             if tabLayout == .vertical {
                 TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
@@ -56,7 +55,7 @@ struct BrowserWindow: View {
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
         .onChange(of: browser.activeTabID) { _, _ in
-            address = browser.activeTab?.page.url?.absoluteString ?? ""
+            address = browser.activeTab?.url?.absoluteString ?? ""
         }
         .onChange(of: browser.addressFocusRequest) { _, _ in
             addressIsFocused = true
@@ -133,74 +132,61 @@ struct BrowserWindow: View {
     }
 
     private func webView(for tab: BrowserTab) -> some View {
-        WebView(tab.page)
-            .webViewBackForwardNavigationGestures(.enabled)
-            .webViewLinkPreviews(.enabled)
-            .webViewTextSelection(.enabled)
-            .webViewMagnificationGestures(.enabled)
-            .webViewElementFullscreenBehavior(.enabled)
-            .id(tab.id)
-            .onGeometryChange(for: CGSize.self, of: \.size) { tab.viewportSize = $0 }
-            .onChange(of: tab.page.isLoading) { _, isLoading in
-                guard !isLoading else { return }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    await tab.captureThumbnail()
-                }
-            }
+        PageHost(content: tab.contentView)
             .overlay(alignment: .topLeading) {
-                if tab.page.isLoading {
+                if tab.isLoading {
                     GeometryReader { geometry in
                         Capsule()
                             .fill(accent.opacity(0.5))
-                            .frame(width: max(18, geometry.size.width * tab.page.estimatedProgress),
+                            .frame(width: max(18, geometry.size.width * tab.estimatedProgress),
                                    height: 2)
                     }
                     .frame(height: 2)
                     .padding(.horizontal, 12)
                     .padding(.top, 3)
-                    .animation(.easeOut(duration: 0.18), value: tab.page.estimatedProgress)
+                    .animation(.easeOut(duration: 0.18), value: tab.estimatedProgress)
                 }
             }
-            .onChange(of: tab.page.url) { _, url in
+            .onChange(of: tab.url) { _, url in
                 if !addressIsFocused { address = url?.absoluteString ?? "" }
             }
             .onAppear {
-                if !addressIsFocused { address = tab.page.url?.absoluteString ?? "" }
+                if !addressIsFocused { address = tab.url?.absoluteString ?? "" }
             }
     }
 
     private var navigationBar: some View {
-        let page = browser.activeTab?.page
+        let tab = browser.activeTab
+        let isLoading = tab?.isLoading == true
 
         return HStack(spacing: 6) {
             HStack(spacing: 0) {
                 Button { browser.goBack() } label: {
                     Image(systemName: "chevron.left")
                 }
-                .disabled(page?.backForwardList.backList.isEmpty ?? true)
+                .disabled(!(tab?.canGoBack ?? false))
                 .help("Back (⌘[)")
                 .contextMenu {
-                    historyMenu(for: Array((page?.backForwardList.backList ?? []).reversed()))
+                    historyMenu(for: Array((tab?.backList ?? []).reversed()))
                 }
 
                 Button { browser.goForward() } label: {
                     Image(systemName: "chevron.right")
                 }
-                .disabled(page?.backForwardList.forwardList.isEmpty ?? true)
+                .disabled(!(tab?.canGoForward ?? false))
                 .help("Forward (⌘])")
                 .contextMenu {
-                    historyMenu(for: page?.backForwardList.forwardList ?? [])
+                    historyMenu(for: tab?.forwardList ?? [])
                 }
 
                 Button {
-                    if page?.isLoading == true { page?.stopLoading() } else { browser.reload() }
+                    if isLoading { browser.stopLoading() } else { browser.reload() }
                 } label: {
-                    Image(systemName: page?.isLoading == true ? "xmark" : "arrow.clockwise")
+                    Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
                         .contentTransition(.symbolEffect(.replace))
                 }
-                .disabled(browser.activeTab?.isNewTab ?? true)
-                .help(page?.isLoading == true ? "Stop Loading" : "Reload (⌘R)")
+                .disabled(tab?.isNewTab ?? true)
+                .help(isLoading ? "Stop Loading" : "Reload (⌘R)")
             }
             .buttonStyle(ChromeIconButtonStyle(size: 30))
             .padding(2)
@@ -247,9 +233,9 @@ struct BrowserWindow: View {
 
     @ViewBuilder
     private var bookmarkButton: some View {
-        if let tab = browser.activeTab, !tab.isNewTab, let url = tab.page.url {
+        if let tab = browser.activeTab, !tab.isNewTab, let url = tab.url {
             let isBookmarked = bookmarks.isBookmarked(url)
-            Button { bookmarks.toggle(title: tab.page.title, url: url) } label: {
+            Button { bookmarks.toggle(title: tab.pageTitle, url: url) } label: {
                 Image(systemName: isBookmarked ? "star.fill" : "star")
                     .foregroundStyle(isBookmarked ? Color.yellow : Color.secondary)
                     .contentTransition(.symbolEffect(.replace))
@@ -261,8 +247,8 @@ struct BrowserWindow: View {
     }
 
     @ViewBuilder
-    private func historyMenu(for items: [WebPage.BackForwardList.Item]) -> some View {
-        ForEach(items.prefix(15)) { item in
+    private func historyMenu(for items: [WKBackForwardListItem]) -> some View {
+        ForEach(items.prefix(15), id: \.self) { item in
             Button(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString) {
                 browser.go(to: item)
             }

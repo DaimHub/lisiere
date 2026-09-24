@@ -36,7 +36,7 @@ private struct BrowserCommands: Commands {
     @AppStorage(BrowserModel.studioVisibilityKey) private var studioIsVisible = false
 
     private var bookmarkableTab: BrowserTab? {
-        guard let tab = browser?.activeTab, !tab.isNewTab, tab.page.url != nil else { return nil }
+        guard let tab = browser?.activeTab, !tab.isNewTab, tab.url != nil else { return nil }
         return tab
     }
 
@@ -98,9 +98,9 @@ private struct BrowserCommands: Commands {
             Divider()
         }
         CommandMenu("Bookmarks") {
-            Button(bookmarks.isBookmarked(bookmarkableTab?.page.url) ? "Remove Bookmark" : "Bookmark This Page") {
-                guard let tab = bookmarkableTab, let url = tab.page.url else { return }
-                bookmarks.toggle(title: tab.page.title, url: url)
+            Button(bookmarks.isBookmarked(bookmarkableTab?.url) ? "Remove Bookmark" : "Bookmark This Page") {
+                guard let tab = bookmarkableTab, let url = tab.url else { return }
+                bookmarks.toggle(title: tab.pageTitle, url: url)
             }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(bookmarkableTab == nil)

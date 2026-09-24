@@ -1,75 +1,7 @@
 import AppKit
 import Foundation
 import Observation
-import SwiftUI
 import WebKit
-
-@MainActor
-@Observable
-final class BrowserTab: Identifiable {
-    let id = UUID()
-    let page: WebPage
-    var isNewTab = true
-    var favicon: Image?
-    var thumbnail: Image?
-    @ObservationIgnored var viewportSize: CGSize = .zero
-    private var faviconHost: String?
-
-    init() {
-        var configuration = WebPage.Configuration()
-        let safariURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
-        let safariVersion = safariURL.flatMap { Bundle(url: $0)?
-            .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
-            ?? "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0"
-        configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
-        page = WebPage(configuration: configuration)
-        page.isInspectable = true
-    }
-
-    var title: String {
-        if !page.title.isEmpty { return page.title }
-        return page.url?.host() ?? "New Tab"
-    }
-
-    var host: String? {
-        page.url?.host()
-    }
-
-    var isSecure: Bool {
-        page.url?.scheme == "https" && page.hasOnlySecureContent
-    }
-
-    func captureThumbnail(afterScreenUpdates: Bool = true) async {
-        guard !isNewTab, viewportSize.width > 0, viewportSize.height > 0 else { return }
-        let region = WebPage.ExportedContentConfiguration.Region.rect(CGRect(origin: .zero, size: viewportSize))
-        guard let data = try? await page.exported(as: .image(region: region,
-                                                             snapshotWidth: 520,
-                                                             afterScreenUpdates: afterScreenUpdates)),
-              let image = NSImage(data: data) else { return }
-        thumbnail = Image(nsImage: image)
-    }
-
-    func updateFavicon() async {
-        guard let url = page.url, let host = url.host() else {
-            favicon = nil
-            faviconHost = nil
-            return
-        }
-        guard faviconHost != host else { return }
-
-        favicon = FaviconStore.cachedIcon(for: url)
-        if favicon != nil {
-            faviconHost = host
-            return
-        }
-
-        guard let icon = await FaviconStore.icon(for: url),
-              !Task.isCancelled,
-              page.url?.host() == host else { return }
-        faviconHost = host
-        favicon = icon
-    }
-}
 
 @MainActor
 @Observable
@@ -77,15 +9,21 @@ final class BrowserModel {
     static let studioVisibilityKey = "studioVisible"
 
     private(set) var tabs: [BrowserTab] = []
-    private var closedTabURLs: [URL?] = []
+    private var closedTabs: [ClosedTab] = []
     var activeTabID: UUID? {
         didSet {
             // Keep a preview of the page being left for background-tab hover cards.
             guard oldValue != activeTabID, let previousTab = tab(withID: oldValue) else { return }
-            Task { await previousTab.captureThumbnail(afterScreenUpdates: false) }
+            previousTab.captureThumbnail(afterScreenUpdates: false)
         }
     }
     var addressFocusRequest = 0
+
+    private struct ClosedTab {
+        let url: URL?
+        /// The tab's back-forward history, restored when it reopens.
+        let interactionState: Any?
+    }
 
     init() {
         addTab()
@@ -96,7 +34,7 @@ final class BrowserModel {
     }
 
     var canReopenClosedTab: Bool {
-        !closedTabURLs.isEmpty
+        !closedTabs.isEmpty
     }
 
     func tab(withID id: UUID?) -> BrowserTab? {
@@ -113,10 +51,11 @@ final class BrowserModel {
 
     func duplicateTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let original = tabs[index]
         let tab = BrowserTab()
-        if let url = tabs[index].page.url {
+        if original.url != nil {
             tab.isNewTab = false
-            _ = tab.page.load(url)
+            tab.webView.interactionState = original.webView.interactionState
         }
         tabs.insert(tab, at: index + 1)
         activeTabID = tab.id
@@ -167,16 +106,21 @@ final class BrowserModel {
     }
 
     private func rememberClosedTab(_ tab: BrowserTab) {
-        closedTabURLs.append(tab.page.url)
-        if closedTabURLs.count > 10 { closedTabURLs.removeFirst() }
+        let isBlank = tab.isNewTab || tab.url == nil
+        closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url,
+                                    interactionState: isBlank ? nil : tab.webView.interactionState))
+        if closedTabs.count > 10 { closedTabs.removeFirst() }
     }
 
     func reopenClosedTab() {
-        guard let url = closedTabURLs.popLast() else { return }
+        guard let closedTab = closedTabs.popLast() else { return }
         addTab()
-        if let url, let tab = activeTab {
+        guard let tab = activeTab else { return }
+        if let interactionState = closedTab.interactionState {
             tab.isNewTab = false
-            _ = tab.page.load(url)
+            tab.webView.interactionState = interactionState
+        } else if let url = closedTab.url {
+            tab.load(url)
         }
     }
 
@@ -202,15 +146,12 @@ final class BrowserModel {
             tabs.append(tab)
             activeTabID = tab.id
         }
-        guard let tab = activeTab else { return }
-        tab.isNewTab = false
-        _ = tab.page.load(url)
+        activeTab?.load(url)
     }
 
     func navigate(to input: String) {
-        guard let url = BrowserAddress.url(for: input), let tab = activeTab else { return }
-        tab.isNewTab = false
-        _ = tab.page.load(url)
+        guard let url = BrowserAddress.url(for: input) else { return }
+        activeTab?.load(url)
     }
 
     func reload() {
@@ -220,21 +161,23 @@ final class BrowserModel {
 
     func reloadTab(_ id: UUID) {
         guard let tab = tab(withID: id), !tab.isNewTab else { return }
-        _ = tab.page.reload(fromOrigin: false)
+        tab.webView.reload()
+    }
+
+    func stopLoading() {
+        activeTab?.webView.stopLoading()
     }
 
     func goBack() {
-        guard let page = activeTab?.page, let item = page.backForwardList.backList.last else { return }
-        _ = page.load(item)
+        activeTab?.webView.goBack()
     }
 
     func goForward() {
-        guard let page = activeTab?.page, let item = page.backForwardList.forwardList.first else { return }
-        _ = page.load(item)
+        activeTab?.webView.goForward()
     }
 
-    func go(to item: WebPage.BackForwardList.Item) {
-        _ = activeTab?.page.load(item)
+    func go(to item: WKBackForwardListItem) {
+        activeTab?.webView.go(to: item)
     }
 
     func requestAddressFocus() {
@@ -242,10 +185,8 @@ final class BrowserModel {
     }
 
     func showWebInspector() {
-        guard activeTab?.isNewTab == false,
-              let contentView = NSApp.keyWindow?.contentView,
-              let webView = WebInspector.findWebView(in: contentView) else { return }
-        WebInspector.show(for: webView)
+        guard let tab = activeTab, !tab.isNewTab else { return }
+        WebInspector.show(for: tab.webView)
     }
 }
 

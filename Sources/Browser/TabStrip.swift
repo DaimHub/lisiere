@@ -217,11 +217,11 @@ struct TabStrip: View {
             .disabled(tab.isNewTab)
         Button("Duplicate") { browser.duplicateTab(tab.id) }
         Button("Copy Link") {
-            guard let url = tab.page.url else { return }
+            guard let url = tab.url else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.absoluteString, forType: .string)
         }
-        .disabled(tab.page.url == nil)
+        .disabled(tab.url == nil)
         Divider()
         Button("Close Tab") { browser.closeTab(tab.id) }
         Button("Close Other Tabs") { browser.closeOtherTabs(than: tab.id) }
@@ -297,7 +297,7 @@ private struct TabItem: View {
         .onTapGesture(perform: select)
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityElement(children: .contain)
-        .task(id: tab.page.url) {
+        .task(id: tab.url) {
             await tab.updateFavicon()
         }
     }
@@ -348,7 +348,7 @@ private struct TabIcon: View {
 
     var body: some View {
         Group {
-            if tab.page.isLoading && !tab.isNewTab {
+            if tab.isLoading && !tab.isNewTab {
                 ProgressView()
                     .controlSize(.mini)
             } else if let favicon = tab.favicon {
@@ -418,8 +418,8 @@ struct TabHoverCard: View {
     private var subtitle: String {
         if tab.isNewTab { return "Start page" }
         let host = tab.host.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 }
-            ?? tab.page.url?.absoluteString ?? ""
-        return tab.page.isLoading ? "\(host) · Loading…" : host
+            ?? tab.url?.absoluteString ?? ""
+        return tab.isLoading ? "\(host) · Loading…" : host
     }
 }
 
