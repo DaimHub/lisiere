@@ -40,11 +40,12 @@ final class DownloadManagerTests: XCTestCase {
         let downloads = DownloadManager(directory: directory)
         let browser = BrowserModel(downloads: downloads)
         let tab = try XCTUnwrap(browser.activeTab)
-        tab.webView.loadHTMLString("<title>Files</title><a id=file download=note.txt href='data:text/plain,hello'>Get</a>",
-                                   baseURL: URL(string: "https://example.com")!)
+        let webView = try XCTUnwrap(tab.webView)
+        webView.loadHTMLString("<title>Files</title><a id=file download=note.txt href='data:text/plain,hello'>Get</a>",
+                               baseURL: URL(string: "https://example.com")!)
         try await waitUntil { !tab.isLoading && tab.pageTitle == "Files" }
 
-        _ = try await tab.webView.evaluateJavaScript("document.getElementById('file').click(); 0")
+        _ = try await webView.evaluateJavaScript("document.getElementById('file').click(); 0")
 
         try await waitUntil { downloads.items.first?.state == .finished }
         let item = try XCTUnwrap(downloads.items.first)

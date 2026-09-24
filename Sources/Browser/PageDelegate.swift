@@ -54,6 +54,17 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         return browser.openChildTab(of: tab, configuration: configuration, select: true).webView
     }
 
+    /// Reloads the page being viewed when its web process crashes or is killed. A background page waits
+    /// suspended, and loads again when it's selected.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard let tab else { return }
+        if tab.browser?.activeTabID == tab.id {
+            webView.reload()
+        } else {
+            tab.suspend()
+        }
+    }
+
     func webViewDidClose(_ webView: WKWebView) {
         guard let tab else { return }
         tab.browser?.closeTab(tab.id)

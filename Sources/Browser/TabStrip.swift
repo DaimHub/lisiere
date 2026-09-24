@@ -271,6 +271,7 @@ private struct TabItem: View {
         HStack(spacing: 7) {
             if !(isCompact && showsCloseButton) {
                 TabIcon(tab: tab, isActive: isActive)
+                    .opacity(tab.isSuspended ? 0.5 : 1)
             }
             if !isCompact {
                 title

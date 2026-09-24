@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class BrowserCompatibilityTests: XCTestCase {
     func testTabsAdvertiseSafariCompatibleUserAgent() async throws {
-        let webView = BrowserTab().webView
+        let webView = try XCTUnwrap(BrowserTab().webView)
         webView.loadHTMLString("<html><body>Ready</body></html>", baseURL: URL(string: "https://example.com")!)
 
         let userAgent = try await webView.evaluateJavaScript("navigator.userAgent") as? String

@@ -14,15 +14,19 @@ final class BrowserModel {
     private var closedTabs: [ClosedTab] = []
     var activeTabID: UUID? {
         didSet {
-            // Keep a preview of the page being left for background-tab hover cards.
-            guard oldValue != activeTabID, let previousTab = tab(withID: oldValue) else { return }
-            previousTab.captureThumbnail(afterScreenUpdates: false)
+            guard oldValue != activeTabID else { return }
+            if let previousTab = tab(withID: oldValue) {
+                // Keep a preview of the page being left for background-tab hover cards.
+                previousTab.captureThumbnail(afterScreenUpdates: false)
+            }
+            activeTab?.restore()
         }
     }
     var addressFocusRequest = 0
 
     private struct ClosedTab {
         let url: URL?
+        let title: String
         /// The tab's back-forward history, restored when it reopens.
         let interactionState: Any?
     }
@@ -46,7 +50,10 @@ final class BrowserModel {
     }
 
     private func makeTab(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration()) -> BrowserTab {
-        let tab = BrowserTab(configuration: configuration)
+        adopt(BrowserTab(configuration: configuration))
+    }
+
+    private func adopt(_ tab: BrowserTab) -> BrowserTab {
         tab.browser = self
         return tab
     }
@@ -61,11 +68,9 @@ final class BrowserModel {
     func duplicateTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let original = tabs[index]
-        let tab = makeTab()
-        if original.url != nil {
-            tab.isNewTab = false
-            tab.webView.interactionState = original.webView.interactionState
-        }
+        // The copy starts suspended, so selecting it restores the original's history and scroll position.
+        let tab = original.url == nil ? makeTab()
+            : adopt(BrowserTab(url: original.url, title: original.pageTitle, interactionState: original.interactionState))
         tabs.insert(tab, at: index + 1)
         activeTabID = tab.id
     }
@@ -116,21 +121,22 @@ final class BrowserModel {
 
     private func rememberClosedTab(_ tab: BrowserTab) {
         let isBlank = tab.isNewTab || tab.url == nil
-        closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url,
-                                    interactionState: isBlank ? nil : tab.webView.interactionState))
+        closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url, title: tab.pageTitle,
+                                    interactionState: isBlank ? nil : tab.interactionState))
         if closedTabs.count > 10 { closedTabs.removeFirst() }
     }
 
     func reopenClosedTab() {
         guard let closedTab = closedTabs.popLast() else { return }
-        addTab()
-        guard let tab = activeTab else { return }
-        if let interactionState = closedTab.interactionState {
-            tab.isNewTab = false
-            tab.webView.interactionState = interactionState
-        } else if let url = closedTab.url {
-            tab.load(url)
+        guard closedTab.url != nil else {
+            addTab()
+            return
         }
+        // Selecting the suspended tab restores its history, or loads its address.
+        let tab = adopt(BrowserTab(url: closedTab.url, title: closedTab.title,
+                                   interactionState: closedTab.interactionState))
+        tabs.append(tab)
+        activeTabID = tab.id
     }
 
     /// Opens a tab after the opener and any tabs it opened before, like a page's pop-up or a ⌘-clicked link.
@@ -148,7 +154,7 @@ final class BrowserModel {
             index += 1
         }
         tabs.insert(tab, at: index)
-        if let request { tab.webView.load(request) }
+        if let request { tab.webView?.load(request) }
         if select { activeTabID = tab.id }
         return tab
     }
@@ -190,23 +196,27 @@ final class BrowserModel {
 
     func reloadTab(_ id: UUID) {
         guard let tab = tab(withID: id), !tab.isNewTab else { return }
-        tab.webView.reload()
+        if let webView = tab.webView {
+            webView.reload()
+        } else {
+            tab.restore()
+        }
     }
 
     func stopLoading() {
-        activeTab?.webView.stopLoading()
+        activeTab?.webView?.stopLoading()
     }
 
     func goBack() {
-        activeTab?.webView.goBack()
+        activeTab?.webView?.goBack()
     }
 
     func goForward() {
-        activeTab?.webView.goForward()
+        activeTab?.webView?.goForward()
     }
 
     func go(to item: WKBackForwardListItem) {
-        activeTab?.webView.go(to: item)
+        activeTab?.webView?.go(to: item)
     }
 
     func requestAddressFocus() {
@@ -214,8 +224,8 @@ final class BrowserModel {
     }
 
     func showWebInspector() {
-        guard let tab = activeTab, !tab.isNewTab else { return }
-        WebInspector.show(for: tab.webView)
+        guard let tab = activeTab, !tab.isNewTab, let webView = tab.webView else { return }
+        WebInspector.show(for: webView)
     }
 }
 

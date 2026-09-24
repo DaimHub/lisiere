@@ -55,17 +55,17 @@ final class BrowserTabTests: XCTestCase {
         browser.open(page(titled: "Opener"))
         try await waitUntil { !opener.isLoading && opener.pageTitle == "Opener" }
 
-        _ = try await opener.webView.evaluateJavaScript("window.popup = window.open('about:blank'); 0")
+        _ = try await opener.webView?.evaluateJavaScript("window.popup = window.open('about:blank'); 0")
 
         try await waitUntil { browser.tabs.count == 3 }
         let popUp = browser.tabs[1]
         XCTAssertEqual(browser.activeTabID, popUp.id)
         XCTAssertEqual(browser.tabs.last?.id, lastTabID)
         XCTAssertFalse(popUp.isNewTab)
-        let hasOpener = try await popUp.webView.evaluateJavaScript("window.opener !== null") as? Bool
+        let hasOpener = try await popUp.webView?.evaluateJavaScript("window.opener !== null") as? Bool
         XCTAssertEqual(hasOpener, true)
 
-        _ = try await opener.webView.evaluateJavaScript("window.popup.close(); 0")
+        _ = try await opener.webView?.evaluateJavaScript("window.popup.close(); 0")
         try await waitUntil { browser.tabs.count == 2 }
         XCTAssertNil(browser.tab(withID: popUp.id))
     }
