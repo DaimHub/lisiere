@@ -30,6 +30,7 @@ final class BrowserTab: Identifiable {
     @ObservationIgnored private let pageDelegate = PageDelegate()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
+    @ObservationIgnored private var faviconTask: Task<Void, Never>?
     private var faviconHost: String?
 
     /// Pass the configuration WebKit provides when a page opens a window, so the new page keeps its opener.
@@ -45,12 +46,19 @@ final class BrowserTab: Identifiable {
         webView.uiDelegate = pageDelegate
         pageDelegate.tab = self
 
-        observe(\.url) { $0.url = $1.url }
+        observe(\.url) { tab, webView in
+            tab.url = webView.url
+            // Same-document navigations don't load, but can still change the icon.
+            if !webView.isLoading { tab.updateFavicon() }
+        }
         observe(\.title) { $0.pageTitle = $1.title ?? "" }
         observe(\.isLoading) { tab, webView in
             let didFinish = tab.isLoading && !webView.isLoading
             tab.isLoading = webView.isLoading
-            if didFinish { tab.scheduleThumbnail() }
+            if didFinish {
+                tab.scheduleThumbnail()
+                tab.updateFavicon()
+            }
         }
         observe(\.estimatedProgress) { $0.estimatedProgress = $1.estimatedProgress }
         observe(\.canGoBack) { $0.canGoBack = $1.canGoBack }
@@ -130,25 +138,27 @@ final class BrowserTab: Identifiable {
         }
     }
 
-    func updateFavicon() async {
-        guard let url, let host = url.host() else {
+    /// Reads the icon from the loaded page, showing the host's last known icon until then.
+    private func updateFavicon() {
+        faviconTask?.cancel()
+        guard let url, let host = url.host(), url.scheme == "http" || url.scheme == "https" else {
             favicon = nil
             faviconHost = nil
             return
         }
-        guard faviconHost != host else { return }
-
-        favicon = FaviconStore.cachedIcon(for: url)
-        if favicon != nil {
+        if faviconHost != host {
             faviconHost = host
-            return
+            favicon = FaviconStore.cachedIcon(for: url)
         }
-
-        guard let icon = await FaviconStore.icon(for: url),
-              !Task.isCancelled,
-              self.url?.host() == host else { return }
-        faviconHost = host
-        favicon = icon
+        faviconTask = Task { [weak self] in
+            // Pages often set their icon from script just after loading or changing their URL.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled, !webView.isLoading, webView.url == url else { return }
+            let candidates = await FaviconStore.candidates(in: webView)
+            guard let icon = await FaviconStore.icon(forPage: url, candidates: candidates),
+                  !Task.isCancelled, self.url == url else { return }
+            favicon = icon
+        }
     }
 }
 

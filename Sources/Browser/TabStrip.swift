@@ -297,9 +297,6 @@ private struct TabItem: View {
         .onTapGesture(perform: select)
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityElement(children: .contain)
-        .task(id: tab.url) {
-            await tab.updateFavicon()
-        }
     }
 
     private var title: some View {

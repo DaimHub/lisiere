@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import WebKit
 
 /// An icon a page declares with `<link rel="icon">` or `<link rel="apple-touch-icon">`.
 struct FaviconCandidate: Equatable, Sendable {
@@ -133,6 +134,7 @@ enum FaviconStore {
     private static var requests: [String: Task<Icon?, Never>] = [:]
     /// When a host's icon couldn't be found, so a slow network doesn't leave it without one for long.
     private static var missingHosts: [String: ContinuousClock.Instant] = [:]
+    private static var failedSources: Set<URL> = []
 
     nonisolated private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -165,6 +167,41 @@ enum FaviconStore {
         }
         missingHosts[host] = icon == nil ? .now : nil
         return icon?.image
+    }
+
+    /// The best of the icons an open page declares, downloaded only when it isn't the one already cached.
+    static func icon(forPage url: URL, candidates: [FaviconCandidate]) async -> Image? {
+        guard let host = url.host() else { return nil }
+        let sources = FaviconCandidate.ranked(candidates, pageURL: url).filter { !failedSources.contains($0) }.prefix(4)
+        guard let best = sources.first else { return nil }
+        if let icon = icons[host], icon.source == best { return icon.image }
+
+        let icon = await deduplicated(best.absoluteString, host: host) {
+            if let icon = await diskIcon(forHost: host, in: cache), icon.source == best { return icon }
+            for source in sources {
+                if let icon = await download(source, forHost: host, into: cache) { return icon }
+                failedSources.insert(source)
+            }
+            return nil
+        }
+        if icon != nil { missingHosts[host] = nil }
+        return icon?.image
+    }
+
+    /// Reads the icon links of the page a web view shows, in a content world the page's scripts can't reach.
+    static func candidates(in webView: WKWebView) async -> [FaviconCandidate] {
+        let script = """
+            Array.from(document.querySelectorAll('link[rel][href]'), link => ({
+                rel: link.rel, href: link.href, sizes: link.getAttribute('sizes') || '', type: link.type
+            }))
+            """
+        guard let pageURL = webView.url,
+              let links = try? await webView.evaluateJavaScript(script, contentWorld: .defaultClient) as? [[String: String]]
+        else { return [] }
+        return links.compactMap {
+            FaviconCandidate(rel: $0["rel"] ?? "", href: $0["href"] ?? "", sizes: $0["sizes"] ?? "",
+                             type: $0["type"] ?? "", baseURL: pageURL)
+        }
     }
 
     /// Shares one load between everything asking for the same icon, and keeps the result for the host.

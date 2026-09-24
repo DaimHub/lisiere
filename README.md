@@ -34,6 +34,8 @@ Switch between the tab strip and a sidebar of vertical tabs with View ▸ Use Ve
 
 New tabs show a short greeting, a search field that focuses the address bar, and your bookmarks as favorites over a translucent background. Bookmark a page with ⌘D or the star in the address bar. The bookmarks bar can always show, show only on new tabs, or stay hidden (View ▸ Bookmarks Bar, or ⇧⌘B to toggle it). Drag bookmarks to reorder them, right-click to rename or delete, and ⌘-click to open one in a new tab. Bookmarks are stored in the app's user defaults.
 
+Tab icons come from the icon links of the loaded page, read in a separate script world, so only the one best-sized icon is downloaded. Bookmarks the app hasn't seen open try the site's `/favicon.ico`, then the icon links in its HTML. Icons are cached in `~/Library/Caches` for a week.
+
 ## Studio
 
 Studio is a pane on the right (⌘\\ or the sparkles button) where you describe a small tool, such as "a todo list", and Codex builds it as a self-contained web app. Each view is saved and can be reopened from the pane's title menu; follow-up requests change the selected view and keep its data.

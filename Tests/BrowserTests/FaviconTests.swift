@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 @testable import Browser
 
@@ -81,5 +82,30 @@ final class FaviconTests: XCTestCase {
         XCTAssertEqual(cache.entry(forHost: "example.com", now: .now.addingTimeInterval(6 * 24 * 60 * 60)), entry)
         XCTAssertNil(cache.entry(forHost: "example.com", now: .now.addingTimeInterval(8 * 24 * 60 * 60)))
         XCTAssertNil(cache.entry(forHost: "example.org"))
+    }
+
+    func testReadsAndLoadsTheIconsOfAnOpenPage() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "FaviconTests-\(UUID().uuidString)")
+        let originalCache = FaviconStore.cache
+        FaviconStore.cache = FaviconCache(directory: directory)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+            await MainActor.run { FaviconStore.cache = originalCache }
+        }
+        let svg = #"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16"/></svg>"#
+        let iconURL = "data:image/svg+xml;base64,\(Data(svg.utf8).base64EncodedString())"
+        let pageURL = URL(string: "https://favicon-test.invalid/app/")!
+        let webView = WKWebView()
+        webView.loadHTMLString(#"<head><link rel="mask-icon" href="m.svg"><link rel="icon" href="\#(iconURL)"></head>"#,
+                               baseURL: pageURL)
+        try await waitUntil { !webView.isLoading && webView.url == pageURL }
+
+        let candidates = await FaviconStore.candidates(in: webView)
+        XCTAssertEqual(candidates, [FaviconCandidate(url: URL(string: iconURL)!, isScalable: true)])
+
+        let icon = await FaviconStore.icon(forPage: pageURL, candidates: candidates)
+        XCTAssertNotNil(icon)
+        XCTAssertNotNil(FaviconStore.cachedIcon(for: pageURL))
+        XCTAssertEqual(FaviconStore.cache.entry(forHost: "favicon-test.invalid")?.source, URL(string: iconURL))
     }
 }
