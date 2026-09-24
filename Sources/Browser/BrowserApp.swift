@@ -4,10 +4,11 @@ import SwiftUI
 struct BrowserApp: App {
     @State private var bookmarks = BookmarkStore()
     @State private var library = GeneratedViewLibrary()
+    @State private var downloads = DownloadManager()
 
     var body: some Scene {
         WindowGroup {
-            BrowserWindow(bookmarks: bookmarks, library: library)
+            BrowserWindow(bookmarks: bookmarks, library: library, downloads: downloads)
                 .frame(minWidth: 680, minHeight: 440)
         }
         .windowStyle(.hiddenTitleBar)

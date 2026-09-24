@@ -8,6 +8,8 @@ import WebKit
 final class BrowserModel {
     static let studioVisibilityKey = "studioVisible"
 
+    let downloads: DownloadManager
+
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []
     var activeTabID: UUID? {
@@ -25,7 +27,8 @@ final class BrowserModel {
         let interactionState: Any?
     }
 
-    init() {
+    init(downloads: DownloadManager = DownloadManager()) {
+        self.downloads = downloads
         addTab()
     }
 

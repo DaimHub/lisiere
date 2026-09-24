@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-/// Handles what a tab's page asks of the browser: new windows, modifier-clicked links, and JavaScript panels.
+/// Handles what a tab's page asks of the browser: new windows, modifier-clicked links, downloads, and JavaScript panels.
 @MainActor
 final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     weak var tab: BrowserTab?
@@ -11,6 +11,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        if navigationAction.shouldPerformDownload { return .download }
         if navigationAction.navigationType == .linkActivated,
            navigationAction.modifierFlags.contains(.command) || navigationAction.buttonNumber == Self.middleButtonMask,
            let tab, let browser = tab.browser {
@@ -18,6 +19,31 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return .cancel
         }
         return .allow
+    }
+
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition")?.lowercased()
+        if !navigationResponse.canShowMIMEType || disposition?.hasPrefix("attachment") == true {
+            return .download
+        }
+        return .allow
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        track(download, from: webView)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        track(download, from: webView)
+    }
+
+    private func track(_ download: WKDownload, from webView: WKWebView) {
+        guard let tab else { return }
+        tab.browser?.downloads.track(download)
+        // A download typed into a new tab leaves no page behind, so show the new tab page again.
+        if webView.backForwardList.currentItem == nil { tab.isNewTab = true }
     }
 
     /// Opens pop-ups and `target="_blank"` links as tabs. WebKit loads the page into the returned

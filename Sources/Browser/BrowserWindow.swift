@@ -4,7 +4,7 @@ import WebKit
 struct BrowserWindow: View {
     let bookmarks: BookmarkStore
     let library: GeneratedViewLibrary
-    @State private var browser = BrowserModel()
+    @State private var browser: BrowserModel
     @State private var studio: StudioSession
     @State private var address = ""
     @State private var hoverCardTabID: UUID?
@@ -16,9 +16,10 @@ struct BrowserWindow: View {
 
     private let accent = Color(red: 0.38, green: 0.49, blue: 0.54)
 
-    init(bookmarks: BookmarkStore, library: GeneratedViewLibrary) {
+    init(bookmarks: BookmarkStore, library: GeneratedViewLibrary, downloads: DownloadManager) {
         self.bookmarks = bookmarks
         self.library = library
+        _browser = State(initialValue: BrowserModel(downloads: downloads))
         _studio = State(initialValue: StudioSession(library: library))
     }
 
@@ -219,6 +220,11 @@ struct BrowserWindow: View {
                     .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
             }
 
+            if !browser.downloads.items.isEmpty {
+                DownloadsButton(downloads: browser.downloads)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+
             Button { studioIsVisible.toggle() } label: {
                 Image(systemName: "sparkles")
                     .foregroundStyle(studioIsVisible ? Color.accentColor : Color.primary)
@@ -229,6 +235,7 @@ struct BrowserWindow: View {
         }
         .padding(.trailing, BrowserChrome.edgeInset)
         .frame(height: BrowserChrome.navigationBarHeight)
+        .animation(.snappy(duration: 0.2), value: browser.downloads.items.isEmpty)
     }
 
     @ViewBuilder
