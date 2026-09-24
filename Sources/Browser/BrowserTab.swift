@@ -67,6 +67,7 @@ final class BrowserTab: Identifiable {
         configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.preferences.isTextInteractionEnabled = true
+        WebInspector.enableDeveloperExtras(in: configuration)
         return configuration
     }
 

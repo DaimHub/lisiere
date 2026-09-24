@@ -50,4 +50,4 @@ Running the Codex CLI needs the app sandbox off. Unsigned development builds (th
 | Show or hide Studio | ⌘\\ |
 | Show Web Inspector | ⌥⌘I |
 
-The in-app Web Inspector shortcut uses a private WebKit hook because WebKit's public API only enables inspection through Safari's Develop menu. The Inspector opens in its own window, because docking it inside the SwiftUI-managed web view makes the two fight over the page's frame. This hook needs review before distributing the app.
+The in-app Web Inspector shortcut and the Inspect Element context menu item use private WebKit hooks because WebKit's public API only enables inspection through Safari's Develop menu. The Inspector docks inside the page or opens in its own window, and remembers which one you chose last. Each hook is checked before use, so the Inspector is simply unavailable if WebKit changes it. These hooks need review before distributing the app.

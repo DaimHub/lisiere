@@ -1,41 +1,28 @@
 import AppKit
 import WebKit
 
+/// WebKit only enables the Web Inspector through Safari's Develop menu, so these hooks use private API.
+/// Every selector is checked first, so the Inspector just stays unavailable if WebKit changes.
 @MainActor
 enum WebInspector {
-    static func show(for webView: WKWebView) {
-        // WebKit has no public API for opening the in-app Inspector.
-        webView.configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        let inspectorSelector = NSSelectorFromString("_inspector")
-        guard webView.isInspectable,
-              webView.responds(to: inspectorSelector),
-              let inspector = webView.perform(inspectorSelector)?.takeUnretainedValue() as? NSObject else {
-            return
-        }
-
-        let showSelector = NSSelectorFromString("show")
-        guard inspector.responds(to: showSelector) else { return }
-        inspector.perform(showSelector)
-        detach(inspector, from: webView)
+    /// Adds Inspect Element to the page's context menu.
+    static func enableDeveloperExtras(in configuration: WKWebViewConfiguration) {
+        let preferences = configuration.preferences
+        guard preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) else { return }
+        preferences.setValue(true, forKey: "developerExtrasEnabled")
     }
 
-    /// Docked, the Inspector resizes the web view that SwiftUI lays out, and the two keep
-    /// overriding each other's frames. A separate window avoids that fight. The Inspector
-    /// ignores `detach` until its interface has loaded, so keep asking briefly.
-    private static func detach(_ inspector: NSObject, from webView: WKWebView, attempts: Int = 30) {
-        let detachSelector = NSSelectorFromString("detach")
-        let inspectorViewSelector = NSSelectorFromString("inspectorWebView")
-        guard attempts > 0,
-              inspector.responds(to: detachSelector),
-              inspector.responds(to: inspectorViewSelector) else { return }
-
-        let inspectorView = inspector.perform(inspectorViewSelector)?.takeUnretainedValue() as? NSView
-        if let inspectorWindow = inspectorView?.window, inspectorWindow !== webView.window { return }
-        if inspectorView?.window != nil {
-            inspector.perform(detachSelector)
+    /// Opens the Inspector docked in the page, or in its own window if that's where the user last put it.
+    static func show(for webView: WKWebView) {
+        let inspectorSelector = NSSelectorFromString("_inspector")
+        let showSelector = NSSelectorFromString("show")
+        guard webView.isInspectable,
+              webView.responds(to: inspectorSelector),
+              let inspector = webView.perform(inspectorSelector)?.takeUnretainedValue() as? NSObject,
+              inspector.responds(to: showSelector) else {
+            NSSound.beep()
+            return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            detach(inspector, from: webView, attempts: attempts - 1)
-        }
+        inspector.perform(showSelector)
     }
 }
