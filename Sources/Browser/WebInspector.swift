@@ -14,15 +14,24 @@ enum WebInspector {
 
     /// Opens the Inspector docked in the page, or in its own window if that's where the user last put it.
     static func show(for webView: WKWebView) {
-        let inspectorSelector = NSSelectorFromString("_inspector")
         let showSelector = NSSelectorFromString("show")
-        guard webView.isInspectable,
-              webView.responds(to: inspectorSelector),
-              let inspector = webView.perform(inspectorSelector)?.takeUnretainedValue() as? NSObject,
-              inspector.responds(to: showSelector) else {
+        guard webView.isInspectable, let inspector = inspector(for: webView), inspector.responds(to: showSelector) else {
             NSSound.beep()
             return
         }
         inspector.perform(showSelector)
+    }
+
+    /// Whether the Inspector is open for the page, docked or in its own window.
+    static func isOpen(for webView: WKWebView) -> Bool {
+        guard let inspector = inspector(for: webView),
+              inspector.responds(to: NSSelectorFromString("isConnected")) else { return false }
+        return inspector.value(forKey: "isConnected") as? Bool ?? false
+    }
+
+    private static func inspector(for webView: WKWebView) -> NSObject? {
+        let inspectorSelector = NSSelectorFromString("_inspector")
+        guard webView.responds(to: inspectorSelector) else { return nil }
+        return webView.perform(inspectorSelector)?.takeUnretainedValue() as? NSObject
     }
 }

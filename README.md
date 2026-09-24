@@ -20,6 +20,8 @@ Tabs share the strip width and shrink to icons when many are open. Hover a tab f
 
 Pop-ups and links that open a new window become a tab next to the page that opened them. ⌘-click or middle-click a link to open it in a background tab.
 
+Background tabs you haven't selected for 10 minutes are suspended to free memory, and the least recently used ones go right away when macOS reports memory pressure. A suspended tab keeps its title, icon (slightly dimmed), and preview, and releases its web view so WebKit can end the page's process. Selecting it creates a new web view that restores its back-forward history and scroll position. Tabs that are loading, playing media, using the camera or microphone, showing the Web Inspector, or linked to a pop-up through `window.opener` stay loaded. Unsaved form input isn't detected, so text typed into a background page can be lost. A background page whose web process crashes is suspended the same way, and the page you're viewing reloads.
+
 The window controls are repositioned to sit centered in the taller tab row. AppKit resets them during layout, so they are placed again after resizes and full screen changes.
 
 ## Downloads

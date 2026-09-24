@@ -15,6 +15,38 @@ final class TabSuspensionTests: XCTestCase {
         return tab
     }
 
+    func testOnlyIdleBackgroundPagesAreSuspendableLeastRecentlyUsedFirst() async throws {
+        let browser = BrowserModel()
+        let newTab = try XCTUnwrap(browser.activeTab)
+        let first = try await openLoadedTab(browser, titled: "First")
+        let second = try await openLoadedTab(browser, titled: "Second")
+        let active = try await openLoadedTab(browser, titled: "Active")
+        first.lastActive = .now - .seconds(60)
+        let loading = browser.openChildTab(of: active, loading: URLRequest(url: page(titled: "Loading")), select: false)
+
+        XCTAssertTrue(loading.isLoading)
+        XCTAssertEqual(browser.suspendableTabs.map(\.id), [first.id, second.id])
+        XCTAssertFalse(browser.suspendableTabs.contains { $0 === newTab || $0 === active })
+
+        browser.activeTabID = first.id
+        XCTAssertGreaterThan(active.lastActive, second.lastActive)
+        try await waitUntil { !loading.isLoading }
+        XCTAssertEqual(browser.suspendableTabs.map(\.id), [second.id, loading.id, active.id])
+    }
+
+    func testPopUpAndOpenerStayLoadedWhileBothAreOpen() async throws {
+        let browser = BrowserModel()
+        let opener = try await openLoadedTab(browser, titled: "Opener")
+        let popUp = browser.openChildTab(of: opener, configuration: BrowserTab.makeConfiguration(), select: false)
+        let other = try await openLoadedTab(browser, titled: "Other")
+        browser.activeTabID = browser.tabs[0].id
+
+        XCTAssertEqual(browser.suspendableTabs.map(\.id), [other.id])
+
+        browser.closeTab(opener.id)
+        XCTAssertTrue(browser.suspendableTabs.contains { $0 === popUp })
+    }
+
     func testSuspendedTabKeepsItsPageAndRestoresHistoryWhenSelected() async throws {
         let browser = BrowserModel()
         let tab = try await openLoadedTab(browser, titled: "First")
@@ -24,7 +56,7 @@ final class TabSuspensionTests: XCTestCase {
 
         weak var suspendedWebView: WKWebView?
         autoreleasepool { suspendedWebView = tab.webView }
-        tab.suspend()
+        await browser.suspendTabs(browser.suspendableTabs)
 
         XCTAssertTrue(tab.isSuspended)
         XCTAssertTrue(tab.contentView.subviews.isEmpty)

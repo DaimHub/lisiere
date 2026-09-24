@@ -18,11 +18,13 @@ final class BrowserModel {
             if let previousTab = tab(withID: oldValue) {
                 // Keep a preview of the page being left for background-tab hover cards.
                 previousTab.captureThumbnail(afterScreenUpdates: false)
+                previousTab.lastActive = .now
             }
             activeTab?.restore()
         }
     }
     var addressFocusRequest = 0
+    @ObservationIgnored private var suspender: TabSuspender?
 
     private struct ClosedTab {
         let url: URL?
@@ -34,6 +36,7 @@ final class BrowserModel {
     init(downloads: DownloadManager = DownloadManager()) {
         self.downloads = downloads
         addTab()
+        suspender = TabSuspender(browser: self)
     }
 
     var activeTab: BrowserTab? {
@@ -147,6 +150,7 @@ final class BrowserModel {
         let tab = configuration.map(makeTab) ?? makeTab()
         tab.isNewTab = false
         tab.openerID = opener.id
+        tab.isPopUp = configuration != nil
         // Background tabs lay out at the size they'll be shown at.
         tab.contentView.frame = opener.contentView.frame
         var index = (tabs.firstIndex { $0.id == opener.id } ?? tabs.count - 1) + 1
@@ -226,6 +230,28 @@ final class BrowserModel {
     func showWebInspector() {
         guard let tab = activeTab, !tab.isNewTab, let webView = tab.webView else { return }
         WebInspector.show(for: webView)
+    }
+
+    /// Background tabs that can be suspended to free memory, least recently used first. A pop-up and its opener
+    /// can script each other, so neither is suspended while both are open.
+    var suspendableTabs: [BrowserTab] {
+        var linkedIDs = Set<UUID>()
+        for tab in tabs where tab.isPopUp {
+            guard let openerID = tab.openerID, self.tab(withID: openerID) != nil else { continue }
+            linkedIDs.formUnion([tab.id, openerID])
+        }
+        return tabs
+            .filter { $0.id != activeTabID && $0.canSuspend && !linkedIDs.contains($0.id) }
+            .sorted { $0.lastActive < $1.lastActive }
+    }
+
+    /// Suspends the tabs in order, except pages playing media. Each is checked again after asking WebKit about
+    /// media, since it might have been selected in the meantime.
+    func suspendTabs(_ candidates: [BrowserTab]) async {
+        for tab in candidates {
+            guard !(await tab.isPlayingMedia()), suspendableTabs.contains(where: { $0 === tab }) else { continue }
+            tab.suspend()
+        }
     }
 }
 

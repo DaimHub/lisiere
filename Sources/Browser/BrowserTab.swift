@@ -14,7 +14,11 @@ final class BrowserTab: Identifiable {
     var isNewTab = true
     /// The tab whose page opened this one, so its links and pop-ups open next to each other.
     @ObservationIgnored var openerID: UUID?
+    /// Whether another page's script opened this one, and can still reach it through `window.opener`.
+    @ObservationIgnored var isPopUp = false
     @ObservationIgnored weak var browser: BrowserModel?
+    /// When the tab was last selected, so the least recently used tabs are suspended first.
+    @ObservationIgnored var lastActive = ContinuousClock.now
     var favicon: Image?
     var thumbnail: Image?
 
@@ -123,6 +127,19 @@ final class BrowserTab: Identifiable {
             webView.load(URLRequest(url: url))
         }
         suspendedState = nil
+    }
+
+    /// Whether suspending would lose nothing the page is doing: loading, using the camera or microphone, or being inspected.
+    /// Pages with unsaved form input aren't detected, since WebKit has no cheap way to ask; their history still restores.
+    var canSuspend: Bool {
+        guard let webView, !isNewTab, !isLoading else { return false }
+        return webView.cameraCaptureState == .none && webView.microphoneCaptureState == .none
+            && !WebInspector.isOpen(for: webView)
+    }
+
+    /// WebKit only answers this asynchronously, so it's checked separately from `canSuspend`.
+    func isPlayingMedia() async -> Bool {
+        await webView?.requestMediaPlaybackState() == .playing
     }
 
     static func makeConfiguration() -> WKWebViewConfiguration {
