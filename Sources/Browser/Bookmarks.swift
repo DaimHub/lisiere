@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import LinkPresentation
 import Observation
 import SwiftUI
 
@@ -107,43 +106,6 @@ final class BookmarkStore {
     private func save() {
         guard let data = try? JSONEncoder().encode(bookmarks) else { return }
         defaults.set(data, forKey: Self.storageKey)
-    }
-}
-
-/// Site icons shared by tabs, the bookmarks bar, and the new tab page.
-@MainActor
-enum FaviconStore {
-    private static var cache: [String: Image] = [:]
-    private static var requests: [String: Task<Image?, Never>] = [:]
-
-    static func cachedIcon(for url: URL?) -> Image? {
-        url?.host().flatMap { cache[$0] }
-    }
-
-    static func icon(for url: URL) async -> Image? {
-        guard let host = url.host() else { return nil }
-        if let icon = cache[host] { return icon }
-        if let request = requests[host] { return await request.value }
-
-        let request = Task { await fetchIcon(for: url) }
-        requests[host] = request
-        let icon = await request.value
-        requests[host] = nil
-        if let icon { cache[host] = icon }
-        return icon
-    }
-
-    private static func fetchIcon(for url: URL) async -> Image? {
-        let provider = LPMetadataProvider()
-        provider.timeout = 10
-        guard let metadata = try? await provider.startFetchingMetadata(for: url),
-              let iconProvider = metadata.iconProvider,
-              let icon = await withCheckedContinuation({ continuation in
-                  _ = iconProvider.loadObject(ofClass: NSImage.self) { image, _ in
-                      continuation.resume(returning: image as? NSImage)
-                  }
-              }) else { return nil }
-        return Image(nsImage: icon)
     }
 }
 
