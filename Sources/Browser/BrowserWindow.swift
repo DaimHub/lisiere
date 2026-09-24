@@ -2,37 +2,46 @@ import SwiftUI
 import WebKit
 
 struct BrowserWindow: View {
+    let bookmarks: BookmarkStore
     @State private var browser = BrowserModel()
     @State private var address = ""
-    @State private var hoveredTabID: UUID?
+    @State private var hoverCardTabID: UUID?
+    @State private var isFullScreen = false
     @FocusState private var addressIsFocused: Bool
+    @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
+    @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
 
     private let accent = Color(red: 0.38, green: 0.49, blue: 0.54)
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 0) {
-                tabStrip
-                navigationBar
+        // The main column keeps one identity across layouts. Rebuilding it would briefly show the
+        // active page in two WebViews at once, which WebKit treats as a fatal error.
+        HStack(spacing: 0) {
+            if tabLayout == .vertical {
+                TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
+                         hoverCardTabID: $hoverCardTabID)
+                    .frame(width: BrowserChrome.sidebarWidth)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
-
-            if let tab = browser.activeTab {
-                Group {
-                    if tab.isNewTab {
-                        NewTabView { browser.requestAddressFocus() }
-                    } else {
-                        webView(for: tab)
-                    }
+            VStack(spacing: 0) {
+                if tabLayout == .horizontal {
+                    TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
+                             hoverCardTabID: $hoverCardTabID)
+                        .transition(.opacity)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                }
-                .padding(8)
+                mainColumn
             }
         }
+        .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
+            hoverCard(tabFrames: tabFrames)
+        }
+        .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
+        .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
+        .animation(.snappy(duration: 0.25), value: tabLayout)
+        .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background(WindowGlassBackground())
+        .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
+                                             isFullScreen: $isFullScreen))
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
@@ -49,6 +58,61 @@ struct BrowserWindow: View {
         }
     }
 
+    /// Navigation, bookmarks, and the page. In the vertical layout the sidebar supplies the leading inset.
+    private var mainColumn: some View {
+        let leadingInset = tabLayout == .vertical ? 0 : BrowserChrome.edgeInset
+
+        return VStack(spacing: 0) {
+            navigationBar
+                .padding(.leading, leadingInset)
+
+            if bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
+                BookmarksBar(bookmarks: bookmarks, browser: browser)
+                    .padding(.leading, leadingInset - BrowserChrome.edgeInset)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
+            }
+
+            if let tab = browser.activeTab {
+                Group {
+                    if tab.isNewTab {
+                        NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
+                    } else {
+                        webView(for: tab)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+                .padding(.leading, leadingInset)
+                .padding([.trailing, .bottom], BrowserChrome.edgeInset)
+            }
+        }
+    }
+
+    private func hoverCard(tabFrames: [UUID: Anchor<CGRect>]) -> some View {
+        GeometryReader { geometry in
+            if let tab = browser.tab(withID: hoverCardTabID), let anchor = tabFrames[tab.id] {
+                let tabFrame = geometry[anchor]
+                let position = tabLayout == .vertical
+                    // Beside the sidebar row, kept clear of the window's bottom edge.
+                    ? CGPoint(x: tabFrame.maxX + 10,
+                              y: max(BrowserChrome.edgeInset, min(tabFrame.minY - 4, geometry.size.height - 250)))
+                    : CGPoint(x: min(max(tabFrame.minX, BrowserChrome.edgeInset),
+                                     geometry.size.width - TabHoverCard.width - BrowserChrome.edgeInset),
+                              y: tabFrame.maxY + 6)
+                TabHoverCard(tab: tab, isActive: tab.id == browser.activeTabID)
+                    .offset(x: position.x, y: position.y)
+                    .transition(tabLayout == .vertical ? .opacity.combined(with: .offset(x: -3))
+                                                       : .opacity.combined(with: .offset(y: -3)))
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.14), value: hoverCardTabID)
+    }
+
     private func webView(for tab: BrowserTab) -> some View {
         WebView(tab.page)
             .webViewBackForwardNavigationGestures(.enabled)
@@ -57,6 +121,14 @@ struct BrowserWindow: View {
             .webViewMagnificationGestures(.enabled)
             .webViewElementFullscreenBehavior(.enabled)
             .id(tab.id)
+            .onGeometryChange(for: CGSize.self, of: \.size) { tab.viewportSize = $0 }
+            .onChange(of: tab.page.isLoading) { _, isLoading in
+                guard !isLoading else { return }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    await tab.captureThumbnail()
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if tab.page.isLoading {
                     GeometryReader { geometry in
@@ -79,136 +151,48 @@ struct BrowserWindow: View {
             }
     }
 
-    private var tabStrip: some View {
-        GeometryReader { geometry in
-            let tabWidth = CGFloat(browser.tabs.count) * 190
-                + CGFloat(max(browser.tabs.count - 1, 0)) * 6
-            let availableWidth = max(190, geometry.size.width - 180)
-
-            HStack(spacing: 8) {
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 6) {
-                            ForEach(browser.tabs) { tab in
-                                tabButton(for: tab)
-                                    .id(tab.id)
-                            }
-                        }
-                    }
-                    .scrollIndicators(.hidden)
-                    .onChange(of: browser.tabs.count) { _, _ in
-                        if let activeTabID = browser.activeTabID {
-                            scrollProxy.scrollTo(activeTabID, anchor: .trailing)
-                        }
-                    }
-                }
-                .frame(width: min(tabWidth, availableWidth))
-
-                Button { browser.addTab() } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(ChromeIconButtonStyle())
-                .help("New Tab (⌘T)")
-                .accessibilityLabel("New Tab")
-
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(WindowDragGesture())
-            }
-            .padding(.leading, 80)
-            .padding(.trailing, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        }
-        .frame(height: 34)
-    }
-
-    private func tabButton(for tab: BrowserTab) -> some View {
-        let isActive = browser.activeTabID == tab.id
-        let isHovered = hoveredTabID == tab.id
-
-        return HStack(spacing: 4) {
-            Button { browser.activeTabID = tab.id } label: {
-                HStack(spacing: 8) {
-                    Group {
-                        if let favicon = tab.favicon {
-                            favicon
-                                .resizable()
-                                .scaledToFit()
-                        } else {
-                            Image(systemName: "globe")
-                                .resizable()
-                                .scaledToFit()
-                        }
-                    }
-                    .frame(width: 14, height: 14)
-                    .foregroundStyle(isActive ? Color.primary : Color.secondary)
-                    Text(tab.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .tracking(-0.15)
-                        .foregroundStyle(isActive ? Color.primary : Color.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(isActive ? .isSelected : [])
-            Button { browser.closeTab(tab.id) } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(ChromeCloseButtonStyle())
-            .help("Close Tab")
-            .accessibilityLabel("Close \(tab.title)")
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 4)
-        .frame(width: 190, height: 34)
-        .background(isActive ? Color.primary.opacity(0.10) :
-                    isHovered ? Color.primary.opacity(0.05) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(isActive ? Color.primary.opacity(0.08) : Color.clear, lineWidth: 1)
-        }
-        .onHover { hoveredTabID = $0 ? tab.id : nil }
-        .task(id: tab.page.url) {
-            await tab.updateFavicon()
-        }
-    }
-
     private var navigationBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 2) {
+        let page = browser.activeTab?.page
+
+        return HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 Button { browser.goBack() } label: {
                     Image(systemName: "chevron.left")
                 }
-                .disabled(browser.activeTab?.page.backForwardList.backList.isEmpty ?? true)
+                .disabled(page?.backForwardList.backList.isEmpty ?? true)
                 .help("Back (⌘[)")
+                .contextMenu {
+                    historyMenu(for: Array((page?.backForwardList.backList ?? []).reversed()))
+                }
 
                 Button { browser.goForward() } label: {
                     Image(systemName: "chevron.right")
                 }
-                .disabled(browser.activeTab?.page.backForwardList.forwardList.isEmpty ?? true)
+                .disabled(page?.backForwardList.forwardList.isEmpty ?? true)
                 .help("Forward (⌘])")
+                .contextMenu {
+                    historyMenu(for: page?.backForwardList.forwardList ?? [])
+                }
 
-                Button { browser.reload() } label: {
-                    Image(systemName: "arrow.clockwise")
+                Button {
+                    if page?.isLoading == true { page?.stopLoading() } else { browser.reload() }
+                } label: {
+                    Image(systemName: page?.isLoading == true ? "xmark" : "arrow.clockwise")
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .disabled(browser.activeTab?.isNewTab ?? true)
-                .help("Reload (⌘R)")
+                .help(page?.isLoading == true ? "Stop Loading" : "Reload (⌘R)")
             }
-            .buttonStyle(ChromeIconButtonStyle())
-            .padding(3)
+            .buttonStyle(ChromeIconButtonStyle(size: 30))
+            .padding(2)
             .background(Color.primary.opacity(0.035),
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .frame(width: 14)
                 TextField("Search or enter address", text: $address)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
@@ -218,48 +202,44 @@ struct BrowserWindow: View {
                         addressIsFocused = false
                     }
                     .accessibilityLabel("Address and search")
+                bookmarkButton
             }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
+            .padding(.leading, 11)
+            .padding(.trailing, 4)
+            .frame(height: 34)
             .background(Color.primary.opacity(0.065),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
             }
+
         }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
+        .padding(.trailing, BrowserChrome.edgeInset)
+        .frame(height: BrowserChrome.navigationBarHeight)
     }
-}
 
-private struct ChromeIconButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.5))
-            .frame(width: 32, height: 32)
-            .background(!isEnabled ? Color.clear :
-                        configuration.isPressed ? Color.primary.opacity(0.12) :
-                        isHovered ? Color.primary.opacity(0.07) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(Rectangle())
-            .onHover { isHovered = $0 }
+    @ViewBuilder
+    private var bookmarkButton: some View {
+        if let tab = browser.activeTab, !tab.isNewTab, let url = tab.page.url {
+            let isBookmarked = bookmarks.isBookmarked(url)
+            Button { bookmarks.toggle(title: tab.page.title, url: url) } label: {
+                Image(systemName: isBookmarked ? "star.fill" : "star")
+                    .foregroundStyle(isBookmarked ? Color.yellow : Color.secondary)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(ChromeIconButtonStyle(size: 26))
+            .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark This Page (⌘D)")
+            .accessibilityLabel(isBookmarked ? "Remove Bookmark" : "Bookmark This Page")
+        }
     }
-}
 
-private struct ChromeCloseButtonStyle: ButtonStyle {
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isHovered ? Color.primary : Color.secondary)
-            .background(configuration.isPressed ? Color.primary.opacity(0.12) :
-                        isHovered ? Color.primary.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .onHover { isHovered = $0 }
+    @ViewBuilder
+    private func historyMenu(for items: [WebPage.BackForwardList.Item]) -> some View {
+        ForEach(items.prefix(15)) { item in
+            Button(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString) {
+                browser.go(to: item)
+            }
+        }
     }
 }

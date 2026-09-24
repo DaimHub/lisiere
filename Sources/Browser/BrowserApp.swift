@@ -2,14 +2,16 @@ import SwiftUI
 
 @main
 struct BrowserApp: App {
+    @State private var bookmarks = BookmarkStore()
+
     var body: some Scene {
         WindowGroup {
-            BrowserWindow()
+            BrowserWindow(bookmarks: bookmarks)
                 .frame(minWidth: 680, minHeight: 440)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            BrowserCommands()
+            BrowserCommands(bookmarks: bookmarks)
         }
     }
 }
@@ -26,7 +28,15 @@ extension FocusedValues {
 }
 
 private struct BrowserCommands: Commands {
+    let bookmarks: BookmarkStore
     @FocusedValue(\.browserModel) private var browser
+    @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
+    @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
+
+    private var bookmarkableTab: BrowserTab? {
+        guard let tab = browser?.activeTab, !tab.isNewTab, tab.page.url != nil else { return nil }
+        return tab
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -65,6 +75,38 @@ private struct BrowserCommands: Commands {
                 .keyboardShortcut("[", modifiers: .command)
             Button("Forward") { browser?.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
+        }
+        CommandGroup(after: .sidebar) {
+            Button(tabLayout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs") {
+                tabLayout = tabLayout.toggled
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            Divider()
+            Picker("Bookmarks Bar", selection: $bookmarksBarVisibility) {
+                ForEach(BookmarksBarVisibility.allCases) { visibility in
+                    Text(visibility.title).tag(visibility)
+                }
+            }
+            Button(bookmarksBarVisibility == .never ? "Show Bookmarks Bar" : "Hide Bookmarks Bar") {
+                bookmarksBarVisibility = bookmarksBarVisibility == .never ? .always : .never
+            }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            Divider()
+        }
+        CommandMenu("Bookmarks") {
+            Button(bookmarks.isBookmarked(bookmarkableTab?.page.url) ? "Remove Bookmark" : "Bookmark This Page") {
+                guard let tab = bookmarkableTab, let url = tab.page.url else { return }
+                bookmarks.toggle(title: tab.page.title, url: url)
+            }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(bookmarkableTab == nil)
+
+            if !bookmarks.bookmarks.isEmpty {
+                Divider()
+                ForEach(bookmarks.bookmarks) { bookmark in
+                    Button(bookmark.displayTitle) { browser?.open(bookmark.url) }
+                }
+            }
         }
         CommandMenu("Develop") {
             Button("Show Web Inspector") { browser?.showWebInspector() }
