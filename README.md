@@ -1,8 +1,14 @@
 # Browser
 
-A first macOS browser built with SwiftUI and WebKit. Requires macOS 26 or later and Xcode 26 or later.
+A native macOS browser built with SwiftUI and WebKit.
 
-## Run
+## Requirements
+
+- macOS 26 or later
+- Xcode 26 or later
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+
+## Build
 
 ```sh
 xcodegen generate
@@ -10,59 +16,12 @@ xcodebuild -project Browser.xcodeproj -scheme Browser -configuration Debug -deri
 open DerivedData/Build/Products/Debug/Browser.app
 ```
 
-The first version supports tabs, address entry and web search, back and forward navigation, reload, and standard keyboard shortcuts. Each tab owns a `WKWebView`, shown in a view the app owns while SwiftUI draws the rest of the window, so switching tabs or layouts keeps its page and navigation history alive. WebKit manages page rendering and persistent website data.
-
-Each tab adds the installed Safari version to WebKit's user agent. Sites such as Google otherwise serve an older layout to the embedded WebKit default user agent.
-
-## Tabs
-
-Tabs share the strip width and shrink to icons when many are open. Hover a tab for a card with its title, address, and a preview of background pages. Drag tabs to reorder them. Right-click a tab to reload, duplicate, copy its link, or close other tabs and tabs to the right. Right-click the back or forward button to jump through history.
-
-Pop-ups and links that open a new window become a tab next to the page that opened them. ⌘-click or middle-click a link to open it in a background tab.
-
-Background tabs you haven't selected for 10 minutes are suspended to free memory, and the least recently used ones go right away when macOS reports memory pressure. A suspended tab keeps its title, icon (slightly dimmed), and preview, and releases its web view so WebKit can end the page's process. Selecting it creates a new web view that restores its back-forward history and scroll position. Tabs that are loading, playing media, using the camera or microphone, showing the Web Inspector, or linked to a pop-up through `window.opener` stay loaded. Unsaved form input isn't detected, so text typed into a background page can be lost. A background page whose web process crashes is suspended the same way, and the page you're viewing reloads.
-
-The window controls are repositioned to sit centered in the taller tab row. AppKit resets them during layout, so they are placed again after resizes and full screen changes.
-
-## Downloads
-
-Downloads are saved to your Downloads folder, numbered instead of replacing a file with the same name, and marked as downloaded from the web so Gatekeeper checks them. The downloads button in the navigation bar shows their progress and lists them to open, show in Finder, cancel, or clear.
-
-## Vertical tabs
-
-Switch between the tab strip and a sidebar of vertical tabs with View ▸ Use Vertical Tabs (⇧⌘S), the button at the top of the sidebar, or the tab context menu. The window controls move to the sidebar's top row, level with the address bar.
-
-## New tabs and bookmarks
-
-New tabs show a short greeting, a search field that focuses the address bar, and your bookmarks as favorites over a translucent background. Bookmark a page with ⌘D or the star in the address bar. The bookmarks bar can always show, show only on new tabs, or stay hidden (View ▸ Bookmarks Bar, or ⇧⌘B to toggle it). Drag bookmarks to reorder them, right-click to rename or delete, and ⌘-click to open one in a new tab. Bookmarks are stored in the app's user defaults.
-
-Tab icons come from the icon links of the loaded page, read in a separate script world, so only the one best-sized icon is downloaded. Bookmarks the app hasn't seen open try the site's `/favicon.ico`, then the icon links in its HTML. Icons are cached in `~/Library/Caches` for a week.
-
-## Keyboard shortcuts
-
-| Action | Shortcut |
-| --- | --- |
-| New tab / close tab / reopen closed tab | ⌘T / ⌘W / ⇧⌘T |
-| Next / previous tab | ⇧⌘] / ⇧⌘[ or ⌃Tab / ⌃⇧Tab |
-| Select tab 1–8 / last tab | ⌘1–8 / ⌘9 |
-| Focus address / reload | ⌘L / ⌘R |
-| Back / forward | ⌘[ / ⌘] |
-| Bookmark page / toggle bookmarks bar | ⌘D / ⇧⌘B |
-| Switch between horizontal and vertical tabs | ⇧⌘S |
-| Show Web Inspector | ⌥⌘I |
-
-The in-app Web Inspector shortcut and the Inspect Element context menu item use private WebKit hooks because WebKit's public API only enables inspection through Safari's Develop menu. The Inspector docks inside the page or opens in its own window, and remembers which one you chose last. Each hook is checked before use, so the Inspector is simply unavailable if WebKit changes it. These hooks need review before distributing the app.
-
 ## Contributing
 
-Contributions are welcome. See the [contributing guide](CONTRIBUTING.md); pull requests can only be merged once you agree to the [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).
+See the [contributing guide](CONTRIBUTING.md). Pull requests can only be merged once you agree to the [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).
 
 ## License
 
 Copyright (C) 2026 Athas
 
-Browser is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-Browser is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
-
-Athas may also distribute Browser under other terms, such as through the Mac App Store. The Contributor License Agreement gives Athas the rights to do so for contributed code.
+Browser is licensed under the [GNU Affero General Public License v3.0](LICENSE) or later. Athas may also distribute it under other terms, such as through the Mac App Store.
