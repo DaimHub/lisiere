@@ -38,14 +38,6 @@ New tabs show a short greeting, a search field that focuses the address bar, and
 
 Tab icons come from the icon links of the loaded page, read in a separate script world, so only the one best-sized icon is downloaded. Bookmarks the app hasn't seen open try the site's `/favicon.ico`, then the icon links in its HTML. Icons are cached in `~/Library/Caches` for a week.
 
-## Studio
-
-Studio is a pane on the right (⌘\\ or the sparkles button) where you describe a small tool, such as "a todo list", and Codex builds it as a self-contained web app. Each view is saved and can be reopened from the pane's title menu; follow-up requests change the selected view and keep its data.
-
-Studio runs the [Codex CLI](https://github.com/openai/codex) the same way the Codex SDK does (`codex exec --json`), using your existing Codex sign-in. Install it with `npm install -g @openai/codex` and run `codex login` first. Views are stored in `~/Library/Application Support/dev.athas.browser/Views`, one folder per view, and served from `athas-view://<id>/`, so each view keeps its own `localStorage`.
-
-Running the Codex CLI needs the app sandbox off. Unsigned development builds (the command above) already run without it; signed builds need `ENABLE_APP_SANDBOX: NO` in `project.yml`.
-
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -57,7 +49,6 @@ Running the Codex CLI needs the app sandbox off. Unsigned development builds (th
 | Back / forward | ⌘[ / ⌘] |
 | Bookmark page / toggle bookmarks bar | ⌘D / ⇧⌘B |
 | Switch between horizontal and vertical tabs | ⇧⌘S |
-| Show or hide Studio | ⌘\\ |
 | Show Web Inspector | ⌥⌘I |
 
 The in-app Web Inspector shortcut and the Inspect Element context menu item use private WebKit hooks because WebKit's public API only enables inspection through Safari's Develop menu. The Inspector docks inside the page or opens in its own window, and remembers which one you chose last. Each hook is checked before use, so the Inspector is simply unavailable if WebKit changes it. These hooks need review before distributing the app.

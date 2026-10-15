@@ -6,8 +6,6 @@ import WebKit
 @MainActor
 @Observable
 final class BrowserModel {
-    static let studioVisibilityKey = "studioVisible"
-
     let downloads: DownloadManager
 
     private(set) var tabs: [BrowserTab] = []
