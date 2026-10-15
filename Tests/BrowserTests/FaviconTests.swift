@@ -5,6 +5,8 @@ import XCTest
 @MainActor
 final class FaviconTests: XCTestCase {
     private let page = URL(string: "https://example.com/docs/page.html")!
+    /// A 1×1 PNG.
+    private static let pixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
     func testParsesIconLinksFromTheHead() {
         let html = """
@@ -25,7 +27,6 @@ final class FaviconTests: XCTestCase {
             FaviconCandidate(url: URL(string: "https://example.com/docs/favicon.ico")!),
             FaviconCandidate(url: URL(string: "https://example.com/icon-32.png")!, sizes: [16, 32]),
             FaviconCandidate(url: URL(string: "https://cdn.example.net/touch.png?a=1&b=2")!, isTouchIcon: true),
-            FaviconCandidate(url: URL(string: "https://static.example.com/icon.svg")!, isScalable: true),
         ])
     }
 
@@ -40,6 +41,50 @@ final class FaviconTests: XCTestCase {
         XCTAssertNil(FaviconCandidate(rel: "icon", href: "javascript:alert(1)", baseURL: page))
         XCTAssertNil(FaviconCandidate(rel: "icon", href: " ", baseURL: page))
         XCTAssertNotNil(FaviconCandidate(rel: "icon", href: "data:image/png;base64,AAAA", baseURL: page))
+    }
+
+    func testSkipsSVGIcons() {
+        XCTAssertNil(FaviconCandidate(rel: "icon", href: "/icon.svg", baseURL: page))
+        XCTAssertNil(FaviconCandidate(rel: "icon", href: "/icon", type: "image/svg+xml", baseURL: page))
+        XCTAssertNil(FaviconCandidate(rel: "icon", href: "data:image/svg+xml;base64,AAAA", baseURL: page))
+        XCTAssertEqual(FaviconCandidate(rel: "icon", href: "/icon.png", sizes: "any", baseURL: page)?.isScalable, true)
+    }
+
+    func testReadingStopsPastTheLimit() async throws {
+        func read(_ count: Int, limit: Int) async throws -> FaviconData.Read {
+            try await FaviconData.read(AsyncStream { continuation in
+                for byte in 0..<count { continuation.yield(UInt8(byte % 256)) }
+                continuation.finish()
+            }, limit: limit)
+        }
+
+        let whole = try await read(4, limit: 4)
+        XCTAssertEqual(whole, FaviconData.Read(bytes: Data([0, 1, 2, 3]), isTruncated: false))
+        let truncated = try await read(10, limit: 4)
+        XCTAssertEqual(truncated, FaviconData.Read(bytes: Data([0, 1, 2, 3]), isTruncated: true))
+    }
+
+    func testAcceptsOnlyRasterIconTypes() throws {
+        XCTAssertTrue(FaviconData.isIconMIMEType("image/x-icon"))
+        XCTAssertTrue(FaviconData.isIconMIMEType("image/PNG"))
+        XCTAssertTrue(FaviconData.isIconMIMEType("application/octet-stream"))
+        XCTAssertFalse(FaviconData.isIconMIMEType("image/svg+xml"))
+        XCTAssertFalse(FaviconData.isIconMIMEType("application/pdf"))
+        XCTAssertFalse(FaviconData.isIconMIMEType("text/html"))
+        XCTAssertTrue(FaviconData.isPageMIMEType("text/html"))
+        XCTAssertFalse(FaviconData.isPageMIMEType("application/json"))
+
+        let png = try XCTUnwrap(Data(base64Encoded: Self.pixelPNG))
+        XCTAssertEqual(FaviconData.imageType(of: png), .png)
+        XCTAssertEqual(FaviconData.imageType(of: Data([0, 0, 1, 0, 1, 0])), .ico)
+        XCTAssertEqual(FaviconData.imageType(of: Data("GIF89a".utf8)), .gif)
+        XCTAssertEqual(FaviconData.imageType(of: Data("RIFF\0\0\0\0WEBPVP8 ".utf8)), .webP)
+        XCTAssertNil(FaviconData.imageType(of: Data("%PDF-1.7".utf8)))
+        XCTAssertNil(FaviconData.imageType(of: Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)))
+
+        XCTAssertNotNil(FaviconData.image(from: png))
+        XCTAssertNil(FaviconData.image(from: Data("%PDF-1.7".utf8)))
+        XCTAssertNil(FaviconData.image(from: png + Data(count: FaviconData.maxIconBytes)))
     }
 
     func testRanksSizesNearTheDisplaySizeFirst() {
@@ -92,8 +137,7 @@ final class FaviconTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
             await MainActor.run { FaviconStore.cache = originalCache }
         }
-        let svg = #"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16"/></svg>"#
-        let iconURL = "data:image/svg+xml;base64,\(Data(svg.utf8).base64EncodedString())"
+        let iconURL = "data:image/png;base64,\(Self.pixelPNG)"
         let pageURL = URL(string: "https://favicon-test.invalid/app/")!
         let webView = WKWebView()
         webView.loadHTMLString(#"<head><link rel="mask-icon" href="m.svg"><link rel="icon" href="\#(iconURL)"></head>"#,
@@ -101,7 +145,7 @@ final class FaviconTests: XCTestCase {
         try await waitUntil { !webView.isLoading && webView.url == pageURL }
 
         let candidates = await FaviconStore.candidates(in: webView)
-        XCTAssertEqual(candidates, [FaviconCandidate(url: URL(string: iconURL)!, isScalable: true)])
+        XCTAssertEqual(candidates, [FaviconCandidate(url: URL(string: iconURL)!)])
 
         let icon = await FaviconStore.icon(forPage: pageURL, candidates: candidates)
         XCTAssertNotNil(icon)

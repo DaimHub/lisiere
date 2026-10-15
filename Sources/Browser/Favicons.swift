@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// An icon a page declares with `<link rel="icon">` or `<link rel="apple-touch-icon">`.
@@ -18,19 +20,21 @@ struct FaviconCandidate: Equatable, Sendable {
         self.isTouchIcon = isTouchIcon
     }
 
-    /// Reads a `<link>` element's attributes. `mask-icon` is left out because it's a monochrome template.
+    /// Reads a `<link>` element's attributes. `mask-icon` is left out because it's a monochrome template,
+    /// and SVG icons because decoding them would run an SVG parser outside WebKit's sandbox.
     init?(rel: String, href: String, sizes: String = "", type: String = "", baseURL: URL) {
         let rels = Set(rel.lowercased().split(whereSeparator: \.isWhitespace).map(String.init))
         let isTouchIcon = !rels.isDisjoint(with: ["apple-touch-icon", "apple-touch-icon-precomposed"])
         let href = href.trimmingCharacters(in: .whitespacesAndNewlines)
         guard rels.contains("icon") || isTouchIcon, !href.isEmpty,
               let url = URL(string: href, relativeTo: baseURL)?.absoluteURL,
-              ["http", "https", "data"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+              ["http", "https", "data"].contains(url.scheme?.lowercased() ?? ""),
+              type.lowercased() != "image/svg+xml", url.pathExtension.lowercased() != "svg",
+              !url.absoluteString.lowercased().hasPrefix("data:image/svg") else { return nil }
         let sizeTokens = sizes.lowercased().split(whereSeparator: \.isWhitespace)
         self.init(url: url,
                   sizes: sizeTokens.compactMap { $0.split(separator: "x").first.flatMap { Int($0) } },
-                  isScalable: sizeTokens.contains("any") || type.lowercased() == "image/svg+xml"
-                      || url.pathExtension.lowercased() == "svg" || url.absoluteString.hasPrefix("data:image/svg"),
+                  isScalable: sizeTokens.contains("any"),
                   isTouchIcon: isTouchIcon)
     }
 
@@ -79,7 +83,7 @@ struct FaviconCandidate: Equatable, Sendable {
         return URL(string: "/favicon.ico", relativeTo: pageURL)?.absoluteURL
     }
 
-    /// Known sizes of at least 32 px come first, closest to 64 px. An SVG beats a raster icon of unknown or small size,
+    /// Known sizes of at least 32 px come first, closest to 64 px. A scalable icon beats one of unknown or small size,
     /// and touch icons, which are usually opaque squares, come last.
     private var rank: (tier: Int, distance: Int) {
         if isTouchIcon { return (4, abs((sizes.max() ?? 180) - 64)) }
@@ -225,26 +229,106 @@ enum FaviconStore {
     @concurrent
     nonisolated private static func download(_ source: URL, forHost host: String,
                                              into cache: FaviconCache) async -> Icon? {
-        guard let (data, _) = await fetch(source), let image = image(from: data) else { return nil }
-        cache.save(FaviconCache.Entry(source: source, data: data), forHost: host)
+        guard let (data, _) = await fetch(source, limit: FaviconData.maxIconBytes,
+                                          accepting: FaviconData.isIconMIMEType),
+              !data.isTruncated, let image = image(from: data.bytes) else { return nil }
+        cache.save(FaviconCache.Entry(source: source, data: data.bytes), forHost: host)
         return Icon(source: source, image: image)
     }
 
+    /// The start of a page's HTML, which is enough to find the icons in its `<head>`.
     @concurrent
     nonisolated private static func page(at url: URL) async -> (String, URL)? {
-        guard let (data, pageURL) = await fetch(url) else { return nil }
-        return (String(decoding: data, as: UTF8.self), pageURL)
+        guard let (data, pageURL) = await fetch(url, limit: FaviconData.maxPageBytes,
+                                                accepting: FaviconData.isPageMIMEType) else { return nil }
+        return (String(decoding: data.bytes, as: UTF8.self), pageURL)
     }
 
-    nonisolated private static func fetch(_ url: URL) async -> (Data, URL)? {
-        guard let (data, response) = try? await session.data(from: url), !data.isEmpty,
-              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
+    /// Stops reading once the response is larger than `limit`, so a huge or endless file can't fill memory.
+    nonisolated private static func fetch(_ url: URL, limit: Int,
+                                          accepting isAccepted: (String?) -> Bool) async -> (FaviconData.Read, URL)? {
+        guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
+        defer { bytes.task.cancel() }
+        guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
+              isAccepted(response.mimeType),
+              let data = try? await FaviconData.read(bytes, limit: limit), !data.bytes.isEmpty
         else { return nil }
         return (data, response.url ?? url)
     }
 
     nonisolated private static func image(from data: Data) -> Image? {
-        guard let image = NSImage(data: data), image.isValid, image.size.width > 0 else { return nil }
-        return Image(nsImage: image)
+        guard let image = FaviconData.image(from: data) else { return nil }
+        return Image(nsImage: NSImage(cgImage: image, size: .zero))
+    }
+}
+
+/// Limits on the icons and pages read to find a site's icon. Icons are decoded in the app's own process,
+/// outside WebKit's sandbox, so only small files in a few raster formats are accepted.
+enum FaviconData {
+    static let maxIconBytes = 512 * 1024
+    static let maxPageBytes = 1024 * 1024
+    /// Icons show at 14–32 pt, so larger images are scaled down as they're decoded.
+    static let maxPixelSize = 128
+
+    struct Read: Equatable {
+        let bytes: Data
+        /// Whether the response had more bytes than the limit, which were left unread.
+        let isTruncated: Bool
+    }
+
+    /// Reads up to `limit` bytes, stopping at the first byte past it.
+    static func read<Bytes: AsyncSequence>(_ bytes: Bytes, limit: Int) async throws -> Read
+    where Bytes.Element == UInt8 {
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < limit else { return Read(bytes: data, isTruncated: true) }
+            data.append(byte)
+        }
+        return Read(bytes: data, isTruncated: false)
+    }
+
+    /// Servers often send `.ico` files as untyped binary data, so that's accepted too. The file's
+    /// first bytes decide whether it's decoded.
+    static func isIconMIMEType(_ mimeType: String?) -> Bool {
+        guard let mimeType = mimeType?.lowercased() else { return true }
+        return (mimeType.hasPrefix("image/") && mimeType != "image/svg+xml") || mimeType == "application/octet-stream"
+    }
+
+    static func isPageMIMEType(_ mimeType: String?) -> Bool {
+        ["text/html", "application/xhtml+xml"].contains(mimeType?.lowercased())
+    }
+
+    /// The format a file's first bytes identify, among PNG, ICO, JPEG, GIF, and WebP.
+    static func imageType(of data: Data) -> UTType? {
+        let header = [UInt8](data.prefix(12))
+        func starts(with prefix: String) -> Bool { header.starts(with: Array(prefix.utf8)) }
+        if header.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return .png }
+        if header.starts(with: [0x00, 0x00, 0x01, 0x00]) { return .ico }
+        if header.starts(with: [0xFF, 0xD8, 0xFF]) { return .jpeg }
+        if starts(with: "GIF87a") || starts(with: "GIF89a") { return .gif }
+        if starts(with: "RIFF"), header.count == 12, header[8...].elementsEqual("WEBP".utf8) { return .webP }
+        return nil
+    }
+
+    /// Decodes an icon whose bytes match one of the accepted formats, picking the size closest to 64 px
+    /// from an `.ico` file and scaling it down to `maxPixelSize`.
+    static func image(from data: Data) -> CGImage? {
+        guard data.count <= maxIconBytes, let type = imageType(of: data),
+              let source = CGImageSourceCreateWithData(data as CFData, [
+                  kCGImageSourceTypeIdentifierHint: type.identifier,
+                  kCGImageSourceShouldCache: false,
+              ] as CFDictionary),
+              CGImageSourceGetType(source) as String? == type.identifier else { return nil }
+        func width(at index: Int) -> Int {
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            return properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
+        }
+        guard let index = (0..<min(CGImageSourceGetCount(source), 16))
+            .min(by: { abs(width(at: $0) - 64) < abs(width(at: $1) - 64) }) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, index, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ] as CFDictionary)
     }
 }

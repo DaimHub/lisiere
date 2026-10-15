@@ -23,6 +23,8 @@ final class DownloadItem: Identifiable {
     fileprivate(set) var destinationURL: URL?
     @ObservationIgnored fileprivate let download: WKDownload
     @ObservationIgnored fileprivate var progressObservation: NSKeyValueObservation?
+    /// Asks whether a download the page started on its own may go ahead, or `nil` when the user started it.
+    @ObservationIgnored fileprivate var confirmation: (@MainActor () async -> Bool)?
 
     fileprivate init(download: WKDownload) {
         self.download = download
@@ -52,8 +54,11 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
         return running.map(\.progress).reduce(0, +) / Double(running.count)
     }
 
-    func track(_ download: WKDownload) {
+    /// Pass a confirmation for a download the user didn't start. It's asked before anything is saved,
+    /// and the download disappears if it's refused.
+    func track(_ download: WKDownload, confirmation: (@MainActor () async -> Bool)? = nil) {
         let item = DownloadItem(download: download)
+        item.confirmation = confirmation
         download.delegate = self
         item.progressObservation = download.progress.observe(\.fractionCompleted) { [weak item] progress, _ in
             let (fraction, completed, total) = (progress.fractionCompleted, progress.completedUnitCount,
@@ -116,6 +121,15 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         guard let item = item(for: download), item.state == .downloading else { return nil }
+        if let confirmation = item.confirmation {
+            item.confirmation = nil
+            guard await confirmation() else {
+                items.removeAll { $0 === item }
+                return nil
+            }
+            // It might have been cancelled while the user was asked.
+            guard item.state == .downloading else { return nil }
+        }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Downloads that are still running haven't necessarily created their files yet.
         let reserved = Set(items.filter { $0.state == .downloading }.compactMap(\.destinationURL))

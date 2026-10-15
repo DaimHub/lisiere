@@ -1,10 +1,15 @@
 import AppKit
 import WebKit
 
-/// Handles what a tab's page asks of the browser: new windows, modifier-clicked links, downloads, and JavaScript panels.
+/// Handles what a tab's page asks of the browser: new windows, modifier-clicked links, downloads, load errors,
+/// camera and microphone access, and JavaScript panels.
 @MainActor
 final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     weak var tab: BrowserTab?
+    /// Whether the main frame is loading an address the user opened from the browser, such as the address bar,
+    /// rather than one the page navigated to on its own.
+    var isLoadingFromBrowser = false
+    private var dialogs = DialogLimiter()
 
     /// WebKit reports mouse buttons as a mask, like `NSEvent.pressedMouseButtons`, not as a button number.
     private static let middleButtonMask = 1 << 2
@@ -32,18 +37,94 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        track(download, from: webView)
+        track(download, from: webView, isUserStarted: download.isUserInitiated)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        track(download, from: webView)
+        track(download, from: webView, isUserStarted: download.isUserInitiated || isLoadingFromBrowser)
+        isLoadingFromBrowser = false
     }
 
-    private func track(_ download: WKDownload, from webView: WKWebView) {
-        guard let tab else { return }
-        tab.browser?.downloads.track(download)
+    /// Downloads the user started with a click or from the browser go ahead. A page that starts one on its own
+    /// needs the user's permission first, which is remembered for the site.
+    private func track(_ download: WKDownload, from webView: WKWebView, isUserStarted: Bool) {
+        guard let tab, let browser = tab.browser else { return }
+        let site = webView.backForwardList.currentItem?.url.host() ?? download.originalRequest?.url?.host() ?? ""
+        let permissions = browser.sitePermissions
+        let confirmation: @MainActor () async -> Bool = { [weak self] in
+            await permissions.decide([.downloads], on: site) {
+                await self?.askToAllowDownloads(on: site, in: webView)
+            }
+        }
+        browser.downloads.track(download, confirmation: isUserStarted ? nil : confirmation)
         // A download typed into a new tab leaves no page behind, so show the new tab page again.
         if webView.backForwardList.currentItem == nil { tab.isNewTab = true }
+    }
+
+    /// `nil` when the tab closed before the user could answer.
+    private func askToAllowDownloads(on site: String, in webView: WKWebView) async -> Bool? {
+        let alert = NSAlert()
+        alert.messageText = site.isEmpty ? "Allow this page to download files?" : "Allow “\(site)” to download files?"
+        alert.informativeText = "The page is trying to download a file you didn’t click. If you allow it, "
+            + "the site can download files until you quit Browser."
+        alert.addButton(withTitle: "Don’t Allow")
+        alert.addButton(withTitle: "Allow")
+        return await present(alert, in: webView).map { $0 == .alertSecondButtonReturn }
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        isLoadingFromBrowser = false
+        dialogs = DialogLimiter()
+        tab?.clearLoadError()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showLoadError(error, in: webView, isProvisional: true)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showLoadError(error, in: webView, isProvisional: false)
+    }
+
+    /// A load that fails before it commits leaves the previous page in place, so the error covers it.
+    private func showLoadError(_ error: Error, in webView: WKWebView, isProvisional: Bool) {
+        isLoadingFromBrowser = false
+        guard let tab, let loadError = PageLoadError(error, url: webView.url) else { return }
+        tab.showLoadError(loadError, coversPreviousPage: isProvisional && webView.backForwardList.currentItem != nil)
+    }
+
+    /// Asks before a page uses the camera or microphone, naming the site that wants them. The answer lasts
+    /// until the app quits.
+    func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
+                 initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
+        let permissions: Set<SitePermissions.Permission> = switch type {
+        case .camera: [.camera]
+        case .microphone: [.microphone]
+        case .cameraAndMicrophone: [.camera, .microphone]
+        @unknown default: []
+        }
+        guard let browser = tab?.browser, !permissions.isEmpty, !origin.host.isEmpty else { return .deny }
+        let site = origin.port == 0 ? origin.host : "\(origin.host):\(origin.port)"
+        let topSite = frame.isMainFrame ? nil : webView.url?.host()
+        let isAllowed = await browser.sitePermissions.decide(permissions, on: "\(origin.protocol)://\(site)") {
+            [weak self] in
+            await self?.askForMediaCapture(permissions, site: site, embeddedIn: topSite, in: webView)
+        }
+        return isAllowed ? .grant : .deny
+    }
+
+    private func askForMediaCapture(_ permissions: Set<SitePermissions.Permission>, site: String,
+                                    embeddedIn topSite: String?, in webView: WKWebView) async -> Bool? {
+        let devices = [permissions.contains(.camera) ? "camera" : nil,
+                       permissions.contains(.microphone) ? "microphone" : nil].compactMap { $0 }
+        let alert = NSAlert()
+        alert.messageText = "Allow “\(site)” to use your \(devices.joined(separator: " and "))?"
+        if let topSite, topSite != site {
+            alert.informativeText = "It’s part of a page on “\(topSite)”."
+        }
+        alert.addButton(withTitle: "Don’t Allow")
+        alert.addButton(withTitle: "Allow")
+        return await present(alert, in: webView).map { $0 == .alertSecondButtonReturn }
     }
 
     /// Opens pop-ups and `target="_blank"` links as tabs. WebKit loads the page into the returned
@@ -74,7 +155,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
                  initiatedByFrame frame: WKFrameInfo) async {
         let alert = makeAlert(message: message, frame: frame)
         alert.addButton(withTitle: "OK")
-        _ = await present(alert, in: webView)
+        _ = await presentDialog(alert, in: webView)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
@@ -82,7 +163,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         let alert = makeAlert(message: message, frame: frame)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        return await present(alert, in: webView) == .alertFirstButtonReturn
+        return await presentDialog(alert, in: webView) == .alertFirstButtonReturn
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
@@ -94,7 +175,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
-        return await present(alert, in: webView) == .alertFirstButtonReturn ? field.stringValue : nil
+        return await presentDialog(alert, in: webView) == .alertFirstButtonReturn ? field.stringValue : nil
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
@@ -118,12 +199,43 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         return alert
     }
 
-    /// Brings the page's tab forward, then shows the panel as a sheet on its window.
-    private func present(_ alert: NSAlert, in webView: WKWebView) async -> NSApplication.ModalResponse {
-        if let tab { tab.browser?.activeTabID = tab.id }
-        if let window = webView.window {
-            return await alert.beginSheetModal(for: window)
+    /// Shows a page's JavaScript dialog, unless the user blocked the page's dialogs. From the second dialog on,
+    /// the user can block the rest until the page changes.
+    private func presentDialog(_ alert: NSAlert, in webView: WKWebView) async -> NSApplication.ModalResponse? {
+        guard !dialogs.isBlocked else { return nil }
+        if dialogs.offersBlocking {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Prevent this page from creating more dialogs"
         }
-        return alert.runModal()
+        let response = await present(alert, in: webView)
+        dialogs.didShow(blockingMore: alert.showsSuppressionButton && alert.suppressionButton?.state == .on)
+        return response
+    }
+
+    /// Shows the panel as a sheet on the page's window. A background tab's panel waits until the tab is selected,
+    /// so a page can't take over the window, and is dismissed if the tab closes first.
+    private func present(_ alert: NSAlert, in webView: WKWebView) async -> NSApplication.ModalResponse? {
+        guard let tab, await tab.waitUntilSelected() else { return nil }
+        // The selected tab's page joins the window on SwiftUI's next update.
+        for _ in 0..<20 where webView.window == nil {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard let window = webView.window else { return nil }
+        return await alert.beginSheetModal(for: window)
+    }
+}
+
+/// Counts the JavaScript dialogs a page shows, so the user can block the rest once it has shown one, like Safari.
+struct DialogLimiter {
+    private(set) var count = 0
+    private(set) var isBlocked = false
+
+    var offersBlocking: Bool {
+        count > 0
+    }
+
+    mutating func didShow(blockingMore: Bool) {
+        count += 1
+        if blockingMore { isBlocked = true }
     }
 }

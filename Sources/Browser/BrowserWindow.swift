@@ -119,6 +119,11 @@ struct BrowserWindow: View {
 
     private func webView(for tab: BrowserTab) -> some View {
         PageHost(content: tab.contentView)
+            .overlay {
+                if let error = tab.loadError {
+                    PageErrorView(error: error, isLoading: tab.isLoading) { tab.retry() }
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if tab.isLoading {
                     GeometryReader { geometry in
@@ -150,7 +155,7 @@ struct BrowserWindow: View {
                 Button { browser.goBack() } label: {
                     Image(systemName: "chevron.left")
                 }
-                .disabled(!(tab?.canGoBack ?? false))
+                .disabled(!(tab?.canNavigateBack ?? false))
                 .help("Back (⌘[)")
                 .contextMenu {
                     historyMenu(for: Array((tab?.backList ?? []).reversed()))

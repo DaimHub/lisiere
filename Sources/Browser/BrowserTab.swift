@@ -31,6 +31,10 @@ final class BrowserTab: Identifiable {
     private(set) var hasOnlySecureContent = false
     private(set) var backList: [WKBackForwardListItem] = []
     private(set) var forwardList: [WKBackForwardListItem] = []
+    /// Why the page couldn't load, shown in place of it until another page loads.
+    private(set) var loadError: PageLoadError?
+    /// Whether the failed load left the previous page behind the error, so going back shows that page.
+    @ObservationIgnored private var loadErrorCoversPreviousPage = false
 
     @ObservationIgnored private let pageDelegate = PageDelegate()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
@@ -39,6 +43,8 @@ final class BrowserTab: Identifiable {
     /// The history and scroll position a suspended tab brings back when it's restored.
     @ObservationIgnored private var suspendedState: Any?
     private var faviconHost: String?
+    /// Panels the page is waiting to show until the tab is selected.
+    @ObservationIgnored private var selectionWaiters: [CheckedContinuation<Bool, Never>] = []
 
     /// Pass the configuration WebKit provides when a page opens a window, so the new page keeps its opener.
     init(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration()) {
@@ -82,7 +88,7 @@ final class BrowserTab: Identifiable {
 
         let options: NSKeyValueObservingOptions = isRestoring ? [] : .initial
         observe(webView, \.url, options) { tab, webView in
-            tab.url = webView.url
+            tab.url = tab.loadError?.url ?? webView.url
             // Same-document navigations don't load, but can still change the icon.
             if !webView.isLoading { tab.updateFavicon() }
         }
@@ -104,6 +110,7 @@ final class BrowserTab: Identifiable {
     /// Releases the web view, and with it the page's memory, keeping what the tab strip shows and the state to restore.
     func suspend() {
         guard let webView, !isNewTab else { return }
+        stopWaitingForSelection()
         suspendedState = webView.interactionState
         observations.forEach { $0.invalidate() }
         observations = []
@@ -131,12 +138,37 @@ final class BrowserTab: Identifiable {
         suspendedState = nil
     }
 
-    /// Whether suspending would lose nothing the page is doing: loading, using the camera or microphone, or being inspected.
-    /// Pages with unsaved form input aren't detected, since WebKit has no cheap way to ask; their history still restores.
+    /// Whether suspending would lose nothing the page is doing: loading, showing an error or waiting to show a panel,
+    /// using the camera or microphone, or being inspected. Pages with unsaved form input aren't detected, since WebKit
+    /// has no cheap way to ask; their history still restores.
     var canSuspend: Bool {
-        guard let webView, !isNewTab, !isLoading else { return false }
+        guard let webView, !isNewTab, !isLoading, loadError == nil, selectionWaiters.isEmpty else { return false }
+        #if DEBUG
+        if WebInspector.isOpen(for: webView) { return false }
+        #endif
         return webView.cameraCaptureState == .none && webView.microphoneCaptureState == .none
-            && !WebInspector.isOpen(for: webView)
+    }
+
+    /// Waits until the tab is selected, so a background page's panel can't take over the window.
+    /// Returns `false` if the tab is closed or suspended first.
+    func waitUntilSelected() async -> Bool {
+        guard let browser else { return false }
+        if browser.activeTabID == id { return true }
+        return await withCheckedContinuation { selectionWaiters.append($0) }
+    }
+
+    func didBecomeSelected() {
+        resumeSelectionWaiters(true)
+    }
+
+    func stopWaitingForSelection() {
+        resumeSelectionWaiters(false)
+    }
+
+    private func resumeSelectionWaiters(_ isSelected: Bool) {
+        let waiters = selectionWaiters
+        selectionWaiters = []
+        waiters.forEach { $0.resume(returning: isSelected) }
     }
 
     /// WebKit only answers this asynchronously, so it's checked separately from `canSuspend`.
@@ -153,7 +185,9 @@ final class BrowserTab: Identifiable {
         configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.preferences.isTextInteractionEnabled = true
+        #if DEBUG
         WebInspector.enableDeveloperExtras(in: configuration)
+        #endif
         return configuration
     }
 
@@ -187,13 +221,62 @@ final class BrowserTab: Identifiable {
     }
 
     var isSecure: Bool {
-        url?.scheme == "https" && hasOnlySecureContent
+        url?.scheme == "https" && hasOnlySecureContent && loadError == nil
+    }
+
+    /// Going back from an error that covers the previous page shows that page, which is still the current history item.
+    var canNavigateBack: Bool {
+        canGoBack || (loadError != nil && loadErrorCoversPreviousPage)
     }
 
     func load(_ url: URL) {
         isNewTab = false
         restore()
+        pageDelegate.isLoadingFromBrowser = true
         webView?.load(URLRequest(url: url))
+    }
+
+    func reload() {
+        if loadError != nil {
+            retry()
+        } else if let webView {
+            pageDelegate.isLoadingFromBrowser = true
+            webView.reload()
+        } else {
+            restore()
+        }
+    }
+
+    func goBack() {
+        if loadError != nil, loadErrorCoversPreviousPage {
+            clearLoadError()
+        } else {
+            webView?.goBack()
+        }
+    }
+
+    func showLoadError(_ error: PageLoadError, coversPreviousPage: Bool) {
+        loadError = error
+        loadErrorCoversPreviousPage = coversPreviousPage
+        url = error.url ?? url
+    }
+
+    func clearLoadError() {
+        guard loadError != nil else { return }
+        loadError = nil
+        loadErrorCoversPreviousPage = false
+        url = webView?.url
+    }
+
+    /// Loads the address that failed again, keeping the error up until a page loads.
+    func retry() {
+        guard let webView else { return }
+        pageDelegate.isLoadingFromBrowser = true
+        if let url = loadError?.url {
+            webView.load(URLRequest(url: url))
+        } else {
+            webView.reload()
+        }
     }
 
     /// Captures the visible page for hover cards. Only a web view that's on screen has anything to capture.

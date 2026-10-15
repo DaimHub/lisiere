@@ -109,10 +109,12 @@ private struct BrowserCommands: Commands {
                 }
             }
         }
+        #if DEBUG
         CommandMenu("Develop") {
             Button("Show Web Inspector") { browser?.showWebInspector() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(browser?.activeTab?.isNewTab != false)
         }
+        #endif
     }
 }

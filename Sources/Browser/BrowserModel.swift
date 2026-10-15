@@ -7,6 +7,7 @@ import WebKit
 @Observable
 final class BrowserModel {
     let downloads: DownloadManager
+    let sitePermissions: SitePermissions
 
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []
@@ -19,6 +20,7 @@ final class BrowserModel {
                 previousTab.lastActive = .now
             }
             activeTab?.restore()
+            activeTab?.didBecomeSelected()
         }
     }
     var addressFocusRequest = 0
@@ -31,8 +33,9 @@ final class BrowserModel {
         let interactionState: Any?
     }
 
-    init(downloads: DownloadManager = DownloadManager()) {
+    init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared) {
         self.downloads = downloads
+        self.sitePermissions = sitePermissions
         addTab()
         suspender = TabSuspender(browser: self)
     }
@@ -120,7 +123,9 @@ final class BrowserModel {
         }
     }
 
+    /// Remembers a closing tab so it can reopen, and dismisses the panels its page is waiting to show.
     private func rememberClosedTab(_ tab: BrowserTab) {
+        tab.stopWaitingForSelection()
         let isBlank = tab.isNewTab || tab.url == nil
         closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url, title: tab.pageTitle,
                                     interactionState: isBlank ? nil : tab.interactionState))
@@ -198,11 +203,7 @@ final class BrowserModel {
 
     func reloadTab(_ id: UUID) {
         guard let tab = tab(withID: id), !tab.isNewTab else { return }
-        if let webView = tab.webView {
-            webView.reload()
-        } else {
-            tab.restore()
-        }
+        tab.reload()
     }
 
     func stopLoading() {
@@ -210,7 +211,7 @@ final class BrowserModel {
     }
 
     func goBack() {
-        activeTab?.webView?.goBack()
+        activeTab?.goBack()
     }
 
     func goForward() {
@@ -225,10 +226,12 @@ final class BrowserModel {
         addressFocusRequest += 1
     }
 
+    #if DEBUG
     func showWebInspector() {
         guard let tab = activeTab, !tab.isNewTab, let webView = tab.webView else { return }
         WebInspector.show(for: webView)
     }
+    #endif
 
     /// Background tabs that can be suspended to free memory, least recently used first. A pop-up and its opener
     /// can script each other, so neither is suspended while both are open.
