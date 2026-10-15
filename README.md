@@ -52,3 +52,17 @@ Tab icons come from the icon links of the loaded page, read in a separate script
 | Show Web Inspector | ⌥⌘I |
 
 The in-app Web Inspector shortcut and the Inspect Element context menu item use private WebKit hooks because WebKit's public API only enables inspection through Safari's Develop menu. The Inspector docks inside the page or opens in its own window, and remembers which one you chose last. Each hook is checked before use, so the Inspector is simply unavailable if WebKit changes it. These hooks need review before distributing the app.
+
+## Contributing
+
+Contributions are welcome. See the [contributing guide](CONTRIBUTING.md); pull requests can only be merged once you agree to the [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).
+
+## License
+
+Copyright (C) 2026 Athas
+
+Browser is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+Browser is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+Athas may also distribute Browser under other terms, such as through the Mac App Store. The Contributor License Agreement gives Athas the rights to do so for contributed code.
