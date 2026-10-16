@@ -64,4 +64,49 @@ final class DefaultBrowserTests: XCTestCase {
         router.register(later)
         XCTAssertTrue(later.isBlank)
     }
+
+    func testExternalLinksAppendTabsAndPreserveExistingTabs() {
+        let router = ExternalURLRouter()
+        let browser = BrowserModel()
+        browser.openInNewTabs([URL(string: "https://example.com/existing")!])
+        let originalTab = browser.activeTab
+        router.register(browser)
+
+        router.open([URL(string: "http://example.com/one")!, URL(string: "https://example.com/two")!])
+        XCTAssertEqual(browser.tabs.count, 3)
+        XCTAssertTrue(browser.tabs.first === originalTab)
+        XCTAssertTrue(browser.activeTab === browser.tabs.last)
+
+        // Repeated user actions are separate tabs, even for the same URL.
+        router.open([URL(string: "https://example.com/two")!])
+        XCTAssertEqual(browser.tabs.count, 4)
+    }
+
+    func testClosedWindowIsNotAURLDestinationWhileItsModelIsStillAlive() {
+        let router = ExternalURLRouter()
+        let closed = BrowserModel()
+        router.register(closed)
+        router.unregister(closed)
+
+        router.open([URL(string: "https://example.com/new-window")!])
+        XCTAssertTrue(closed.isBlank)
+
+        let replacement = BrowserModel()
+        router.register(replacement)
+        XCTAssertFalse(replacement.isBlank)
+        XCTAssertEqual(replacement.tabs.count, 1)
+        XCTAssertTrue(closed.isBlank)
+    }
+
+    func testExternalLinksReuseNormalWindowWhenPrivateWindowIsRegisteredLast() {
+        let router = ExternalURLRouter()
+        let normal = BrowserModel()
+        let privateWindow = BrowserModel.makePrivate(downloads: DownloadManager())
+        router.register(normal)
+        router.register(privateWindow)
+
+        router.open([URL(string: "https://example.com/normal-only")!])
+        XCTAssertFalse(normal.isBlank)
+        XCTAssertTrue(privateWindow.isBlank)
+    }
 }

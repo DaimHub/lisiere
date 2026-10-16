@@ -1,38 +1,132 @@
 import AppKit
 import Observation
 import SwiftUI
-import UniformTypeIdentifiers
+
+/// Keeps Launch Services writes behind a user action and makes the flow testable without changing macOS.
+@MainActor
+protocol DefaultBrowserSystem {
+    func handlerIdentifier(for scheme: String) -> String?
+    func setDefault(for scheme: String) async throws
+    func openSettings() -> Bool
+}
+
+@MainActor
+struct WorkspaceDefaultBrowserSystem: DefaultBrowserSystem {
+    func handlerIdentifier(for scheme: String) -> String? {
+        guard let probe = URL(string: "\(scheme)://example.com"),
+              let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return nil }
+        return Bundle(url: handler)?.bundleIdentifier
+    }
+
+    func setDefault(for scheme: String) async throws {
+        try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: scheme)
+    }
+
+    func openSettings() -> Bool {
+        // Pane links can change between macOS releases; the root remains a useful fallback.
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension")!)
+            || NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:")!)
+    }
+}
 
 /// Whether macOS opens web links from other apps in this app, and asks it to.
 @MainActor
 @Observable
 final class DefaultBrowser {
-    private(set) var isDefault = false
-
-    func refresh() {
-        guard let probe = URL(string: "https://example.com"),
-              let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else {
-            isDefault = false
-            return
-        }
-        isDefault = Bundle(url: handler)?.bundleIdentifier == Bundle.main.bundleIdentifier
+    enum Status {
+        case unknown, notDefault, partial, defaultBrowser
     }
 
-    /// macOS asks the user to confirm before it changes the default browser.
-    func makeDefault() async {
-        let app = Bundle.main.bundleURL
-        do {
-            try await NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "http")
-            // macOS usually changes HTTPS along with HTTP, which would make asking again a second prompt.
-            refresh()
-            if !isDefault {
-                try await NSWorkspace.shared.setDefaultApplication(at: app, toOpenURLsWithScheme: "https")
-            }
-            try? await NSWorkspace.shared.setDefaultApplication(at: app, toOpen: .html)
-        } catch {
-            // The user kept their current browser.
+    enum Notice {
+        case cancelled, notCompleted, failed, settingsUnavailable
+    }
+
+    private(set) var status = Status.unknown
+    private(set) var isRequesting = false
+    private(set) var notice: Notice?
+    var isDefault: Bool { status == .defaultBrowser }
+
+    @ObservationIgnored private let system: any DefaultBrowserSystem
+    @ObservationIgnored private let bundleIdentifier: String?
+    @ObservationIgnored private var handlers: [String: String] = [:]
+    private static let schemes = ["http", "https"]
+
+    init(system: any DefaultBrowserSystem = WorkspaceDefaultBrowserSystem(),
+         bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
+        self.system = system
+        self.bundleIdentifier = bundleIdentifier
+    }
+
+    func refresh() {
+        handlers = [:]
+        for scheme in Self.schemes {
+            handlers[scheme] = system.handlerIdentifier(for: scheme)
         }
+        let previous = status
+        if let bundleIdentifier, !bundleIdentifier.isEmpty {
+            let matches = handlers.values.filter { $0 == bundleIdentifier }.count
+            switch matches {
+            case 2: status = .defaultBrowser
+            case 1: status = .partial
+            default: status = handlers.count == Self.schemes.count ? .notDefault : .unknown
+            }
+        } else {
+            status = .unknown
+        }
+        if status != previous || isDefault { notice = nil }
+    }
+
+    /// Only called after an explicit click. macOS may ask for consent before completing each request.
+    func makeDefault() async {
+        guard !isRequesting else { return }
         refresh()
+        guard !isDefault else { return }
+        guard let bundleIdentifier, !bundleIdentifier.isEmpty else {
+            notice = .failed
+            return
+        }
+        notice = nil
+        isRequesting = true
+        defer { isRequesting = false }
+        do {
+            for scheme in Self.schemes {
+                try Task.checkCancellation()
+                // macOS may change both schemes together. Recheck before requesting another confirmation.
+                refresh()
+                guard handlers[scheme] != bundleIdentifier else { continue }
+                try await system.setDefault(for: scheme)
+                refresh()
+                // A completed call alone is not proof of a changed association. Do not prompt again if
+                // the first request was declined without an error, or its result is not yet visible.
+                guard handlers[scheme] == bundleIdentifier else {
+                    notice = .notCompleted
+                    return
+                }
+            }
+            refresh()
+            if !isDefault { notice = .notCompleted }
+        } catch {
+            refresh()
+            if !isDefault { notice = Self.isCancellation(error) ? .cancelled : .failed }
+        }
+        // Local HTML/XHTML file associations are a separate preference; leave them alone.
+    }
+
+    func openSystemSettings() {
+        guard !isRequesting else { return }
+        notice = system.openSettings() ? nil : .settingsUnavailable
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let error = error as NSError
+        let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        let errors: [NSError?] = [error, underlying]
+        for case let candidate? in errors {
+            if candidate.domain == NSCocoaErrorDomain && candidate.code == NSUserCancelledError { return true }
+            if candidate.domain == NSOSStatusErrorDomain && candidate.code == -128 { return true } // userCanceledErr
+        }
+        return false
     }
 }
 
@@ -77,6 +171,11 @@ final class ExternalURLRouter {
         let urls = pendingURLs
         pendingURLs = []
         browser.openInNewTabs(urls)
+    }
+
+    /// SwiftUI can retain a closed window's view and model. Never send a link to that invisible window.
+    func unregister(_ browser: BrowserModel) {
+        browsers.removeAll { $0.browser == nil || $0.browser === browser }
     }
 
     func open(_ urls: [URL]) {

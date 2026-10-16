@@ -33,7 +33,11 @@ struct BrowserApp: App {
             BrowserWindow(bookmarks: bookmarks, downloads: downloads, history: history, session: session)
                 .frame(minWidth: 680, minHeight: 440)
                 .environment(browsingData)
+                // SwiftUI selects a scene before forwarding URLs to the app delegate. Without this,
+                // it creates a new window for every URL, even though our router can reuse an existing one.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
+        .handlesExternalEvents(matching: ["*"])
         .windowStyle(.hiddenTitleBar)
         // The session store reopens the windows with their tabs, so the system doesn't reopen them too.
         .restorationBehavior(.disabled)
@@ -47,6 +51,8 @@ struct BrowserApp: App {
                 .frame(minWidth: 680, minHeight: 440)
                 .environment(browsingData)
         }
+        // External links must create a normal window when only private windows remain.
+        .handlesExternalEvents(matching: [])
         .windowStyle(.hiddenTitleBar)
         .restorationBehavior(.disabled)
 

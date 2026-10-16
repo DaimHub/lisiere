@@ -44,13 +44,32 @@ private struct GeneralSettings: View {
             Section {
                 LabeledContent("Default web browser") {
                     if defaultBrowser.isDefault {
-                        Text("Lisière is your default web browser.")
+                        Label("Lisière is your default browser", systemImage: "checkmark.circle")
                             .foregroundStyle(.secondary)
                     } else {
-                        Button("Make Lisière the Default Browser") {
-                            Task { await defaultBrowser.makeDefault() }
+                        HStack {
+                            if defaultBrowser.isRequesting {
+                                ProgressView().controlSize(.small)
+                                    .accessibilityLabel("Waiting for macOS")
+                            }
+                            Button("Make Default…") {
+                                Task { await defaultBrowser.makeDefault() }
+                            }
+                            .disabled(defaultBrowser.isRequesting)
                         }
                     }
+                }
+                if !defaultBrowser.isDefault {
+                    Text(defaultBrowserDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open System Settings…") { defaultBrowser.openSystemSettings() }
+                        .disabled(defaultBrowser.isRequesting)
+                }
+            } footer: {
+                if !defaultBrowser.isDefault {
+                    Text("In System Settings, choose Desktop & Dock › Default web browser › Lisière.")
                 }
             }
 
@@ -88,6 +107,24 @@ private struct GeneralSettings: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             defaultBrowser.refresh()
         }
+    }
+
+    private var defaultBrowserDescription: String {
+        if defaultBrowser.isRequesting { return "Confirm your choice in macOS if asked." }
+        let status: String = switch defaultBrowser.status {
+        case .unknown: "macOS couldn’t confirm the current default browser."
+        case .notDefault: "Lisière isn’t your default web browser."
+        case .partial: "Lisière opens some web links by default, but not all."
+        case .defaultBrowser: "Lisière is your default web browser."
+        }
+        let notice: String? = switch defaultBrowser.notice {
+        case .cancelled: "The request was cancelled."
+        case .notCompleted: "macOS hasn’t applied the full change. Try System Settings."
+        case .failed: "The request couldn’t be completed. Try System Settings."
+        case .settingsUnavailable: "Open System Settings from the Apple menu to continue."
+        case nil: nil
+        }
+        return notice.map { "\(status) \($0)" } ?? status
     }
 }
 
