@@ -33,6 +33,9 @@ struct BrowserApp: App {
         .restorationBehavior(.disabled)
         .commands {
             BrowserCommands(profiles: profiles, updater: .shared)
+            #if DEBUG
+            BrowserDevelopmentCommands()
+            #endif
         }
 
         WindowGroup("Private Window", id: Self.privateWindowID) {
@@ -255,13 +258,6 @@ private struct BrowserCommands: Commands {
                 }
             }
         }
-        #if DEBUG
-        CommandMenu("Develop") {
-            Button("Show Web Inspector") { browser?.showWebInspector() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(browser?.activeTab?.isNewTab != false)
-        }
-        #endif
     }
 
     /// Sends an editing action to the focused page or text field.
@@ -273,3 +269,18 @@ private struct BrowserCommands: Commands {
         title.count > 60 ? String(title.prefix(59)) + "…" : title
     }
 }
+
+#if DEBUG
+/// Keep the development menu separate: older SDKs limit CommandsBuilder to ten children.
+private struct BrowserDevelopmentCommands: Commands {
+    @FocusedValue(\.browserModel) private var browser
+
+    var body: some Commands {
+        CommandMenu("Develop") {
+            Button("Show Web Inspector") { browser?.showWebInspector() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(browser?.activeTab?.isNewTab != false)
+        }
+    }
+}
+#endif
