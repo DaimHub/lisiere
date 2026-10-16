@@ -60,7 +60,7 @@ final class SitePermissionsTests: XCTestCase {
     }
 
     func testCameraAndMicrophoneAnswersAreSavedButDownloadsArent() async {
-        let suiteName = "dev.athas.browser.tests.permissions"
+        let suiteName = "io.github.daimhub.lisiere.tests.permissions"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         let permissions = SitePermissions(defaults: defaults)

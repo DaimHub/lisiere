@@ -2,7 +2,7 @@ import LocalAuthentication
 import SwiftUI
 import WebKit
 
-/// Browser ▸ Settings (⌘,).
+/// Lisière ▸ Settings (⌘,).
 struct SettingsView: View {
     let browsingData: BrowsingData
     let contentBlocker: ContentBlocker
@@ -44,10 +44,10 @@ private struct GeneralSettings: View {
             Section {
                 LabeledContent("Default web browser") {
                     if defaultBrowser.isDefault {
-                        Text("Browser is your default web browser.")
+                        Text("Lisière is your default web browser.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Button("Make Browser the Default Browser") {
+                        Button("Make Lisière the Default Browser") {
                             Task { await defaultBrowser.makeDefault() }
                         }
                     }
@@ -114,7 +114,7 @@ private struct PasswordSettings: View {
             Section {
                 Toggle(isOn: $passwords.offersToSave) {
                     Text("Offer to save passwords")
-                    Text("Browser asks after you sign in to a secure site, keeps passwords in your keychain, and "
+                    Text("Lisière asks after you sign in to a secure site, keeps passwords in your keychain, and "
                          + "fills them in on that site when you choose. Private windows never save or fill them.")
                 }
             }
@@ -162,7 +162,7 @@ private struct PasswordSettings: View {
                 passwords.remove(account)
             }
         } message: { account in
-            Text("Browser forgets the password for \(account.username.isEmpty ? "this site" : "“\(account.username)”") "
+            Text("Lisière forgets the password for \(account.username.isEmpty ? "this site" : "“\(account.username)”") "
                  + "on \(account.origin.host). It can’t be undone.")
         }
     }
@@ -210,7 +210,7 @@ private struct PasswordSettings: View {
     @ViewBuilder
     private var passkeyStatus: some View {
         if !passkeys.isEntitled {
-            Text("Signing in with passkeys and security keys isn’t available in this version of Browser yet.")
+            Text("Signing in with passkeys and security keys isn’t available in this version of Lisière yet.")
                 .foregroundStyle(.secondary)
         } else {
             switch passkeys.authorizationState {
@@ -222,7 +222,7 @@ private struct PasswordSettings: View {
                     Button("Allow…") { passkeys.requestAuthorizationIfNeeded() }
                 }
             default:
-                Text("Browser isn’t allowed to use your passkeys. You can allow it in System Settings.")
+                Text("Lisière isn’t allowed to use your passkeys. You can allow it in System Settings.")
                     .foregroundStyle(.secondary)
             }
         }

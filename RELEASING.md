@@ -1,4 +1,8 @@
-# Releasing
+# Releasing Lisière
+
+Local development needs no release credentials: use `make build` and `make test`. Public releases need Lisière's own signing identity and update keys; none are configured by this fork setup.
+
+The feed is `https://github.com/DaimHub/lisiere/releases/latest/download/appcast.xml`. Never point it at Athas's feed. Each release includes the corresponding app and Sparkle source archives, `LICENSE`, `NOTICE.md`, and `THIRD_PARTY_NOTICES.md` beside the binary.
 
 Pushing a version tag runs [the release workflow](.github/workflows/release.yml). It builds the Release configuration, signs it with the Developer ID certificate, notarizes and staples the app, makes a signed and notarized disk image, signs the update for Sparkle, adds it to the appcast, and publishes a GitHub release with the disk image and `appcast.xml`.
 
@@ -56,11 +60,13 @@ Set these in the repository's Settings ▸ Secrets and variables ▸ Actions.
 
 WebKit only lets an app use passkeys and security keys on any website if Apple grants it the `com.apple.developer.web-browser.public-key-credential` entitlement. The code is ready: builds with `BROWSER_PASSKEYS=YES` are signed with `Config/Browser-Passkeys.entitlements` (or `Config/BrowserAppStore-Passkeys.entitlements`), the app asks once for permission to use the user's passkeys, and Settings ▸ Passwords shows the state. Other builds leave the entitlement out, since an app signed with it but without a matching provisioning profile won't launch.
 
-1. The Account Holder fills in Apple's [macOS Browsers Passkeys request form](https://developer.apple.com/contact/request/macos-browsers-passkeys/) for the App ID `dev.athas.browser`. Apple requires that the app declares the `http` and `https` schemes (it does), shows a field for entering addresses on launch (it does), and opens links unchanged.
-2. Once Apple approves, the entitlement shows up as a managed capability for `dev.athas.browser` in Certificates, Identifiers & Profiles. Turn it on for the App ID.
-3. Create a **Developer ID** provisioning profile for `dev.athas.browser` that includes it, run `base64 -i Browser.provisionprofile | pbcopy`, and save it as `DEVELOPER_ID_PROVISIONING_PROFILE_BASE64`. The release workflow then builds with passkeys.
-4. For the Mac App Store, create a Mac App Store profile too and archive the `BrowserAppStore` scheme with `BROWSER_PASSKEYS=YES`.
+1. The Account Holder fills in Apple's [macOS Browsers Passkeys request form](https://developer.apple.com/contact/request/macos-browsers-passkeys/) for the App ID `io.github.daimhub.lisiere`. Apple requires that the app declares the `http` and `https` schemes (it does), shows a field for entering addresses on launch (it does), and opens links unchanged.
+2. Once Apple approves, the entitlement shows up as a managed capability for `io.github.daimhub.lisiere` in Certificates, Identifiers & Profiles. Turn it on for the App ID.
+3. Create a **Developer ID** provisioning profile for `io.github.daimhub.lisiere` that includes it, run `base64 -i Browser.provisionprofile | pbcopy`, and save it as `DEVELOPER_ID_PROVISIONING_PROFILE_BASE64`. The release workflow then builds with passkeys.
+4. For the Mac App Store, create a Mac App Store profile too and archive the `LisiereAppStore` scheme with `BROWSER_PASSKEYS=YES`.
 
 ## Mac App Store
 
-The `BrowserAppStore` target builds the same app with the `APP_STORE` flag and without Sparkle, which the store replaces. It isn't automated: archive the `BrowserAppStore` scheme in Xcode and upload it from the Organizer.
+The inherited target is retained for development. Athas's alternative licensing rights do not transfer to this fork. Do not submit this AGPL fork under incompatible store terms without the necessary permissions from all relevant copyright holders.
+
+The `LisiereAppStore` target builds the same app with the `APP_STORE` flag and without Sparkle, which the store replaces. It isn't automated: archive the `LisiereAppStore` scheme in Xcode and upload it from the Organizer.

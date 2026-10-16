@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class BookmarkStoreTests: XCTestCase {
     private func makeDefaults() -> UserDefaults {
-        let suiteName = "dev.athas.browser.tests.bookmarks"
+        let suiteName = "io.github.daimhub.lisiere.tests.bookmarks"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults

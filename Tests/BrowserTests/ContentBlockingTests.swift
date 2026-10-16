@@ -9,7 +9,7 @@ final class ContentBlockingTests: XCTestCase {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let suiteName = "dev.athas.browser.tests.content-blocker"
+        let suiteName = "io.github.daimhub.lisiere.tests.content-blocker"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults

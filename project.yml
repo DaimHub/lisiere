@@ -1,6 +1,6 @@
-name: Browser
+name: Lisiere
 options:
-  bundleIdPrefix: dev.athas
+  bundleIdPrefix: io.github.daimhub
   deploymentTarget:
     macOS: "26.0"
 settings:
@@ -21,16 +21,20 @@ targetTemplates:
     platform: macOS
     sources:
       - path: Sources/Browser
+      - path: LICENSE
+        buildPhase: resources
+      - path: NOTICE.md
+        buildPhase: resources
+      - path: Resources/Credits.rtf
+        buildPhase: resources
     settings:
       base:
-        PRODUCT_NAME: Browser
+        PRODUCT_NAME: Lisiere
+        # Keep the upstream Swift module and source paths to simplify future merges.
         PRODUCT_MODULE_NAME: Browser
-        PRODUCT_BUNDLE_IDENTIFIER: dev.athas.browser
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Browser
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
-        INFOPLIST_KEY_NSCameraUsageDescription: Websites you allow can use the camera, for example for video calls.
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: Websites you allow can use the microphone, for example for calls.
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere
+        # XcodeGen writes the complete plist below; preserve its Unicode product name.
+        GENERATE_INFOPLIST_FILE: NO
         ENABLE_APP_SANDBOX: YES
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_USER_SELECTED_FILES: readwrite
@@ -45,12 +49,18 @@ targetTemplates:
         PASSKEYS_ENTITLEMENTS_SUFFIX_YES: -Passkeys
 targets:
   # The Mac App Store build: the same app without Sparkle, which the store updates instead.
-  BrowserAppStore:
+  LisiereAppStore:
     templates:
       - BrowserApp
     info:
       path: Config/BrowserAppStore-Info.plist
       properties: &sharedInfo
+        CFBundleDisplayName: Lisière
+        CFBundleName: Lisière
+        LSApplicationCategoryType: public.app-category.productivity
+        NSCameraUsageDescription: Websites you allow can use the camera, for example for video calls.
+        NSMicrophoneUsageDescription: Websites you allow can use the microphone, for example for calls.
+        NSHumanReadableCopyright: "Copyright © 2026 Athas. Lisière modifications © 2026 David Nikolic."
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
@@ -74,7 +84,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Config/BrowserAppStore$(PASSKEYS_ENTITLEMENTS_SUFFIX_$(BROWSER_PASSKEYS)).entitlements
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) APP_STORE
   # Distributed directly with a Developer ID, and updated with Sparkle.
-  Browser:
+  Lisiere:
     templates:
       - BrowserApp
     sources:
@@ -95,18 +105,31 @@ targets:
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Config/Browser$(PASSKEYS_ENTITLEMENTS_SUFFIX_$(BROWSER_PASSKEYS)).entitlements
-        SPARKLE_FEED_URL: https://github.com/athasdev/browser/releases/latest/download/appcast.xml
+        SPARKLE_FEED_URL: https://github.com/DaimHub/lisiere/releases/latest/download/appcast.xml
         # PLACEHOLDER, not a real key: replace it with the public key Sparkle's generate_keys prints (see
         # RELEASING.md). Updates stay off until it's set; the release workflow can also pass it in.
         SPARKLE_PUBLIC_ED_KEY: REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY
-  BrowserTests:
+  LisiereTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: Tests/BrowserTests
     dependencies:
-      - target: Browser
+      - target: Lisiere
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.athas.browser.tests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere.tests
         GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Lisiere:
+    build:
+      targets:
+        Lisiere: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LisiereTests
+    archive:
+      config: Release

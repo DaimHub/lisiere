@@ -5,7 +5,7 @@ import Synchronization
 /// main thread.
 final class StoreFile: Sendable {
     let url: URL
-    private let queue = DispatchQueue(label: "dev.athas.browser.store-file", qos: .utility)
+    private let queue = DispatchQueue(label: "io.github.daimhub.lisiere.store-file", qos: .utility)
     /// The latest write asked for, so a write that a newer one overtakes is skipped.
     private let latestWrite = Mutex(0)
 
@@ -15,7 +15,7 @@ final class StoreFile: Sendable {
 
     static func applicationSupport(named name: String) -> StoreFile {
         StoreFile(url: URL.applicationSupportDirectory
-            .appending(path: Bundle.main.bundleIdentifier ?? "dev.athas.browser")
+            .appending(path: Bundle.main.bundleIdentifier ?? "io.github.daimhub.lisiere")
             .appending(path: name))
     }
 

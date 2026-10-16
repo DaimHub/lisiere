@@ -4,7 +4,7 @@ import XCTest
 final class UpdateFeatureTests: XCTestCase {
     /// 32 bytes shaped like an Ed25519 public key. Not a real key.
     private let wellFormedKey = Data(repeating: 7, count: 32).base64EncodedString()
-    private let feed = "https://github.com/athasdev/browser/releases/latest/download/appcast.xml"
+    private let feed = "https://github.com/DaimHub/lisiere/releases/latest/download/appcast.xml"
 
     func testUpdatesNeedAnHTTPSFeedAndARealPublicKey() {
         XCTAssertTrue(UpdateFeature.isEnabled(info: ["SUFeedURL": feed, "SUPublicEDKey": wellFormedKey],
@@ -33,6 +33,7 @@ final class UpdateFeatureTests: XCTestCase {
         XCTAssertEqual((info["SUFeedURL"] as? String).flatMap(URL.init(string:))?.scheme, "https")
         XCTAssertEqual(info["SUEnableInstallerLauncherService"] as? Bool, true)
         XCTAssertNotNil(info["SUPublicEDKey"] as? String)
+        XCTAssertEqual(info["SUFeedURL"] as? String, feed)
     }
 
     @MainActor

@@ -141,7 +141,7 @@ enum FaviconStore {
     }
 
     static var cache = FaviconCache(directory: URL.cachesDirectory
-        .appending(path: Bundle.main.bundleIdentifier ?? "dev.athas.browser")
+        .appending(path: Bundle.main.bundleIdentifier ?? "io.github.daimhub.lisiere")
         .appending(path: "Favicons"))
     private static var icons: [String: Icon] = [:]
     private static var requests: [String: Task<Icon?, Never>] = [:]

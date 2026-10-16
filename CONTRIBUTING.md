@@ -1,37 +1,22 @@
-# Contributing to Browser
+# Contributing to Lisière
 
-Thank you for contributing! Please check existing issues and pull requests before creating new ones.
+Lisière is maintained at [DaimHub/lisiere](https://github.com/DaimHub/lisiere), independently of [Athas Browser](https://github.com/athasdev/browser).
 
-## Setup
+## Development
 
-Browser requires macOS 26 or later, Xcode 26 or later, and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+1. Install the requirements in the README and run `make generate`.
+2. Create a branch for a focused change.
+3. Follow the existing SwiftUI, AppKit, and WebKit patterns. Keep browser behavior owned by the existing models and delegates.
+4. Run `make test` and `make build`.
+5. For interface changes, launch the Release app and check the changed interaction, keyboard access, and both tab layouts as applicable.
+6. Open a pull request against **DaimHub/lisiere**, describing the behavior change and validation.
 
-```sh
-xcodegen generate
-xcodebuild -project Browser.xcodeproj -scheme Browser -configuration Debug -derivedDataPath DerivedData build CODE_SIGNING_ALLOWED=NO
-open DerivedData/Build/Products/Debug/Browser.app
-```
+Do not commit generated Xcode projects, DerivedData, personal browser data, signing certificates, private keys, or credentials. Update documentation and the changelog when behavior or build requirements change.
 
-Run the tests with:
+## Licensing
 
-```sh
-xcodebuild -project Browser.xcodeproj -scheme Browser -derivedDataPath DerivedData test CODE_SIGNING_ALLOWED=NO
-```
+By submitting a contribution for inclusion in Lisière, you license that contribution under **AGPL-3.0-or-later**. You retain copyright. No separate CLA, copyright assignment, or proprietary relicensing grant is requested.
 
-## Before Submitting
+Only contribute material you have the right to license. Identify third-party sources and preserve their notices. Keep the original Athas attribution and the unmodified AGPL text.
 
-1. The app builds and the tests pass
-2. Rebase on main: `git rebase origin/main`
-3. Squash commits into logical units
-4. Update the README if behavior or shortcuts change
-5. Read and agree to the [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md) by checking the box in the pull request
-
-## Contributor License Agreement
-
-Browser is licensed under the AGPL-3.0, and Athas also distributes it under other terms, such as through the Mac App Store. The Contributor License Agreement gives Athas the rights to include your contribution in both. You keep the copyright in your work. Pull requests without the agreement checked can't be merged.
-
-## Guidelines
-
-- Follow the existing code style
-- Use descriptive commit messages (e.g., "Add tab shortcuts")
-- One logical change per commit
+The original Athas CLA is archived at [docs/upstream/CONTRIBUTOR_LICENSE_AGREEMENT.md](docs/upstream/CONTRIBUTOR_LICENSE_AGREEMENT.md) for provenance. It is not Lisière's contribution agreement. Contributions sent separately to Athas are subject to that project's own contribution process.

@@ -1,11 +1,13 @@
 ## Summary
 
-<!-- What does this change and why? -->
+<!-- What changes and why? -->
 
-## Testing
+## Validation
 
-<!-- How did you check it? -->
+<!-- Tests and native app checks performed. -->
 
-## Contributor License Agreement
+## Contribution checklist
 
-- [ ] I have read the [Contributor License Agreement](https://github.com/athasdev/browser/blob/main/CONTRIBUTOR_LICENSE_AGREEMENT.md) and agree to it for this and my later contributions.
+- [ ] I have the right to contribute these changes under AGPL-3.0-or-later.
+- [ ] I preserved attribution and identified third-party material.
+- [ ] I ran relevant tests and checked changed UI behavior in the native app.

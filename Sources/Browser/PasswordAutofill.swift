@@ -159,7 +159,7 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
         switch offer {
         case .save:
             alert.messageText = "Save your password for “\(site)”?"
-            alert.informativeText = "Browser keeps it in your keychain, and can fill it in when you sign in to "
+            alert.informativeText = "Lisière keeps it in your keychain, and can fill it in when you sign in to "
                 + "this site again. You can see it in Settings ▸ Passwords."
             alert.addButton(withTitle: "Save Password")
         case .update:

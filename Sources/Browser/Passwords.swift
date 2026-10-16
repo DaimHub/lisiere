@@ -63,7 +63,7 @@ enum PasswordStorageError: Error {
 /// The data protection keychain would need a provisioning profile in every build.
 final class KeychainPasswordStorage: PasswordStorage {
     /// Marks the items this app saves, so it never lists or reads another app's.
-    private static let itemDescription = "Browser website password"
+    private static let itemDescription = "io.github.daimhub.lisiere website password"
 
     private func query(for origin: PasswordOrigin? = nil, username: String? = nil) -> [String: Any] {
         var query: [String: Any] = [

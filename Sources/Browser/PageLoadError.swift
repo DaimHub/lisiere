@@ -77,16 +77,16 @@ struct PageLoadError: Equatable {
         case .offline:
             "This page can’t be shown because your Mac isn’t connected to the internet."
         case .serverNotFound:
-            "Browser can’t open the page because it can’t find the server “\(host)”."
+            "Lisière can’t open the page because it can’t find the server “\(host)”."
         case .cannotConnect:
-            "Browser can’t open the page because it can’t connect to the server “\(host)”."
+            "Lisière can’t open the page because it can’t connect to the server “\(host)”."
         case .timedOut:
             "“\(host)” took too long to respond."
         case .invalidCertificate:
             "The certificate for “\(host)” isn’t valid. The site may be impersonating “\(host)” to steal "
-                + "your personal or financial information, so Browser won’t open it."
+                + "your personal or financial information, so Lisière won’t open it."
         case .secureConnectionFailed:
-            "Browser can’t establish a secure connection to the server “\(host)”."
+            "Lisière can’t establish a secure connection to the server “\(host)”."
         case .other(let description):
             description
         }

@@ -66,7 +66,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         let alert = NSAlert()
         alert.messageText = site.isEmpty ? "Allow this page to download files?" : "Allow “\(site)” to download files?"
         alert.informativeText = "The page is trying to download a file you didn’t click. If you allow it, "
-            + "the site can download files until you quit Browser."
+            + "the site can download files until you quit Lisière."
         alert.addButton(withTitle: "Don’t Allow")
         alert.addButton(withTitle: "Allow")
         return await present(alert, in: webView).map { $0 == .alertSecondButtonReturn }

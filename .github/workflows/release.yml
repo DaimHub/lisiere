@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.repository == 'DaimHub/lisiere'
     runs-on: macos-26
     timeout-minutes: 90
     env:
@@ -59,7 +60,7 @@ jobs:
             echo "BUILD_NUMBER=$(git rev-list --count HEAD)"
             echo "SPARKLE_PUBLIC_KEY=$public_key"
             echo "SPARKLE_VERSION=$(awk '/exactVersion:/ { print $2 }' project.yml)"
-            echo "DMG=Browser-$version.dmg"
+            echo "DMG=Lisiere-$version.dmg"
           } >> "$GITHUB_ENV"
 
       - name: Install XcodeGen
@@ -115,11 +116,13 @@ jobs:
             profile_settings=(PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME")
           fi
           xcodebuild archive \
-            -project Browser.xcodeproj \
-            -scheme Browser \
+            -packageAuthorizationProvider netrc \
+            -project Lisiere.xcodeproj \
+            -scheme Lisiere \
+            -clonedSourcePackagesDirPath "$BUILD_DIR/SourcePackages" \
             -configuration Release \
             -destination "generic/platform=macOS" \
-            -archivePath "$BUILD_DIR/Browser.xcarchive" \
+            -archivePath "$BUILD_DIR/Lisiere.xcarchive" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_KEY" \
@@ -138,14 +141,14 @@ jobs:
             -c "Add :teamID string $TEAM_ID" "$options"
           if [ "$BROWSER_PASSKEYS" = YES ]; then
             /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" \
-              -c "Add :provisioningProfiles:dev.athas.browser string $PROFILE_NAME" "$options"
+              -c "Add :provisioningProfiles:io.github.daimhub.lisiere string $PROFILE_NAME" "$options"
           fi
           xcodebuild -exportArchive \
-            -archivePath "$BUILD_DIR/Browser.xcarchive" \
+            -archivePath "$BUILD_DIR/Lisiere.xcarchive" \
             -exportPath "$BUILD_DIR/export" \
             -exportOptionsPlist "$options"
 
-          app="$BUILD_DIR/export/Browser.app"
+          app="$BUILD_DIR/export/Lisiere.app"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --display --entitlements - "$app"
           echo "APP=$app" >> "$GITHUB_ENV"
@@ -157,8 +160,8 @@ jobs:
           API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
         run: |
           echo "$API_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
-          ditto -c -k --keepParent "$APP" "$BUILD_DIR/Browser.zip"
-          xcrun notarytool submit "$BUILD_DIR/Browser.zip" --wait \
+          ditto -c -k --keepParent "$APP" "$BUILD_DIR/Lisiere.zip"
+          xcrun notarytool submit "$BUILD_DIR/Lisiere.zip" --wait \
             --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
           xcrun stapler staple "$APP"
 
@@ -170,9 +173,9 @@ jobs:
         run: |
           staging="$BUILD_DIR/dmg"
           mkdir -p "$staging" "$BUILD_DIR/release"
-          ditto "$APP" "$staging/Browser.app"
+          ditto "$APP" "$staging/Lisiere.app"
           ln -s /Applications "$staging/Applications"
-          hdiutil create -volname Browser -srcfolder "$staging" -fs HFS+ -format UDZO -ov \
+          hdiutil create -volname Lisiere -srcfolder "$staging" -fs HFS+ -format UDZO -ov \
             "$BUILD_DIR/release/$DMG"
           codesign --sign "Developer ID Application" --keychain "$KEYCHAIN" --timestamp "$BUILD_DIR/release/$DMG"
           xcrun notarytool submit "$BUILD_DIR/release/$DMG" --wait \
@@ -200,6 +203,13 @@ jobs:
             "$BUILD_DIR/release"
           cat "$BUILD_DIR/release/appcast.xml"
 
+      - name: Include corresponding source and notices
+        run: |
+          git archive --format=tar.gz --prefix="lisiere-$VERSION/" --output="$BUILD_DIR/release/lisiere-$VERSION-source.tar.gz" "$TAG"
+          git -C "$BUILD_DIR/SourcePackages/checkouts/Sparkle" archive --format=tar.gz \
+            --prefix="Sparkle-$SPARKLE_VERSION/" --output="$BUILD_DIR/release/Sparkle-$SPARKLE_VERSION-source.tar.gz" HEAD
+          cp LICENSE NOTICE.md THIRD_PARTY_NOTICES.md "$BUILD_DIR/release/"
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -209,7 +219,10 @@ jobs:
             prerelease=(--prerelease)
           fi
           gh release create "$TAG" "$BUILD_DIR/release/$DMG" "$BUILD_DIR/release/appcast.xml" \
-            --repo "$REPOSITORY" --title "Browser $VERSION" --generate-notes --verify-tag "${prerelease[@]}"
+            "$BUILD_DIR/release/lisiere-$VERSION-source.tar.gz" \
+            "$BUILD_DIR/release/Sparkle-$SPARKLE_VERSION-source.tar.gz" \
+            "$BUILD_DIR/release/LICENSE" "$BUILD_DIR/release/NOTICE.md" "$BUILD_DIR/release/THIRD_PARTY_NOTICES.md" \
+            --repo "$REPOSITORY" --title "Lisiere $VERSION" --generate-notes --verify-tag "${prerelease[@]}"
 
       - name: Remove the signing keychain and keys
         if: always()

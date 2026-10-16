@@ -172,13 +172,15 @@ final class PasswordTests: XCTestCase {
             "origin": "https://evil.example", "username": "alice", "secret": "secret",
         ], in: nil, contentWorld: PasswordAutofill.world)
         XCTAssertEqual(refused as? Bool, false)
-        XCTAssertEqual(try await webView.evaluateJavaScript(values) as? [String], ["", ""])
+        let refusedValues = try await webView.evaluateJavaScript(values) as? [String]
+        XCTAssertEqual(refusedValues, ["", ""])
 
         let filled = try await webView.callAsyncJavaScript(PasswordAutofill.fillScript, arguments: [
             "origin": example.description, "username": "alice", "secret": "secret",
         ], in: nil, contentWorld: PasswordAutofill.world)
         XCTAssertEqual(filled as? Bool, true)
-        XCTAssertEqual(try await webView.evaluateJavaScript(values) as? [String], ["alice", "secret"])
+        let filledValues = try await webView.evaluateJavaScript(values) as? [String]
+        XCTAssertEqual(filledValues, ["alice", "secret"])
     }
 
     func testPageScriptsCantReachTheAutofillHandler() async throws {

@@ -1,0 +1,14 @@
+# Changelog
+
+## 0.1.0 — 2026-10-16
+
+Initial independent fork of Athas Browser at `f7a7e4c6232aa9c8ca2e9c926fa3d79efc9953b5`.
+
+- Name the app Lisière and isolate its bundle identifier, storage fallbacks, and keychain marker.
+- Point updates at DaimHub/lisiere; keep them disabled until a fork-specific key is configured.
+- Retain AGPL-3.0-or-later, Athas credits, upstream history, and third-party notices.
+- Bundle the license and credits in the app.
+- Add Make commands, an explicit test scheme, macOS CI, and guidance for future development. The signed test host permits process termination; the Release app retains its sandbox and hardened runtime.
+- Adapt the release workflow and include corresponding source and notices with each release.
+- Use AGPL contributions without a separate CLA; archive the upstream agreement for provenance.
+- Await JavaScript results before XCTest assertions in the inherited password-origin test, preserving its checks.

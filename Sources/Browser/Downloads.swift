@@ -189,7 +189,7 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
     /// Marks the file as downloaded from the web, so Gatekeeper checks it before it's opened.
     private func quarantine(_ url: URL, from sourceURL: URL?) {
         var properties: [String: Any] = [
-            kLSQuarantineAgentNameKey as String: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") ?? "Browser",
+            kLSQuarantineAgentNameKey as String: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") ?? "Lisière",
             kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload as String,
         ]
         if let sourceURL { properties[kLSQuarantineDataURLKey as String] = sourceURL }
