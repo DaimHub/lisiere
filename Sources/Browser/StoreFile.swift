@@ -8,6 +8,7 @@ final class StoreFile: Sendable {
     private let queue = DispatchQueue(label: "io.github.daimhub.lisiere.store-file", qos: .utility)
     /// The latest write asked for, so a write that a newer one overtakes is skipped.
     private let latestWrite = Mutex(0)
+    private let writesDisabled = Mutex(false)
 
     init(url: URL) {
         self.url = url
@@ -49,7 +50,14 @@ final class StoreFile: Sendable {
         queue.sync { save(data) }
     }
 
+    /// Drain queued writes before explicit profile deletion; late store callbacks cannot recreate its files.
+    func disableWrites() {
+        writesDisabled.withLock { $0 = true }
+        queue.sync {}
+    }
+
     private func save(_ data: Data) {
+        guard !writesDisabled.withLock({ $0 }) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
     }

@@ -4,6 +4,8 @@ import WebKit
 
 /// Lisière ▸ Settings (⌘,).
 struct SettingsView: View {
+    var profileID: UUID? = nil
+    var profileName: String? = nil
     let browsingData: BrowsingData
     let contentBlocker: ContentBlocker
     let sitePermissions: SitePermissions
@@ -18,11 +20,14 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             AppearanceSettings()
                 .tabItem { Label("Appearance", systemImage: "macwindow") }
-            PrivacySettings(browsingData: browsingData, contentBlocker: contentBlocker)
+            PrivacySettings(browsingData: browsingData, contentBlocker: contentBlocker, profileName: profileName)
+                .id("privacy-\(profileID?.uuidString ?? "")")
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
             PasswordSettings(passwords: passwords, passkeys: passkeys)
+                .id("passwords-\(profileID?.uuidString ?? "")")
                 .tabItem { Label("Passwords", systemImage: "key") }
             SiteSettings(contentBlocker: contentBlocker, sitePermissions: sitePermissions, zoomLevels: zoomLevels)
+                .id("sites-\(profileID?.uuidString ?? "")")
                 .tabItem { Label("Site Settings", systemImage: "globe") }
             DownloadSettings()
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
@@ -35,11 +40,10 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @Bindable var updater: AppUpdater
     @State private var defaultBrowser = DefaultBrowser()
-    @AppStorage(SearchEngine.storageKey) private var searchEngine = SearchEngine.google
-    @AppStorage(NewTabPage.storageKey) private var newTabPage = NewTabPage.startPage
-    @AppStorage(SessionPreferences.restoresWindowsKey) private var restoresWindows = true
+    @Environment(ProfilePreferences.self) private var preferences
 
     var body: some View {
+        @Bindable var preferences = preferences
         Form {
             Section {
                 LabeledContent("Default web browser") {
@@ -74,17 +78,17 @@ private struct GeneralSettings: View {
             }
 
             Section {
-                Picker("Search engine", selection: $searchEngine) {
+                Picker("Search engine", selection: $preferences.searchEngine) {
                     ForEach(SearchEngine.allCases) { engine in
                         Text(engine.title).tag(engine)
                     }
                 }
-                Picker("New tabs open with", selection: $newTabPage) {
+                Picker("New tabs open with", selection: $preferences.newTabPage) {
                     ForEach(NewTabPage.allCases) { page in
                         Text(page.title).tag(page)
                     }
                 }
-                Toggle(isOn: $restoresWindows) {
+                Toggle(isOn: $preferences.restoresWindows) {
                     Text("Reopen windows from last session on launch")
                     Text("When off, History ▸ Reopen All Windows from Last Session opens them.")
                 }
@@ -291,12 +295,12 @@ private struct PasswordSettings: View {
 
 private struct AppearanceSettings: View {
     @Bindable private var appearance = AppearanceStore.shared
-    @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
-    @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
     @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
+    @Environment(ProfilePreferences.self) private var preferences
 
     var body: some View {
+        @Bindable var preferences = preferences
         Form {
             Picker("App theme", selection: $appearance.selection) {
                 ForEach(BrowserAppearance.allCases) { theme in
@@ -321,12 +325,12 @@ private struct AppearanceSettings: View {
             Text("Websites use this preference when they support it. Their colors aren’t forced.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Picker("Tabs", selection: $tabLayout) {
+            Picker("Tabs", selection: $preferences.tabLayout) {
                 ForEach(TabLayout.allCases) { layout in
                     Text(layout.title).tag(layout)
                 }
             }
-            Picker("Bookmarks bar", selection: $bookmarksBarVisibility) {
+            Picker("Bookmarks bar", selection: $preferences.bookmarksBarVisibility) {
                 ForEach(BookmarksBarVisibility.allCases) { visibility in
                     Text(visibility.title).tag(visibility)
                 }
@@ -391,6 +395,7 @@ private struct AppearanceSettings: View {
 private struct PrivacySettings: View {
     let browsingData: BrowsingData
     let contentBlocker: ContentBlocker
+    let profileName: String?
     @State private var isShowingClearData = false
     @State private var query = ""
     @State private var isConfirmingRemoveAll = false
@@ -450,7 +455,7 @@ private struct PrivacySettings: View {
         }
         .task { await browsingData.loadSiteRecords() }
         .sheet(isPresented: $isShowingClearData) {
-            ClearDataView(data: browsingData)
+            ClearDataView(data: browsingData, profileName: profileName)
         }
         .confirmationDialog("Remove data stored by all websites?", isPresented: $isConfirmingRemoveAll) {
             Button("Remove All", role: .destructive) {
@@ -566,11 +571,12 @@ private struct SiteSettings: View {
 }
 
 private struct DownloadSettings: View {
-    @AppStorage(DownloadPreferences.asksWhereToSaveKey) private var asksWhereToSave = false
+    @Environment(ProfilePreferences.self) private var preferences
 
     var body: some View {
+        @Bindable var preferences = preferences
         Form {
-            Toggle(isOn: $asksWhereToSave) {
+            Toggle(isOn: $preferences.asksWhereToSave) {
                 Text("Ask where to save each download")
                 Text("When off, downloads save to the Downloads folder.")
             }

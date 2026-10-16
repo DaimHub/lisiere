@@ -131,11 +131,11 @@ final class FaviconTests: XCTestCase {
 
     func testReadsAndLoadsTheIconsOfAnOpenPage() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "FaviconTests-\(UUID().uuidString)")
-        let originalCache = FaviconStore.cache
-        FaviconStore.cache = FaviconCache(directory: directory)
+        let originalCache = FaviconStore.shared.cache
+        FaviconStore.shared.cache = FaviconCache(directory: directory)
         addTeardownBlock {
             try? FileManager.default.removeItem(at: directory)
-            await MainActor.run { FaviconStore.cache = originalCache }
+            await MainActor.run { FaviconStore.shared.cache = originalCache }
         }
         let iconURL = "data:image/png;base64,\(Self.pixelPNG)"
         let pageURL = URL(string: "https://favicon-test.invalid/app/")!
@@ -147,9 +147,9 @@ final class FaviconTests: XCTestCase {
         let candidates = await FaviconStore.candidates(in: webView)
         XCTAssertEqual(candidates, [FaviconCandidate(url: URL(string: iconURL)!)])
 
-        let icon = await FaviconStore.icon(forPage: pageURL, candidates: candidates)
+        let icon = await FaviconStore.shared.icon(forPage: pageURL, candidates: candidates)
         XCTAssertNotNil(icon)
-        XCTAssertNotNil(FaviconStore.cachedIcon(for: pageURL))
-        XCTAssertEqual(FaviconStore.cache.entry(forHost: "favicon-test.invalid")?.source, URL(string: iconURL))
+        XCTAssertNotNil(FaviconStore.shared.cachedIcon(for: pageURL))
+        XCTAssertEqual(FaviconStore.shared.cache.entry(forHost: "favicon-test.invalid")?.source, URL(string: iconURL))
     }
 }

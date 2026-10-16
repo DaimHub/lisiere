@@ -14,7 +14,10 @@ struct TabStrip: View {
     let layout: TabLayout
     let isFullScreen: Bool
     @Binding var hoverCardTabID: UUID?
-    @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
+    private var tabLayout: TabLayout {
+        get { browser.preferences.tabLayout }
+        nonmutating set { browser.preferences.tabLayout = newValue }
+    }
 
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?

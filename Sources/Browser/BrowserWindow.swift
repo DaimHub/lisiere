@@ -10,9 +10,11 @@ private struct AddressBarFrameKey: PreferenceKey {
 }
 
 struct BrowserWindow: View {
+    let profiles: ProfileStore
+    let profileID: UUID
     let bookmarks: BookmarkStore
     let session: SessionStore?
-    @State private var browser: BrowserModel
+    @Bindable private var browser: BrowserModel
     @State private var address = ""
     /// What the user typed, without the inline completion.
     @State private var typedAddress = ""
@@ -27,10 +29,9 @@ struct BrowserWindow: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @Environment(BrowsingData.self) private var browsingData
-    @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
-    @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
-
-    private let contentBlocker = ContentBlocker.shared
+    private var bookmarksBarVisibility: BookmarksBarVisibility { browser.preferences.bookmarksBarVisibility }
+    private var tabLayout: TabLayout { browser.preferences.tabLayout }
+    private var contentBlocker: ContentBlocker { browser.contentBlocker }
 
     private var accent: Color {
         if browser.isPrivate {
@@ -41,15 +42,13 @@ struct BrowserWindow: View {
         return Color(red: 0.38, green: 0.49, blue: 0.54)
     }
 
-    /// Pass `nil` for the history and session of a window whose pages aren't remembered. A private window keeps
-    /// its cookies and site data apart from other windows, and only until it closes.
-    init(bookmarks: BookmarkStore, downloads: DownloadManager, history: HistoryStore?, session: SessionStore?,
-         isPrivate: Bool = false) {
+    init(bookmarks: BookmarkStore, context: ProfileContext, profiles: ProfileStore,
+         browser: BrowserModel) {
         self.bookmarks = bookmarks
-        self.session = isPrivate ? nil : session
-        _browser = State(initialValue: isPrivate ? .makePrivate(downloads: downloads)
-                                                 : BrowserModel(downloads: downloads, history: history,
-                                                                passwords: .shared))
+        self.profiles = profiles
+        self.profileID = context.id
+        self.session = browser.isPrivate ? nil : context.session
+        self.browser = browser
     }
 
     var body: some View {
@@ -58,6 +57,7 @@ struct BrowserWindow: View {
             if tabLayout == .vertical {
                 TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
                          hoverCardTabID: $hoverCardTabID)
+                    .background(profileSwipeArea)
                     .frame(width: BrowserChrome.sidebarWidth)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
@@ -65,7 +65,8 @@ struct BrowserWindow: View {
                 if tabLayout == .horizontal {
                     TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
                              hoverCardTabID: $hoverCardTabID)
-                        .transition(.opacity)
+                        .background(profileSwipeArea)
+                                .transition(.opacity)
                 }
                 mainColumn
             }
@@ -90,7 +91,9 @@ struct BrowserWindow: View {
                                              isFullScreen: $isFullScreen,
                                              onWindowChange: { [browser] in browser.window = $0 }) {
             session?.detach(browser)
+            profiles.unregister(browser)
             ExternalURLRouter.shared.unregister(browser)
+            browser.releaseClosedWindow()
         })
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
@@ -108,7 +111,7 @@ struct BrowserWindow: View {
             }
         }
         .sheet(isPresented: $browser.isShowingClearData) {
-            ClearDataView(data: browsingData)
+            ClearDataView(data: browsingData, profileName: profiles.name(profileID))
         }
         .sheet(isPresented: $browser.isShowingHistory) {
             if let history = browser.history {
@@ -118,16 +121,29 @@ struct BrowserWindow: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+            guard let window = notification.object as? NSWindow, window === browser.window else { return }
+            do { try profiles.select(profileID) } catch { profiles.errorMessage = error.localizedDescription }
+        }
         .onAppear {
+            profiles.register(browser)
             if let session {
                 for _ in 0..<session.attach(browser) {
-                    openWindow(id: BrowserApp.windowID)
+                    openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID))
                 }
             }
+            if !browser.isPrivate { profiles.restoreOtherProfiles(except: profileID, openWindow: openWindow) }
             ExternalURLRouter.shared.register(browser, openWindow: openWindow)
             if browser.activeTab?.isNewTab == true {
                 browser.requestAddressFocus()
             }
+        }
+    }
+
+    private var profileSwipeArea: some View {
+        ProfileSwipeArea(enabled: profiles.availableProfiles.count > 1) { direction in
+            hoverCardTabID = nil
+            profiles.switchProfile(from: profileID, direction: direction, openWindow: openWindow)
         }
     }
 
@@ -348,6 +364,25 @@ struct BrowserWindow: View {
             .padding(2)
             .background(Color.primary.opacity(0.035),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Menu {
+                Text("Profile: \(profiles.name(profileID))")
+                ForEach(profiles.availableProfiles) { profile in
+                    Button { profiles.activate(profile.id, openWindow: openWindow) } label: {
+                        Label(profile.name, systemImage: profile.icon.rawValue)
+                    }
+                }
+                Divider()
+                Button("Manage Profiles…") { openWindow(id: BrowserApp.profilesWindowID) }
+            } label: {
+                Label(profiles.name(profileID), systemImage: profiles.profile(profileID)?.icon.rawValue ?? "person.crop.circle")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 110)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .help("Profile: \(profiles.name(profileID))")
+            .accessibilityLabel("Profile: \(profiles.name(profileID))")
 
             if browser.isPrivate {
                 privateLabel

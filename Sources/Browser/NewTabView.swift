@@ -7,7 +7,7 @@ struct NewTabView: View {
     let browser: BrowserModel
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
-    @AppStorage(NewTabPage.storageKey) private var page = NewTabPage.startPage
+    private var page: NewTabPage { browser.preferences.newTabPage }
     @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
     @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
 

@@ -34,15 +34,27 @@ final class DownloadItem: Identifiable {
     }
 }
 
-/// Downloads from every window, saved to the Downloads folder or where the user chooses.
+/// Downloads from the windows of one profile, saved to the Downloads folder or where the user chooses.
 @MainActor
 @Observable
 final class DownloadManager: NSObject, WKDownloadDelegate {
+    // Separate profile lists still write to the same user-selected filesystem. Coordinate names only,
+    // so simultaneous downloads in different profiles cannot reserve the same not-yet-created file.
+    private static let managers = NSHashTable<DownloadManager>.weakObjects()
     private(set) var items: [DownloadItem] = []
     @ObservationIgnored let directory: URL
 
-    init(directory: URL = .downloadsDirectory) {
+    @ObservationIgnored let preferences: ProfilePreferences
+
+    init(directory: URL = .downloadsDirectory, preferences: ProfilePreferences? = nil) {
         self.directory = directory
+        self.preferences = preferences ?? ProfilePreferences(defaults: .standard)
+        super.init()
+        Self.managers.add(self)
+    }
+
+    func releaseFinishedDownloads() {
+        items.removeAll { $0.state != .downloading }
     }
 
     var isDownloading: Bool {
@@ -134,12 +146,14 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
             // It might have been cancelled while the user was asked.
             guard item.state == .downloading else { return nil }
         }
-        if DownloadPreferences.asksWhereToSave {
+        if preferences.asksWhereToSave {
             return await chooseDestination(for: item, suggestedFilename: suggestedFilename)
         }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Downloads that are still running haven't necessarily created their files yet.
-        let reserved = Set(items.filter { $0.state == .downloading }.compactMap(\.destinationURL))
+        let reserved = Set(Self.managers.allObjects.flatMap { manager in
+            manager.items.filter { $0.state == .downloading }.compactMap(\.destinationURL)
+        })
         let url = Self.uniqueURL(for: suggestedFilename, in: directory) {
             reserved.contains($0) || FileManager.default.fileExists(atPath: $0.path)
         }
