@@ -31,6 +31,139 @@ private final class MessageRecorder: NSObject, WKScriptMessageHandler {
 final class PasswordTests: XCTestCase {
     private let example = PasswordOrigin(host: "example.com")!
 
+    /// A real WebKit page and native sheet, with disposable website data and an in-memory keychain.
+    private func promptBrowser() -> (BrowserModel, MemoryPasswordStorage, NSWindow) {
+        let storage = MemoryPasswordStorage()
+        let dataStoreID = UUID()
+        let browser = BrowserModel(websiteDataStore: WKWebsiteDataStore(forIdentifier: dataStoreID),
+                                   passwords: PasswordManager(storage: storage))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        browser.window = window
+        window.contentView = browser.activeTab?.contentView
+        window.orderFront(nil)
+        addTeardownBlock { @MainActor in
+            await ProfileStore.clearWebsiteData(in: browser.websiteDataStore)
+            browser.releaseClosedWindow()
+            window.close()
+            // XCTest's autorelease pool may keep the empty store alive until the host exits.
+            try? await WKWebsiteDataStore.remove(forIdentifier: dataStoreID)
+        }
+        return (browser, storage, window)
+    }
+
+    private func loadPromptForm(in tab: BrowserTab, onSubmit: String) async throws -> WKWebView {
+        let webView = try XCTUnwrap(tab.webView)
+        tab.isNewTab = false
+        webView.loadHTMLString("""
+        <title>Sign in</title>
+        <form onsubmit="event.preventDefault(); \(onSubmit)">
+          <input name="username" autocomplete="username" value="alice">
+          <input name="password" type="password" value="test-secret">
+          <button>Sign In</button>
+        </form>
+        """, baseURL: URL(string: "https://example.com/login"))
+        try await waitUntil { tab.hasPasswordFields && !tab.isLoading }
+        return webView
+    }
+
+    func testRedirectWaitsForEveryPasswordChoice() async throws {
+        for response in [NSApplication.ModalResponse.alertFirstButtonReturn, .alertSecondButtonReturn,
+                         .alertThirdButtonReturn] {
+            let (browser, storage, window) = promptBrowser()
+            let tab = try XCTUnwrap(browser.activeTab)
+            let webView = try await loadPromptForm(in: tab, onSubmit: "location.href = 'about:blank'")
+            _ = try await webView.evaluateJavaScript("document.querySelector('button').click(); 0")
+            try await waitUntil { window.attachedSheet != nil }
+            // Let the queued WebKit navigation run, rather than checking only the moment the sheet appears.
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertEqual(tab.pageTitle, "Sign in")
+            XCTAssertNotEqual(webView.url?.absoluteString, "about:blank")
+            XCTAssertTrue(storage.items.isEmpty)
+            XCTAssertFalse(tab.canSuspend)
+
+            let sheet = try XCTUnwrap(window.attachedSheet)
+            window.endSheet(sheet, returnCode: response)
+            try await waitUntil { webView.url?.absoluteString == "about:blank" && !tab.isLoading }
+            XCTAssertEqual(storage.items.count, response == .alertFirstButtonReturn ? 1 : 0)
+            XCTAssertEqual(browser.passwords?.neverSaveSites.contains(example.description),
+                           response == .alertThirdButtonReturn)
+            if response == .alertFirstButtonReturn {
+                XCTAssertEqual(storage.items[SavedPassword(origin: example, username: "alice")], "test-secret")
+            }
+        }
+    }
+
+    func testImmediatePopupCloseWaitsForSaving() async throws {
+        let (browser, storage, window) = promptBrowser()
+        let opener = try XCTUnwrap(browser.activeTab)
+        let openerView = try await loadPromptForm(in: opener, onSubmit: "")
+        _ = try await openerView.evaluateJavaScript("window.popup = window.open('about:blank'); 0")
+        try await waitUntil { browser.tabs.count == 2 }
+        let popup = try XCTUnwrap(browser.activeTab)
+        XCTAssertNotIdentical(popup, opener)
+        window.contentView = popup.contentView
+        let webView = try await loadPromptForm(in: popup, onSubmit: "window.close()")
+        _ = try await webView.evaluateJavaScript("document.querySelector('form').requestSubmit(); 0")
+        try await waitUntil { window.attachedSheet != nil }
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNotNil(browser.tab(withID: popup.id))
+        XCTAssertTrue(storage.items.isEmpty)
+
+        window.endSheet(try XCTUnwrap(window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        try await waitUntil { browser.tab(withID: popup.id) == nil }
+        XCTAssertEqual(browser.activeTabID, opener.id)
+        XCTAssertEqual(storage.items[SavedPassword(origin: example, username: "alice")], "test-secret")
+    }
+
+    func testUserCloseCancelsPendingPasswordAndNavigation() async throws {
+        let (browser, storage, window) = promptBrowser()
+        let tab = try XCTUnwrap(browser.activeTab)
+        let webView = try await loadPromptForm(in: tab, onSubmit: "location.href = 'about:blank'")
+        _ = try await webView.evaluateJavaScript("document.querySelector('form').requestSubmit(); 0")
+        try await waitUntil { window.attachedSheet != nil }
+        browser.closeTab(tab.id)
+        try await waitUntil { window.attachedSheet == nil }
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNil(browser.tab(withID: tab.id))
+        XCTAssertTrue(storage.items.isEmpty)
+        XCTAssertNotEqual(webView.url?.absoluteString, "about:blank")
+    }
+
+    func testBackgroundPasswordPromptWaitsForSelectionAndCanBeCancelled() async throws {
+        let (browser, storage, window) = promptBrowser()
+        let tab = try XCTUnwrap(browser.activeTab)
+        let webView = try await loadPromptForm(in: tab, onSubmit: "location.href = 'about:blank'")
+        browser.addTab()
+        window.contentView = browser.activeTab?.contentView
+        _ = try await webView.evaluateJavaScript("document.querySelector('form').requestSubmit(); 0")
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNil(window.attachedSheet)
+        XCTAssertEqual(tab.pageTitle, "Sign in")
+        XCTAssertFalse(tab.canSuspend)
+
+        browser.closeTab(tab.id)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNotEqual(webView.url?.absoluteString, "about:blank")
+        XCTAssertTrue(storage.items.isEmpty)
+        XCTAssertNil(window.attachedSheet)
+    }
+
+    func testUpdatePasswordWaitsForDecision() async throws {
+        let (browser, storage, window) = promptBrowser()
+        let account = SavedPassword(origin: example, username: "alice")
+        storage.items[account] = "old-test-secret"
+        let tab = try XCTUnwrap(browser.activeTab)
+        let webView = try await loadPromptForm(in: tab, onSubmit: "location.href = 'about:blank'")
+        _ = try await webView.evaluateJavaScript("document.querySelector('form').requestSubmit(); 0")
+        try await waitUntil { window.attachedSheet != nil }
+        XCTAssertEqual(storage.items[account], "old-test-secret")
+        window.endSheet(try XCTUnwrap(window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        try await waitUntil { webView.url?.absoluteString == "about:blank" && !tab.isLoading }
+        XCTAssertEqual(storage.items[account], "test-secret")
+    }
+
     private func submission(username: String = "alice", password: String = "secret") -> [String: Any] {
         ["type": "submit", "username": username, "password": password]
     }
