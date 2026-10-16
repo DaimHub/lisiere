@@ -26,6 +26,7 @@ struct BrowserWindow: View {
     @State private var addressIsFocused = false
     @State private var toolbarWidth: CGFloat = 800
     @State private var isShowingDownloads = false
+    @State private var isCustomizingToolbar = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
@@ -310,64 +311,98 @@ struct BrowserWindow: View {
 
     private var navigationBar: some View {
         let presentation = browser.preferences.toolbarLayout.presentation(
-            width: toolbarWidth, hasDownloads: !browser.downloads.items.isEmpty)
+            width: toolbarWidth, hasDownloads: !browser.downloads.items.isEmpty, isPrivate: browser.isPrivate)
         return HStack(spacing: 6) {
-            ForEach(presentation.visible) { item in
-                toolbarItem(item, compactProfile: presentation.compactProfile)
+            ForEach(presentation.visible) { entry in
+                toolbarEntry(entry, compactProfile: presentation.compactProfile)
             }
-            if !presentation.overflow.isEmpty {
-                Menu {
-                    ForEach(presentation.overflow) { item in
-                        Button { performToolbarAction(item) } label: {
-                            Label(item.title, systemImage: item.symbol)
-                        }
-                        .disabled(toolbarActionDisabled(item))
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
-                .buttonStyle(ChromeIconButtonStyle(size: 30))
-                .toolbarControlBackground()
-                .help("More Toolbar Actions")
-                .accessibilityLabel("More Toolbar Actions")
+            if !presentation.overflow.isEmpty,
+               !presentation.visible.contains(where: { $0.items.contains(.allActions) }) {
+                allActionsMenu.toolbarControlBackground()
             }
         }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { toolbarWidth = $0 }
         .padding(.trailing, BrowserChrome.edgeInset)
         .frame(height: BrowserChrome.navigationBarHeight)
         .popover(isPresented: $isShowingDownloads) { DownloadsList(downloads: browser.downloads) }
+        .sheet(isPresented: $isCustomizingToolbar) { ToolbarSettings(preferences: browser.preferences) }
     }
 
     @ViewBuilder
-    private func toolbarItem(_ item: BrowserToolbarItem, compactProfile: Bool) -> some View {
-        switch item {
-        case .profile:
-            if browser.isPrivate { privateLabel } else { profileMenu(compact: compactProfile) }
-        case .navigation: navigationButtons
-        case .address: addressControl.frame(minWidth: 160, maxWidth: .infinity)
-        case .downloads:
-            DownloadsButton(downloads: browser.downloads)
-                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        default:
-            Button { performToolbarAction(item) } label: {
-                Image(systemName: item.symbol)
+    private func toolbarEntry(_ entry: ToolbarEntry, compactProfile: Bool) -> some View {
+        if entry.items.count == 1, let item = entry.items.first, item == .profile || item == .address {
+            toolbarControl(item, compactProfile: compactProfile, grouped: false)
+        } else {
+            HStack(spacing: 0) {
+                ForEach(entry.items) { item in
+                    toolbarControl(item, compactProfile: compactProfile, grouped: true)
+                }
             }
-            .buttonStyle(ChromeIconButtonStyle(size: 30))
             .toolbarControlBackground()
-            .disabled(toolbarActionDisabled(item))
-            .help(item == .newTab ? "New Tab (⌘T)" : item.title)
-            .accessibilityLabel(item.title)
+            .frame(maxWidth: entry.items.contains(.address) ? .infinity : nil)
         }
     }
 
+    @ViewBuilder
+    private func toolbarControl(_ item: BrowserToolbarItem, compactProfile: Bool, grouped: Bool) -> some View {
+        switch item {
+        case .profile:
+            if browser.isPrivate { privateLabel(grouped: grouped) } else { profileMenu(compact: compactProfile, grouped: grouped) }
+        case .address: addressControl(grouped: grouped).frame(minWidth: 160, maxWidth: .infinity)
+        case .downloads: DownloadsButton(downloads: browser.downloads, controlSize: 30)
+        case .allActions: allActionsMenu
+        default:
+            actionButton(item)
+                .contextMenu {
+                    if item == .back { historyMenu(for: Array((browser.activeTab?.backList ?? []).reversed())) }
+                    if item == .forward { historyMenu(for: browser.activeTab?.forwardList ?? []) }
+                }
+        }
+    }
+
+    private func actionButton(_ item: BrowserToolbarItem) -> some View {
+        Button { performToolbarAction(item) } label: {
+            Image(systemName: actionSymbol(item))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(ChromeIconButtonStyle(size: 30))
+        .disabled(toolbarActionDisabled(item))
+        .help(actionHelp(item))
+        .accessibilityLabel(actionTitle(item))
+    }
+
+    private func actionTitle(_ item: BrowserToolbarItem) -> String {
+        item == .reload && browser.activeTab?.isLoading == true ? "Stop Loading" : item.title
+    }
+    private func actionHelp(_ item: BrowserToolbarItem) -> String {
+        switch item {
+        case .back: "Back (⌘[)"
+        case .forward: "Forward (⌘])"
+        case .reload: browser.activeTab?.isLoading == true ? "Stop Loading" : "Reload (⌘R)"
+        case .newTab: "New Tab (⌘T)"
+        default: item.title
+        }
+    }
+    private func actionSymbol(_ item: BrowserToolbarItem) -> String {
+        item == .reload && browser.activeTab?.isLoading == true ? "xmark" : item.symbol
+    }
     private func toolbarActionDisabled(_ item: BrowserToolbarItem) -> Bool {
-        browser.isPrivate && (item == .history || item == .bookmarks)
+        switch item {
+        case .back: !(browser.activeTab?.canNavigateBack ?? false)
+        case .forward: !(browser.activeTab?.canGoForward ?? false)
+        case .reload: browser.activeTab?.isNewTab ?? true
+        case .history, .bookmarks: browser.isPrivate
+        default: false
+        }
     }
 
     private func performToolbarAction(_ item: BrowserToolbarItem) {
         switch item {
+        case .back: browser.goBack()
+        case .forward: browser.goForward()
+        case .reload:
+            if browser.activeTab?.isLoading == true { browser.stopLoading() } else { browser.reload() }
+        case .address: browser.requestAddressFocus()
         case .newTab: browser.addTab()
         case .home: browser.goHome()
         case .privateWindow: openWindow(id: BrowserApp.privateWindowID)
@@ -380,54 +415,61 @@ struct BrowserWindow: View {
         }
     }
 
-    private var navigationButtons: some View {
-        let tab = browser.activeTab
-        let isLoading = tab?.isLoading == true
-        return HStack(spacing: 0) {
-            Button { browser.goBack() } label: {
-                Image(systemName: "chevron.left")
+    private var allActionsMenu: some View {
+        Menu {
+            if !browser.isPrivate {
+                Menu {
+                    profileMenuContents
+                } label: {
+                    Label("Profiles", systemImage: BrowserToolbarItem.profile.symbol)
+                }
+            } else {
+                Label("Private Window", systemImage: "eyeglasses")
             }
-            .disabled(!(tab?.canNavigateBack ?? false))
-            .help("Back (⌘[)")
-            .contextMenu {
-                historyMenu(for: Array((tab?.backList ?? []).reversed()))
+            ForEach([BrowserToolbarItem.back, .forward, .reload, .address]) { menuAction($0) }
+            Divider()
+            ForEach([BrowserToolbarItem.newTab, .home, .privateWindow]) { menuAction($0) }
+            Divider()
+            ForEach([BrowserToolbarItem.history, .downloads, .bookmarks, .settings]) { menuAction($0) }
+            Divider()
+            Button { isCustomizingToolbar = true } label: {
+                Label("Customize Toolbar…", systemImage: "slider.horizontal.3")
             }
-
-            Button { browser.goForward() } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(!(tab?.canGoForward ?? false))
-            .help("Forward (⌘])")
-            .contextMenu {
-                historyMenu(for: tab?.forwardList ?? [])
-            }
-
-            Button {
-                if isLoading { browser.stopLoading() } else { browser.reload() }
-            } label: {
-                Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .disabled(tab?.isNewTab ?? true)
-            .help(isLoading ? "Stop Loading" : "Reload (⌘R)")
+        } label: {
+            Image(systemName: "ellipsis")
         }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
         .buttonStyle(ChromeIconButtonStyle(size: 30))
-        .toolbarControlBackground()
+        .help("All Actions")
+        .accessibilityLabel("All Actions")
     }
 
-    private func profileMenu(compact: Bool) -> some View {
+    private func menuAction(_ item: BrowserToolbarItem) -> some View {
+        Button { performToolbarAction(item) } label: {
+            Label(actionTitle(item), systemImage: actionSymbol(item))
+        }
+        .disabled(toolbarActionDisabled(item))
+    }
+
+    @ViewBuilder
+    private var profileMenuContents: some View {
+        Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
+        ForEach(profiles.availableProfiles) { profile in
+            Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
+                Label(profile.name, systemImage: profile.icon.rawValue)
+            }
+        }
+        Divider()
+        Button("Manage Profiles…") {
+            profiles.settingsTab = .profiles
+            openSettings()
+        }
+    }
+
+    private func profileMenu(compact: Bool, grouped: Bool) -> some View {
         Menu {
-            Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
-            ForEach(profiles.availableProfiles) { profile in
-                Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
-                    Label(profile.name, systemImage: profile.icon.rawValue)
-                }
-            }
-            Divider()
-            Button("Manage Profiles…") {
-                profiles.settingsTab = .profiles
-                openSettings()
-            }
+            profileMenuContents
         } label: {
             Label(profileID.map(profiles.name) ?? "Private", systemImage: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle")
                 .labelStyle(ToolbarProfileLabelStyle(compact: compact))
@@ -437,7 +479,7 @@ struct BrowserWindow: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(compact ? .hidden : .visible)
         .padding(.horizontal, compact ? 0 : 10)
-        .frame(width: compact ? 34 : 132, height: BrowserChrome.navigationControlHeight)
+        .frame(width: compact ? 34 : 132, height: grouped ? 30 : BrowserChrome.navigationControlHeight)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.primary.opacity(0.035))
@@ -448,7 +490,7 @@ struct BrowserWindow: View {
         .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
     }
 
-    private var addressControl: some View {
+    private func addressControl(grouped: Bool) -> some View {
         HStack(spacing: 7) {
             Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
@@ -464,8 +506,8 @@ struct BrowserWindow: View {
         }
         .padding(.leading, 11)
         .padding(.trailing, 4)
-        .frame(height: BrowserChrome.navigationControlHeight)
-        .background(Color.primary.opacity(0.065),
+        .frame(height: grouped ? 30 : BrowserChrome.navigationControlHeight)
+        .background(Color.primary.opacity(grouped ? 0 : 0.065),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -492,12 +534,12 @@ struct BrowserWindow: View {
         }
     }
 
-    private var privateLabel: some View {
+    private func privateLabel(grouped: Bool) -> some View {
         Label("Private", systemImage: "eyeglasses")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(accent)
             .padding(.horizontal, 10)
-            .frame(height: BrowserChrome.navigationControlHeight)
+            .frame(height: grouped ? 30 : BrowserChrome.navigationControlHeight)
             .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .help("Private Window: history, cookies, and website data aren’t kept after it closes")
             .accessibilityLabel("Private Window")

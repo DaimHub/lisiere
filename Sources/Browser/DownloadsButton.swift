@@ -4,6 +4,7 @@ import SwiftUI
 /// The navigation bar's downloads button, which shows overall progress and lists downloads in a popover.
 struct DownloadsButton: View {
     let downloads: DownloadManager
+    var controlSize: CGFloat = 34
     @State private var isShowingList = false
 
     var body: some View {
@@ -24,7 +25,7 @@ struct DownloadsButton: View {
             }
             .frame(width: 17, height: 17)
         }
-        .buttonStyle(ChromeIconButtonStyle(size: 34))
+        .buttonStyle(ChromeIconButtonStyle(size: controlSize))
         .help("Downloads")
         .accessibilityLabel("Downloads")
         .accessibilityValue(downloads.isDownloading ? Text(downloads.progress, format: .percent.precision(.fractionLength(0)))
