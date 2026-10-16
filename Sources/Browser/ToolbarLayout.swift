@@ -6,6 +6,7 @@ enum BrowserToolbarItem: String, CaseIterable, Identifiable {
 
     var id: Self { self }
     var isRequired: Bool { self == .profile || self == .address }
+    var canGroup: Bool { self != .profile && self != .address }
     var canOverflow: Bool { ![.profile, .back, .forward, .reload, .address, .newTab, .allActions].contains(self) }
 
     var title: String {
@@ -110,18 +111,37 @@ struct BrowserToolbarLayout: Equatable {
     init(entries: [ToolbarEntry]) {
         var seen = Set<BrowserToolbarItem>()
         var ids = Set<String>()
-        self.entries = entries.compactMap { entry in
+        self.entries = entries.flatMap { entry -> [ToolbarEntry] in
             let items = entry.items.filter { seen.insert($0).inserted }
-            guard !items.isEmpty else { return nil }
-            if items.count == 1 { return ToolbarEntry(items[0]) }
-            let id = entry.id.hasPrefix("group.") && ids.insert(entry.id).inserted ? entry.id : "group.\(UUID().uuidString)"
-            return ToolbarEntry(id: id, items: items)
+            var result: [ToolbarEntry] = []
+            var buttons: [BrowserToolbarItem] = []
+            func flushButtons() {
+                guard !buttons.isEmpty else { return }
+                if buttons.count == 1 { result.append(ToolbarEntry(buttons[0])) }
+                else {
+                    let id = entry.id.hasPrefix("group.") && ids.insert(entry.id).inserted ? entry.id : "group.\(UUID().uuidString)"
+                    result.append(ToolbarEntry(id: id, items: buttons))
+                }
+                buttons = []
+            }
+            // Split older groups around Profile/Address without changing the flattened order.
+            for item in items {
+                if item.canGroup { buttons.append(item) }
+                else { flushButtons(); result.append(ToolbarEntry(item)) }
+            }
+            flushButtons()
+            return result
         }
         if !seen.contains(.profile) { self.entries.insert(ToolbarEntry(.profile), at: 0) }
         if !seen.contains(.address) { self.entries.append(ToolbarEntry(.address)) }
     }
 
     func entry(containing item: BrowserToolbarItem) -> ToolbarEntry? { entries.first { $0.items.contains(item) } }
+    func canGroup(_ id: String) -> Bool {
+        guard let source = location(id) else { return false }
+        if let child = source.child { return entries[source.root].items[child].canGroup }
+        return entries[source.root].items.allSatisfy(\.canGroup)
+    }
     func siblings(of id: String) -> [String] {
         if entries.contains(where: { $0.id == id }) { return entries.map(\.id) }
         return entries.first(where: { $0.items.contains { $0.rawValue == id } })?.items.map(\.rawValue) ?? []
@@ -146,7 +166,9 @@ struct BrowserToolbarLayout: Equatable {
     @discardableResult
     mutating func move(_ id: String, toGroup groupID: String?, at proposedIndex: Int) -> Bool {
         guard let source = location(id), groupID != id else { return false }
-        if let groupID, !entries.contains(where: { $0.id == groupID && $0.isGroup }) { return false }
+        if let groupID {
+            guard canGroup(id), entries.contains(where: { $0.id == groupID && $0.isGroup }) else { return false }
+        }
         let oldParent = source.child == nil ? nil : entries[source.root].id
         var index = proposedIndex
         if oldParent == groupID, (source.child ?? source.root) < index { index -= 1 }
@@ -161,7 +183,7 @@ struct BrowserToolbarLayout: Equatable {
     }
 
     mutating func group(_ id: String, with targetID: String) {
-        guard id != targetID, let source = location(id),
+        guard id != targetID, canGroup(id), canGroup(targetID), let source = location(id),
               let target = entries.first(where: { $0.id == targetID }),
               !target.items.contains(where: { $0.rawValue == id }) else { return }
         let moved = take(source)

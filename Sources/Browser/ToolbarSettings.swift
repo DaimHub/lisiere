@@ -8,7 +8,7 @@ struct ToolbarSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Customize Toolbar").font(.title2.weight(.semibold))
-                Text("Drag between rows to reorder, or onto a row to group.")
+                Text("Drag to reorder. Use Group to combine buttons.")
                     .foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
@@ -90,15 +90,5 @@ extension View {
         padding(2)
             .background(Color.primary.opacity(0.035),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-struct ToolbarProfileLabelStyle: LabelStyle {
-    let compact: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon
-            if !compact { configuration.title }
-        }
     }
 }

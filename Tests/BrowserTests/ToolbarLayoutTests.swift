@@ -41,16 +41,90 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertFalse(repaired.items.contains(.allActions), "A V2 layout may intentionally hide All Actions")
     }
 
-    func testCustomGroupsCanContainAnyControlAndUngroupWithoutLosingOrder() {
+    func testProfileAndAddressCannotJoinGroupsButRemainMovable() {
+        for id in ["profile", "address"] {
+            var layout = BrowserToolbarLayout.standard
+            layout.group(id, with: "newTab")
+            layout.group("newTab", with: id)
+            layout.group(id, with: "group.navigation")
+            XCTAssertFalse(layout.move(id, toGroup: "group.navigation", at: 0))
+            XCTAssertEqual(layout, .standard)
+            XCTAssertTrue(layout.move(id, toGroup: nil, at: layout.entries.count))
+            XCTAssertEqual(layout.entries.last?.id, id)
+        }
         var layout = BrowserToolbarLayout.standard
-        layout.group("address", with: "profile")
-        let group = layout.entries[0]
-        XCTAssertEqual(group.items, [.profile, .address])
-        layout.group("allActions", with: group.id)
-        XCTAssertEqual(layout.entries[0].items, [.profile, .address, .allActions])
+        layout.group("allActions", with: "newTab")
+        let group = layout.entry(containing: .newTab)!
+        XCTAssertEqual(group.items, [.newTab, .allActions])
         layout.ungroup(group.id)
-        XCTAssertEqual(layout.entries.prefix(3).map(\.items), [[.profile], [.address], [.allActions]])
-        XCTAssertEqual(Set(layout.items).count, layout.items.count)
+        XCTAssertEqual(layout.entries.suffix(2).map(\.items), [[.newTab], [.allActions]])
+    }
+
+    func testStoredGroupsSplitAroundProfileAndAddressWithoutChangingOrder() {
+        let saved = Data(#"{"version":2,"entries":[{"id":"group.old","items":["back","forward","profile","reload","home","address","newTab","allActions"]}]}"#.utf8)
+        let layout = BrowserToolbarLayout(data: saved)
+        XCTAssertEqual(layout.items, [.back, .forward, .profile, .reload, .home, .address, .newTab, .allActions])
+        XCTAssertEqual(layout.entries.map(\.items), [[.back, .forward], [.profile], [.reload, .home], [.address], [.newTab, .allActions]])
+        XCTAssertEqual(layout.entries.first?.id, "group.old")
+        XCTAssertEqual(Set(layout.entries.map(\.id)).count, layout.entries.count)
+        XCTAssertEqual(BrowserToolbarLayout(data: layout.storedValue), layout)
+    }
+
+    func testNativeInsertionEdgesNeverGroupStandaloneRowsOrRequiredControls() throws {
+        let coordinator = ToolbarOutlineView.Coordinator(ToolbarOutlineView(layout: .constant(.standard)))
+        coordinator.reload(.standard)
+        let newTab = try XCTUnwrap(coordinator.nodes["newTab"])
+        let group = try XCTUnwrap(coordinator.nodes["group.navigation"])
+        let forward = try XCTUnwrap(coordinator.nodes["forward"])
+        typealias Insertion = ToolbarOutlineView.Coordinator.Insertion
+        XCTAssertEqual(coordinator.insertion(for: "allActions", target: newTab, index: -1, lowerHalf: false, outdent: false),
+                       Insertion(parentID: nil, index: 3))
+        XCTAssertEqual(coordinator.insertion(for: "allActions", target: newTab, index: -1, lowerHalf: true, outdent: false),
+                       Insertion(parentID: nil, index: 4))
+        XCTAssertEqual(coordinator.insertion(for: "profile", target: forward, index: -1, lowerHalf: false, outdent: false),
+                       Insertion(parentID: nil, index: 2))
+        XCTAssertEqual(coordinator.insertion(for: "address", target: group, index: 1, lowerHalf: true, outdent: false),
+                       Insertion(parentID: nil, index: 2))
+        XCTAssertEqual(coordinator.insertion(for: "newTab", target: forward, index: -1, lowerHalf: false, outdent: false),
+                       Insertion(parentID: "group.navigation", index: 1))
+        XCTAssertEqual(coordinator.insertion(for: "back", target: forward, index: -1, lowerHalf: true, outdent: true),
+                       Insertion(parentID: nil, index: 2))
+        for id in ["profile", "address"] {
+            XCTAssertTrue(coordinator.groupingMenu(for: try XCTUnwrap(coordinator.nodes[id])).items.isEmpty)
+        }
+        XCTAssertFalse(coordinator.groupingMenu(for: newTab).items.contains { $0.title.contains("Profile") || $0.title.contains("Address") })
+    }
+
+    func testNativeReordersKeepRowsCollapsedGroupsAndSelectionWithoutReloading() throws {
+        let coordinator = ToolbarOutlineView.Coordinator(ToolbarOutlineView(layout: .constant(.standard)))
+        let outline = RecordingToolbarOutline()
+        outline.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("test")))
+        outline.outlineTableColumn = outline.tableColumns[0]
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
+        coordinator.outline = outline
+        coordinator.reload(.standard)
+        let group = try XCTUnwrap(coordinator.nodes["group.navigation"])
+        outline.collapseItem(group)
+        outline.selectRowIndexes(IndexSet(integer: 3), byExtendingSelection: false)
+        let reloads = outline.reloadCount
+        for _ in 0..<30 {
+            coordinator.change { $0.move("newTab", by: -1) }
+            coordinator.change { $0.move("newTab", by: 1) }
+        }
+        XCTAssertEqual(outline.reloadCount, reloads, "Reordering must not rebuild the whole outline")
+        XCTAssertFalse(outline.isItemExpanded(group))
+        XCTAssertEqual((outline.item(atRow: outline.selectedRow) as? ToolbarOutlineView.Node)?.id, "newTab")
+        XCTAssertEqual(coordinator.current, .standard)
+        outline.expandItem(group)
+        coordinator.change { $0.move("back", by: 1) }
+        XCTAssertEqual(outline.reloadCount, reloads)
+        XCTAssertEqual((outline.item(atRow: 2) as? ToolbarOutlineView.Node)?.id, "forward")
+        XCTAssertEqual((outline.item(atRow: 3) as? ToolbarOutlineView.Node)?.id, "back")
+        coordinator.change { $0.separate(.back) }
+        XCTAssertTrue(outline.isItemExpanded(group))
+        XCTAssertEqual(coordinator.current?.entry(containing: .back)?.id, "back")
+        XCTAssertFalse(coordinator.change { $0.move("missing", by: 1) })
     }
 
     func testNavigationCanBeSeparatedAndRegroupedWithOtherActions() {
@@ -209,4 +283,10 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(browser.tabs.count, 2)
         XCTAssertEqual(browser.preferences.newTabPage, .blank)
     }
+}
+
+@MainActor
+private final class RecordingToolbarOutline: NSOutlineView {
+    var reloadCount = 0
+    override func reloadData() { reloadCount += 1; super.reloadData() }
 }

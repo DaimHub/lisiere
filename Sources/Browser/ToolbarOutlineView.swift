@@ -19,7 +19,7 @@ struct ToolbarOutlineView: NSViewRepresentable {
         outline.intercellSpacing = NSSize(width: 0, height: 2)
         outline.indentationPerLevel = 18
         outline.style = .inset
-        outline.draggingDestinationFeedbackStyle = .gap
+        outline.draggingDestinationFeedbackStyle = .regular
         outline.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         outline.allowsMultipleSelection = false
         outline.focusRingType = .none
@@ -63,10 +63,16 @@ struct ToolbarOutlineView: NSViewRepresentable {
         var current: BrowserToolbarLayout?
         var roots: [Node] = []
         var nodes: [String: Node] = [:]
+        private var activeDragID: String?
         init(_ parent: ToolbarOutlineView) { self.parent = parent }
 
         func reload(_ layout: BrowserToolbarLayout) {
+            guard current != layout else { return }
+            let previous = current
             let selectedID = outline.flatMap { $0.item(atRow: $0.selectedRow) as? Node }?.id
+            let expanded = Set(nodes.values.filter { outline?.isItemExpanded($0) == true }.map(\.id))
+            let previousIDs = Set(nodes.keys)
+            let scrollOrigin = outline?.enclosingScrollView?.contentView.bounds.origin
             current = layout
             var next: [String: Node] = [:]
             func node(_ entry: ToolbarEntry, parentID: String? = nil) -> Node {
@@ -83,17 +89,61 @@ struct ToolbarOutlineView: NSViewRepresentable {
                 return root
             }
             nodes = next
-            outline?.reloadData()
-            outline?.expandItem(nil, expandChildren: true)
-            if let selectedID, let selected = nodes[selectedID], let outline {
+            guard let outline else { return }
+            // A reorder must not discard all row views or expand collapsed groups.
+            let canMoveRows = previous.map { old in
+                Set(old.entries.map(\.id)) == Set(layout.entries.map(\.id)) && old.entries.allSatisfy { entry in
+                    layout.entries.first(where: { $0.id == entry.id }).map { Set($0.items) == Set(entry.items) } == true
+                }
+            } ?? false
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                if canMoveRows, let previous {
+                    outline.beginUpdates()
+                    reorder(previous.entries.map(\.id), to: roots.map(\.id), parent: nil, in: outline)
+                    for root in roots where root.isGroup {
+                        let old = previous.entries.first { $0.id == root.id }!
+                        reorder(old.items.map(\.rawValue), to: root.children.map(\.id), parent: root, in: outline)
+                    }
+                    outline.endUpdates()
+                    for row in 0..<outline.numberOfRows {
+                        if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? ToolbarRowCell,
+                           let node = outline.item(atRow: row) as? Node { cell.configure(node, coordinator: self) }
+                    }
+                } else {
+                    outline.reloadData()
+                    for root in roots where root.isGroup && (expanded.contains(root.id) || !previousIDs.contains(root.id)) {
+                        outline.expandItem(root)
+                    }
+                }
+            }
+            if let selectedID, let selected = nodes[selectedID] {
                 let row = outline.row(forItem: selected)
                 if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
             }
+            if let scrollOrigin, let scroll = outline.enclosingScrollView {
+                scroll.contentView.scroll(to: scrollOrigin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
         }
-        func change(_ action: (inout BrowserToolbarLayout) -> Void) {
-            var value = parent.layout
+        private func reorder(_ old: [String], to new: [String], parent: Node?, in outline: NSOutlineView) {
+            var order = old
+            for (destination, id) in new.enumerated() {
+                guard let source = order.firstIndex(of: id), source != destination else { continue }
+                order.insert(order.remove(at: source), at: destination)
+                outline.moveItem(at: source, inParent: parent, to: destination, inParent: parent)
+            }
+        }
+        @discardableResult
+        func change(_ action: (inout BrowserToolbarLayout) -> Void) -> Bool {
+            var value = current ?? parent.layout
             action(&value)
+            guard value != current else { return false }
+            // Update AppKit immediately; the following SwiftUI update then becomes a no-op.
+            reload(value)
             parent.layout = value
+            return true
         }
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
             (item as? Node)?.children.count ?? roots.count
@@ -115,41 +165,66 @@ struct ToolbarOutlineView: NSViewRepresentable {
             writer.setString(node.id, forType: Self.dragType)
             return writer
         }
+        func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
+                         willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]) {
+            activeDragID = (draggedItems.first as? Node)?.id
+            session.animatesToStartingPositionsOnCancelOrFail = false
+        }
+        func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+            activeDragID = nil
+        }
         private func draggedID(_ info: NSDraggingInfo) -> String? {
             guard let source = info.draggingSource as? NSOutlineView, source === outline,
-                  let id = info.draggingPasteboard.string(forType: Self.dragType), nodes[id] != nil else { return nil }
+                  let id = activeDragID ?? info.draggingPasteboard.string(forType: Self.dragType), nodes[id] != nil else { return nil }
             return id
+        }
+
+        struct Insertion: Equatable {
+            let parentID: String?
+            let index: Int
+        }
+
+        /// Resolve one stable insertion edge. Hovering a standalone row never creates a group.
+        func insertion(for id: String, target: Node?, index: Int, lowerHalf: Bool, outdent: Bool) -> Insertion? {
+            guard let source = nodes[id] else { return nil }
+            guard let target else { return Insertion(parentID: nil, index: max(0, index)) }
+            let rootOnly = source.isGroup || !source.entry.items.allSatisfy(\.canGroup) || outdent
+            if target.isGroup && !rootOnly && target.id != id && (index >= 0 || lowerHalf) {
+                return Insertion(parentID: target.id, index: index == NSOutlineViewDropOnItemIndex ? 0 : index)
+            }
+            if let parentID = target.parentID, !rootOnly, parentID != id,
+               let child = nodes[parentID]?.children.firstIndex(where: { $0.id == target.id }) {
+                return Insertion(parentID: parentID, index: child + (lowerHalf ? 1 : 0))
+            }
+            let rootID = target.parentID ?? target.id
+            guard let rootIndex = roots.firstIndex(where: { $0.id == rootID }) else { return nil }
+            return Insertion(parentID: nil, index: rootIndex + (target.parentID != nil || lowerHalf ? 1 : 0))
         }
         func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
                          proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
             guard let id = draggedID(info) else { return [] }
-            if let target = item as? Node {
-                guard id != target.id, nodes[id]?.children.contains(where: { $0.id == target.id }) != true else { return [] }
-                if !target.isGroup, index != NSOutlineViewDropOnItemIndex { return [] }
-                // A drop on an existing child inserts beside it in that child's group.
-                if let parentID = target.parentID, let parent = nodes[parentID],
-                   let child = parent.children.firstIndex(where: { $0.id == target.id }) {
-                    outlineView.setDropItem(parent, dropChildIndex: child + 1)
-                }
-            }
+            let point = outlineView.convert(info.draggingLocation, from: nil)
+            let target = item as? Node
+            let targetRow = target.map { outlineView.row(forItem: $0) } ?? -1
+            let lowerHalf = targetRow >= 0 && point.y >= outlineView.rect(ofRow: targetRow).midY
+            guard let insertion = insertion(for: id, target: target, index: index, lowerHalf: lowerHalf,
+                                            outdent: point.x < outlineView.indentationPerLevel * 2) else { return [] }
+            outlineView.setDropItem(insertion.parentID.flatMap { nodes[$0] }, dropChildIndex: insertion.index)
             return .move
         }
         func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
                          item: Any?, childIndex index: Int) -> Bool {
-            guard let id = draggedID(info) else { return false }
+            guard let id = draggedID(info), index >= 0 else { return false }
             let target = item as? Node
-            if let target, !target.isGroup {
-                change { $0.group(id, with: target.id) }
-            } else {
-                let position = index == NSOutlineViewDropOnItemIndex ? (target?.children.count ?? roots.count) : index
-                change { $0.move(id, toGroup: target?.id, at: position) }
-            }
-            return true
+            guard target == nil || target?.isGroup == true else { return false }
+            return change { $0.move(id, toGroup: target?.id, at: index) }
         }
 
         func groupingMenu(for node: Node) -> NSMenu {
             let menu = NSMenu()
-            for target in roots where target.id != node.id && target.id != node.parentID {
+            guard node.entry.items.allSatisfy(\.canGroup) else { return menu }
+            for target in roots where target.id != node.id && target.id != node.parentID && target.entry.items.allSatisfy(\.canGroup) {
                 let item = ToolbarMenuItem(title: "Group with \(target.entry.title)") { [weak self] in
                     self?.change { $0.group(node.id, with: target.id) }
                 }
@@ -186,7 +261,7 @@ private final class ToolbarRowCell: NSTableCellView {
         identifier = Self.reuseID
         handle.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Drag to reorder")
         handle.contentTintColor = .tertiaryLabelColor
-        handle.toolTip = "Drag between rows to reorder, or onto a row to group"
+        handle.toolTip = "Drag to reorder; drag left to move out of a group"
         symbol.contentTintColor = .controlAccentColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -227,14 +302,14 @@ private final class ToolbarRowCell: NSTableCellView {
         label.stringValue = node.entry.title
         label.font = .systemFont(ofSize: 13, weight: node.isGroup ? .semibold : .regular)
         label.toolTip = node.entry.title
-        let siblings = coordinator.parent.layout.siblings(of: node.id)
+        let siblings = coordinator.current?.siblings(of: node.id) ?? []
         configure(up, "Move \(node.entry.title) Left", enabled: siblings.first != node.id) { [weak coordinator] in
             coordinator?.change { $0.move(node.id, by: -1) }
         }
         configure(down, "Move \(node.entry.title) Right", enabled: siblings.last != node.id) { [weak coordinator] in
             coordinator?.change { $0.move(node.id, by: 1) }
         }
-        configure(group, "Group \(node.entry.title) with…") { [weak coordinator, weak group] in
+        configure(group, "Group \(node.entry.title) with…", enabled: node.entry.items.allSatisfy(\.canGroup)) { [weak coordinator, weak group] in
             guard let coordinator, let group else { return }
             coordinator.groupingMenu(for: node).popUp(positioning: nil, at: NSPoint(x: 0, y: group.bounds.height), in: group)
         }

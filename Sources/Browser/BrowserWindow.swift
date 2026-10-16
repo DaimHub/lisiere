@@ -347,7 +347,7 @@ struct BrowserWindow: View {
     private func toolbarControl(_ item: BrowserToolbarItem, compactProfile: Bool, grouped: Bool) -> some View {
         switch item {
         case .profile:
-            if browser.isPrivate { privateLabel(grouped: grouped) } else { profileMenu(compact: compactProfile, grouped: grouped) }
+            if browser.isPrivate { privateLabel(grouped: grouped) } else { profileMenu(compact: compactProfile) }
         case .address: addressControl(grouped: grouped).frame(minWidth: 160, maxWidth: .infinity)
         case .downloads: DownloadsButton(downloads: browser.downloads, controlSize: 30)
         case .allActions: allActionsMenu
@@ -467,27 +467,12 @@ struct BrowserWindow: View {
         }
     }
 
-    private func profileMenu(compact: Bool, grouped: Bool) -> some View {
-        Menu {
+    private func profileMenu(compact: Bool) -> some View {
+        ToolbarProfileMenu(name: profileID.map(profiles.name) ?? "Private",
+                           symbol: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle",
+                           compact: compact, accent: accent) {
             profileMenuContents
-        } label: {
-            Label(profileID.map(profiles.name) ?? "Private", systemImage: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle")
-                .labelStyle(ToolbarProfileLabelStyle(compact: compact))
-                .lineLimit(1)
-                .truncationMode(.tail)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(compact ? .hidden : .visible)
-        .padding(.horizontal, compact ? 0 : 10)
-        .frame(width: compact ? 34 : 132, height: grouped ? 30 : BrowserChrome.navigationControlHeight)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(accent.opacity(colorScheme == .dark ? 0.14 : 0.09))
-        }
-        .help("Profile: \(profileID.map(profiles.name) ?? "Private")")
-        .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
     }
 
     private func addressControl(grouped: Bool) -> some View {
