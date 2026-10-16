@@ -66,7 +66,7 @@ struct BrowserWindow: View {
                     TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
                              hoverCardTabID: $hoverCardTabID)
                         .background(profileSwipeArea)
-                                .transition(.opacity)
+                        .transition(.opacity)
                 }
                 mainColumn
             }
