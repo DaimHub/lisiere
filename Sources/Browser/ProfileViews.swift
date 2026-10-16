@@ -8,10 +8,13 @@ struct ProfileBrowserWindow: View {
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
+        // Keep both profiles in the same bounds while their opacity changes.
+        // A Group provides no stable stacking surface for the outgoing native page.
+        ZStack {
             if let owner, owner.isPrivate, let browsingData = owner.privateBrowsingData {
                 BrowserWindow(bookmarks: owner.privateBookmarks, profiles: profiles,
                               browser: owner.browser, isFullScreen: isFullScreen)
@@ -21,11 +24,17 @@ struct ProfileBrowserWindow: View {
             } else if let owner, let id = owner.browser.profileID, let context = profiles.context(for: id) {
                 BrowserWindow(bookmarks: context.bookmarks, profiles: profiles,
                               browser: owner.browser, isFullScreen: isFullScreen)
-                    .id(id)
-                    .transition(.opacity)
                     .environment(context.browsingData)
                     .environment(context.preferences)
                     .environment(context.favicons)
+                    // The departing profile keeps its own palette until the fade finishes.
+                    .environment(\.colorScheme, context.preferences.appearance.selection.colorScheme
+                                 ?? colorScheme)
+                    // Only crossfade the workspace; don't interpolate its toolbar or WebKit layout.
+                    .transaction { $0.animation = nil }
+                    .id(id)
+                    .transition(reduceMotion ? .identity : .opacity)
+                    .zIndex(1)
             } else if !isPrivate, profiles.context(for: profileID) == nil {
                 ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
                                        description: Text(profiles.loadError ?? "This profile is unavailable."))
@@ -34,7 +43,9 @@ struct ProfileBrowserWindow: View {
             }
         }
         .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.selection.colorScheme)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: owner?.browser.profileID)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner?.browser.profileID)
+        // One material stays at full opacity beneath both layers, avoiding a flash of the desktop.
+        .background { WindowGlassBackground().ignoresSafeArea() }
         .background {
             if let owner {
                 WindowChromeConfigurator(

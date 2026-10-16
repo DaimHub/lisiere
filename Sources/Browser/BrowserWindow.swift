@@ -84,14 +84,16 @@ struct BrowserWindow: View {
         .animation(.snappy(duration: 0.25), value: tabLayout)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background {
-            WindowGlassBackground()
             if browser.isPrivate {
                 BrowserChrome.privateTint(for: colorScheme).ignoresSafeArea()
             }
         }
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
-        .focusedSceneValue(\.browserModel, browser)
+        // A departing profile remains visible during its fade, but cannot receive input or commands.
+        .allowsHitTesting(browser.isActiveInWorkspace)
+        .accessibilityHidden(!browser.isActiveInWorkspace)
+        .focusedSceneValue(\.browserModel, browser.isActiveInWorkspace ? browser : nil)
         .onChange(of: browser.activeTabID) { _, _ in
             address = browser.activeTab?.url?.absoluteString ?? ""
             closeSuggestions()
