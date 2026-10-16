@@ -37,6 +37,9 @@ final class BrowserTab: Identifiable {
     @ObservationIgnored private var loadErrorCoversPreviousPage = false
     private(set) var pageZoom = 1.0
 
+    /// Whether the page has a password field, so saved passwords for its site can be offered.
+    var hasPasswordFields = false
+
     var isFindBarVisible = false
     var findText = ""
     /// Whether the last search found nothing, shown in the find bar.
@@ -151,7 +154,7 @@ final class BrowserTab: Identifiable {
         if let suspendedState {
             webView.interactionState = suspendedState
         } else if let url {
-            webView.load(URLRequest(url: url))
+            Self.load(url, in: webView)
         }
         suspendedState = nil
     }
@@ -173,6 +176,18 @@ final class BrowserTab: Identifiable {
         guard let browser else { return false }
         if browser.activeTabID == id { return true }
         return await withCheckedContinuation { selectionWaiters.append($0) }
+    }
+
+    /// Shows a panel as a sheet on the page's window. A background tab's panel waits until the tab is selected,
+    /// so a page can't take over the window, and is dismissed if the tab closes first.
+    func present(_ alert: NSAlert, in webView: WKWebView? = nil) async -> NSApplication.ModalResponse? {
+        guard let webView = webView ?? self.webView, await waitUntilSelected() else { return nil }
+        // The selected tab's page joins the window on SwiftUI's next update.
+        for _ in 0..<20 where webView.window == nil {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard let window = webView.window else { return nil }
+        return await alert.beginSheetModal(for: window)
     }
 
     func didBecomeSelected() {
@@ -251,7 +266,16 @@ final class BrowserTab: Identifiable {
         isNewTab = false
         restore()
         pageDelegate.isLoadingFromBrowser = true
-        webView?.load(URLRequest(url: url))
+        if let webView { Self.load(url, in: webView) }
+    }
+
+    /// A local file, such as an HTML file opened from the Finder, may only read itself.
+    private static func load(_ url: URL, in webView: WKWebView) {
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url)
+        } else {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     func reload() {
@@ -277,6 +301,7 @@ final class BrowserTab: Identifiable {
     func didCommitNavigation() {
         clearLoadError()
         findHasNoMatches = false
+        hasPasswordFields = false
         applyZoom()
         recordVisit()
     }

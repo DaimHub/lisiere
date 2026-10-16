@@ -6,6 +6,7 @@ struct BrowserApp: App {
     static let windowID = "browser"
     static let privateWindowID = "private"
 
+    @NSApplicationDelegateAdaptor(BrowserAppDelegate.self) private var appDelegate
     @State private var bookmarks = BookmarkStore()
     @State private var downloads = DownloadManager()
     @State private var history: HistoryStore
@@ -37,7 +38,7 @@ struct BrowserApp: App {
         // The session store reopens the windows with their tabs, so the system doesn't reopen them too.
         .restorationBehavior(.disabled)
         .commands {
-            BrowserCommands(bookmarks: bookmarks, history: history, session: session)
+            BrowserCommands(bookmarks: bookmarks, history: history, session: session, updater: .shared)
         }
 
         // A private window joins neither history nor the session, and isn't reopened.
@@ -51,7 +52,7 @@ struct BrowserApp: App {
 
         Settings {
             SettingsView(browsingData: browsingData, contentBlocker: .shared, sitePermissions: .shared,
-                         zoomLevels: .shared)
+                         zoomLevels: .shared, passwords: .shared, passkeys: .shared, updater: .shared)
         }
     }
 }
@@ -71,6 +72,7 @@ private struct BrowserCommands: Commands {
     let bookmarks: BookmarkStore
     let history: HistoryStore
     let session: SessionStore
+    let updater: AppUpdater
     @FocusedValue(\.browserModel) private var browser
     @Environment(\.openWindow) private var openWindow
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
@@ -87,6 +89,12 @@ private struct BrowserCommands: Commands {
     }
 
     var body: some Commands {
+        if updater.isAvailable {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: BrowserApp.windowID) }
                 .keyboardShortcut("n", modifiers: .command)

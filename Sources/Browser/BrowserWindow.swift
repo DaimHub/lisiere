@@ -24,6 +24,7 @@ struct BrowserWindow: View {
     @State private var isFullScreen = false
     @State private var addressIsFocused = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @Environment(BrowsingData.self) private var browsingData
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
@@ -41,7 +42,8 @@ struct BrowserWindow: View {
         self.bookmarks = bookmarks
         self.session = isPrivate ? nil : session
         _browser = State(initialValue: isPrivate ? .makePrivate(downloads: downloads)
-                                                 : BrowserModel(downloads: downloads, history: history))
+                                                 : BrowserModel(downloads: downloads, history: history,
+                                                                passwords: .shared))
     }
 
     var body: some View {
@@ -83,7 +85,10 @@ struct BrowserWindow: View {
             }
         }
         .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
-                                             isFullScreen: $isFullScreen) { session?.detach(browser) })
+                                             isFullScreen: $isFullScreen,
+                                             onWindowChange: { [browser] in browser.window = $0 }) {
+            session?.detach(browser)
+        })
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
@@ -116,6 +121,7 @@ struct BrowserWindow: View {
                     openWindow(id: BrowserApp.windowID)
                 }
             }
+            ExternalURLRouter.shared.register(browser, openWindow: openWindow)
             if browser.activeTab?.isNewTab == true {
                 browser.requestAddressFocus()
             }
@@ -356,6 +362,7 @@ struct BrowserWindow: View {
                              focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
                              edit: editAddress, perform: performAddressCommand)
                 zoomButton
+                passwordButton
                 trackerBlockingButton
                 bookmarkButton
             }
@@ -436,6 +443,34 @@ struct BrowserWindow: View {
             .fixedSize()
             .help(isBlocking ? "Trackers Blocked" : "Tracker Blocking Off for This Site")
             .accessibilityLabel(isBlocking ? "Trackers blocked" : "Tracker blocking off")
+        }
+    }
+
+    /// Offers the passwords saved for exactly the page's origin, once the page shows a password field.
+    @ViewBuilder
+    private var passwordButton: some View {
+        if let tab = browser.activeTab, !tab.isNewTab, tab.hasPasswordFields, let passwords = browser.passwords {
+            let accounts = passwords.passwords(for: PasswordOrigin(url: tab.url))
+            if !accounts.isEmpty {
+                Menu {
+                    ForEach(accounts) { account in
+                        Button(account.username.isEmpty ? "Fill Password" : "Fill “\(account.username)”") {
+                            Task { await PasswordAutofill.fill(account, in: tab, from: passwords) }
+                        }
+                    }
+                    Divider()
+                    Button("Show Passwords…") { openSettings() }
+                } label: {
+                    Image(systemName: "key.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(ChromeIconButtonStyle(size: 26))
+                .fixedSize()
+                .help("Fill Saved Password")
+                .accessibilityLabel("Fill saved password")
+            }
         }
     }
 

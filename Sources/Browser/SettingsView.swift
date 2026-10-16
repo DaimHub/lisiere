@@ -1,3 +1,4 @@
+import LocalAuthentication
 import SwiftUI
 import WebKit
 
@@ -7,15 +8,20 @@ struct SettingsView: View {
     let contentBlocker: ContentBlocker
     let sitePermissions: SitePermissions
     let zoomLevels: ZoomStore
+    let passwords: PasswordManager
+    let passkeys: Passkeys
+    let updater: AppUpdater
 
     var body: some View {
         TabView {
-            GeneralSettings()
+            GeneralSettings(updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
             AppearanceSettings()
                 .tabItem { Label("Appearance", systemImage: "macwindow") }
             PrivacySettings(browsingData: browsingData, contentBlocker: contentBlocker)
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
+            PasswordSettings(passwords: passwords, passkeys: passkeys)
+                .tabItem { Label("Passwords", systemImage: "key") }
             SiteSettings(contentBlocker: contentBlocker, sitePermissions: sitePermissions, zoomLevels: zoomLevels)
                 .tabItem { Label("Site Settings", systemImage: "globe") }
             DownloadSettings()
@@ -27,27 +33,222 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettings: View {
+    @Bindable var updater: AppUpdater
+    @State private var defaultBrowser = DefaultBrowser()
     @AppStorage(SearchEngine.storageKey) private var searchEngine = SearchEngine.google
     @AppStorage(NewTabPage.storageKey) private var newTabPage = NewTabPage.startPage
     @AppStorage(SessionPreferences.restoresWindowsKey) private var restoresWindows = true
 
     var body: some View {
         Form {
-            Picker("Search engine", selection: $searchEngine) {
-                ForEach(SearchEngine.allCases) { engine in
-                    Text(engine.title).tag(engine)
+            Section {
+                LabeledContent("Default web browser") {
+                    if defaultBrowser.isDefault {
+                        Text("Browser is your default web browser.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Make Browser the Default Browser") {
+                            Task { await defaultBrowser.makeDefault() }
+                        }
+                    }
                 }
             }
-            Picker("New tabs open with", selection: $newTabPage) {
-                ForEach(NewTabPage.allCases) { page in
-                    Text(page.title).tag(page)
+
+            Section {
+                Picker("Search engine", selection: $searchEngine) {
+                    ForEach(SearchEngine.allCases) { engine in
+                        Text(engine.title).tag(engine)
+                    }
+                }
+                Picker("New tabs open with", selection: $newTabPage) {
+                    ForEach(NewTabPage.allCases) { page in
+                        Text(page.title).tag(page)
+                    }
+                }
+                Toggle(isOn: $restoresWindows) {
+                    Text("Reopen windows from last session on launch")
+                    Text("When off, History ▸ Reopen All Windows from Last Session opens them.")
                 }
             }
-            Toggle(isOn: $restoresWindows) {
-                Text("Reopen windows from last session on launch")
-                Text("When off, History ▸ Reopen All Windows from Last Session opens them.")
+
+            if updater.isAvailable {
+                Section("Updates") {
+                    Toggle("Check for updates automatically", isOn: $updater.checksAutomatically)
+                    Toggle("Download and install updates automatically", isOn: $updater.downloadsAutomatically)
+                        .disabled(!updater.checksAutomatically)
+                    LabeledContent("Software update") {
+                        Button("Check Now") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheckForUpdates)
+                    }
+                }
             }
         }
+        .task { defaultBrowser.refresh() }
+        // The default browser can also change in System Settings while Settings is open.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            defaultBrowser.refresh()
+        }
+    }
+}
+
+/// Saved passwords stay hidden until the user unlocks them with Touch ID or their login password, and lock again
+/// when the tab closes or the app goes to the background.
+private struct PasswordSettings: View {
+    @Bindable var passwords: PasswordManager
+    let passkeys: Passkeys
+    @State private var isUnlocked = false
+    @State private var query = ""
+    @State private var revealed: [SavedPassword.ID: String] = [:]
+    @State private var removing: SavedPassword?
+
+    private var accounts: [SavedPassword] {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return passwords.passwords }
+        return passwords.passwords.filter {
+            $0.origin.host.localizedCaseInsensitiveContains(query) || $0.username.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: $passwords.offersToSave) {
+                    Text("Offer to save passwords")
+                    Text("Browser asks after you sign in to a secure site, keeps passwords in your keychain, and "
+                         + "fills them in on that site when you choose. Private windows never save or fill them.")
+                }
+            }
+
+            Section("Saved Passwords") {
+                if isUnlocked {
+                    savedPasswords
+                } else {
+                    HStack {
+                        Text("Unlock to see your saved passwords.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Unlock…") { Task { await unlock() } }
+                    }
+                }
+            }
+
+            if !passwords.neverSaveSites.isEmpty {
+                Section("Never Saved") {
+                    ForEach(passwords.neverSaveSites, id: \.self) { site in
+                        HStack {
+                            Text(site)
+                            Spacer()
+                            Button { passwords.allowSaving(on: site) } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Offer to Save Passwords Again")
+                        }
+                    }
+                }
+            }
+
+            Section("Passkeys") {
+                passkeyStatus
+            }
+        }
+        .onDisappear(perform: lock)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in lock() }
+        .confirmationDialog("Remove this saved password?", isPresented: Binding(get: { removing != nil },
+                                                                                set: { if !$0 { removing = nil } }),
+                            presenting: removing) { account in
+            Button("Remove", role: .destructive) {
+                revealed[account.id] = nil
+                passwords.remove(account)
+            }
+        } message: { account in
+            Text("Browser forgets the password for \(account.username.isEmpty ? "this site" : "“\(account.username)”") "
+                 + "on \(account.origin.host). It can’t be undone.")
+        }
+    }
+
+    @ViewBuilder
+    private var savedPasswords: some View {
+        TextField("Search", text: $query, prompt: Text("Search Passwords"))
+            .labelsHidden()
+        if accounts.isEmpty {
+            Text(query.isEmpty ? "No passwords are saved." : "No passwords match “\(query)”.")
+                .foregroundStyle(.secondary)
+        }
+        ForEach(accounts) { account in
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.origin.port == 443 ? account.origin.host : "\(account.origin.host):\(account.origin.port)")
+                    Text(account.username.isEmpty ? "No user name" : account.username)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(revealed[account.id] ?? "••••••••")
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                Button {
+                    revealed[account.id] = revealed[account.id] == nil ? passwords.password(for: account) : nil
+                } label: {
+                    Image(systemName: revealed[account.id] == nil ? "eye" : "eye.slash")
+                }
+                .help(revealed[account.id] == nil ? "Show Password" : "Hide Password")
+                Button { copy(account) } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .help("Copy Password")
+                Button { removing = account } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .help("Remove Password")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    @ViewBuilder
+    private var passkeyStatus: some View {
+        if !passkeys.isEntitled {
+            Text("Signing in with passkeys and security keys isn’t available in this version of Browser yet.")
+                .foregroundStyle(.secondary)
+        } else {
+            switch passkeys.authorizationState {
+            case .authorized:
+                Text("Websites can ask you to sign in with your passkeys and security keys.")
+                    .foregroundStyle(.secondary)
+            case .notDetermined:
+                LabeledContent("Use your passkeys on websites") {
+                    Button("Allow…") { passkeys.requestAuthorizationIfNeeded() }
+                }
+            default:
+                Text("Browser isn’t allowed to use your passkeys. You can allow it in System Settings.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func unlock() async {
+        let context = LAContext()
+        guard (try? await context.evaluatePolicy(.deviceOwnerAuthentication,
+                                                 localizedReason: "show your saved passwords")) == true else { return }
+        passwords.reload()
+        isUnlocked = true
+    }
+
+    private func lock() {
+        isUnlocked = false
+        revealed = [:]
+        query = ""
+    }
+
+    /// Marked as concealed, so clipboard managers that respect it don't keep the password.
+    private func copy(_ account: SavedPassword) {
+        guard let password = passwords.password(for: account) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(password, forType: .string)
+        pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
     }
 }
 

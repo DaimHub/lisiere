@@ -14,6 +14,10 @@ final class BrowserModel {
     /// Shared by the window's tabs. A private window's keeps its cookies and site data in memory, apart from
     /// other windows, until the window closes.
     let websiteDataStore: WKWebsiteDataStore
+    /// Offers to save sign-ins and fills them in. `nil` for a window whose pages aren't remembered.
+    let passwords: PasswordManager?
+    /// The window showing these tabs, so links from other apps can open in the frontmost one.
+    @ObservationIgnored weak var window: NSWindow?
 
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []
@@ -44,18 +48,19 @@ final class BrowserModel {
 
     init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared,
          history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared,
-         websiteDataStore: WKWebsiteDataStore = .default()) {
+         websiteDataStore: WKWebsiteDataStore = .default(), passwords: PasswordManager? = nil) {
         self.downloads = downloads
         self.sitePermissions = sitePermissions
         self.history = history
         self.zoomLevels = zoomLevels
         self.websiteDataStore = websiteDataStore
+        self.passwords = websiteDataStore.isPersistent ? passwords : nil
         addTab()
         suspender = TabSuspender(browser: self)
     }
 
-    /// A window that keeps nothing once it closes: no history, zoom levels, or site permissions, and cookies and
-    /// site data its tabs share only with each other. Downloads still save.
+    /// A window that keeps nothing once it closes: no history, zoom levels, site permissions, or passwords, and
+    /// cookies and site data its tabs share only with each other. Downloads still save.
     static func makePrivate(downloads: DownloadManager) -> BrowserModel {
         BrowserModel(downloads: downloads, sitePermissions: SitePermissions(), history: nil,
                      zoomLevels: ZoomStore(defaults: nil), websiteDataStore: .nonPersistent())
@@ -70,6 +75,10 @@ final class BrowserModel {
     func makeConfiguration() -> WKWebViewConfiguration {
         let configuration = BrowserTab.makeConfiguration()
         configuration.websiteDataStore = websiteDataStore
+        if passwords != nil {
+            PasswordAutofill.install(in: configuration.userContentController,
+                                     handler: PasswordMessageHandler(browser: self))
+        }
         return configuration
     }
 
@@ -222,6 +231,13 @@ final class BrowserModel {
             activeTabID = tab.id
         }
         activeTab?.load(url)
+    }
+
+    /// Opens links from other apps in new tabs, using the window's only tab if it's a new tab.
+    func openInNewTabs(_ urls: [URL]) {
+        for url in urls {
+            open(url, inNewTab: !isBlank)
+        }
     }
 
     func navigate(to input: String) {

@@ -212,16 +212,8 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         return response
     }
 
-    /// Shows the panel as a sheet on the page's window. A background tab's panel waits until the tab is selected,
-    /// so a page can't take over the window, and is dismissed if the tab closes first.
     private func present(_ alert: NSAlert, in webView: WKWebView) async -> NSApplication.ModalResponse? {
-        guard let tab, await tab.waitUntilSelected() else { return nil }
-        // The selected tab's page joins the window on SwiftUI's next update.
-        for _ in 0..<20 where webView.window == nil {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        guard let window = webView.window else { return nil }
-        return await alert.beginSheetModal(for: window)
+        await tab?.present(alert, in: webView)
     }
 }
 
