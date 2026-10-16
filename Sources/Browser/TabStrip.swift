@@ -26,7 +26,6 @@ struct TabStrip: View {
     private let spacing: CGFloat = 4
     private let maxTabWidth: CGFloat = 220
     private let minTabWidth: CGFloat = 56
-    private let newTabButtonSize: CGFloat = 28
     /// Always leave some empty strip to drag the window by.
     private let minDragAreaWidth: CGFloat = 40
 
@@ -46,7 +45,7 @@ struct TabStrip: View {
                 : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.tabRowHeight) + 12
             let count = CGFloat(browser.tabs.count)
             let availableWidth = max(minTabWidth, geometry.size.width - leading - BrowserChrome.edgeInset
-                                     - newTabButtonSize - spacing - minDragAreaWidth)
+                                     - minDragAreaWidth)
             let tabWidth = min(maxTabWidth,
                                max(minTabWidth, ((availableWidth - spacing * (count - 1)) / count).rounded(.down)))
             let tabsWidth = tabWidth * count + spacing * (count - 1)
@@ -73,13 +72,6 @@ struct TabStrip: View {
                 }
                 .frame(width: min(tabsWidth, availableWidth))
 
-                Button { browser.addTab() } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(ChromeIconButtonStyle(size: newTabButtonSize))
-                .help("New Tab (⌘T)")
-                .accessibilityLabel("New Tab")
-
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
@@ -101,18 +93,6 @@ struct TabStrip: View {
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
                     .contextMenu { stripMenu }
-                Button { tabLayout = .horizontal } label: {
-                    Image(systemName: "rectangle.topthird.inset.filled")
-                }
-                .buttonStyle(ChromeIconButtonStyle(size: 28))
-                .help("Use Horizontal Tabs (⇧⌘S)")
-                .accessibilityLabel("Use Horizontal Tabs")
-                Button { browser.addTab() } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(ChromeIconButtonStyle(size: 28))
-                .help("New Tab (⌘T)")
-                .accessibilityLabel("New Tab")
             }
             .padding(.leading, isFullScreen ? BrowserChrome.edgeInset
                      : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.navigationBarHeight) + 8)

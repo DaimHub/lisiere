@@ -327,11 +327,18 @@ private struct PasswordSettings: View {
 
 private struct AppearanceSettings: View {
     @Environment(ProfilePreferences.self) private var preferences
+    @State private var isCustomizingToolbar = false
 
     var body: some View {
         @Bindable var preferences = preferences
         @Bindable var appearance = preferences.appearance
         Form {
+            Section("Toolbar") {
+                LabeledContent("Buttons & order") {
+                    Button("Customize Toolbar…") { isCustomizingToolbar = true }
+                }
+            }
+
             Picker("Profile theme", selection: $appearance.selection) {
                 ForEach(BrowserAppearance.allCases) { theme in
                     Text(theme.title).tag(theme)
@@ -416,6 +423,9 @@ private struct AppearanceSettings: View {
                 Text("Your choice appears on the start page and in the Dock while Lisière is running. "
                      + "Finder keeps the Lutin icon.")
             }
+        }
+        .sheet(isPresented: $isCustomizingToolbar) {
+            ToolbarSettings(preferences: preferences)
         }
         .onChange(of: preferences.mascot) { _, choice in choice.applyDockIcon(palette: preferences.mascotPalette) }
         .onChange(of: preferences.mascotPalette) { _, palette in preferences.mascot.applyDockIcon(palette: palette) }

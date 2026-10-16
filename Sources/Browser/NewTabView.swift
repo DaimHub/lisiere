@@ -6,7 +6,7 @@ struct NewTabView: View {
     let browser: BrowserModel
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
-    private var page: NewTabPage { browser.preferences.newTabPage }
+    private var page: NewTabPage { browser.activeTab?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
     private var mascot: Mascot { browser.preferences.mascot }
     private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
 

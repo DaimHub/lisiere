@@ -16,6 +16,9 @@ final class ProfilePreferences {
     var mascotPalette: MascotPalette { didSet { defaults?.set(mascotPalette.rawValue, forKey: MascotPalette.storageKey) } }
     var searchEngine: SearchEngine { didSet { defaults?.set(searchEngine.rawValue, forKey: SearchEngine.storageKey) } }
     var newTabPage: NewTabPage { didSet { defaults?.set(newTabPage.rawValue, forKey: NewTabPage.storageKey) } }
+    var toolbarLayout: BrowserToolbarLayout {
+        didSet { defaults?.set(toolbarLayout.storedValue, forKey: BrowserToolbarLayout.storageKey) }
+    }
     var tabLayout: TabLayout { didSet { defaults?.set(tabLayout.rawValue, forKey: TabLayout.storageKey) } }
     var bookmarksBarVisibility: BookmarksBarVisibility {
         didSet { defaults?.set(bookmarksBarVisibility.rawValue, forKey: BookmarksBarVisibility.storageKey) }
@@ -32,6 +35,7 @@ final class ProfilePreferences {
         mascotPalette = defaults?.string(forKey: MascotPalette.storageKey).flatMap(MascotPalette.init(rawValue:)) ?? (defaults == nil ? .defaultChoice : .current())
         searchEngine = defaults?.string(forKey: SearchEngine.storageKey).flatMap(SearchEngine.init) ?? .google
         newTabPage = defaults?.string(forKey: NewTabPage.storageKey).flatMap(NewTabPage.init) ?? .startPage
+        toolbarLayout = BrowserToolbarLayout(storedValue: defaults?.stringArray(forKey: BrowserToolbarLayout.storageKey))
         tabLayout = defaults?.string(forKey: TabLayout.storageKey).flatMap(TabLayout.init) ?? .horizontal
         bookmarksBarVisibility = defaults?.string(forKey: BookmarksBarVisibility.storageKey)
             .flatMap(BookmarksBarVisibility.init) ?? .always
@@ -42,7 +46,7 @@ final class ProfilePreferences {
     // Copy explicit settings only: never credentials, grants, history, caches, or WebKit interaction state.
     static let copiedKeys = ["profileAccent", "profileCustomAccent", BrowserAppearance.storageKey, WebPageAppearance.storageKey,
                              WebPageAppearance.separateStorageKey, Mascot.storageKey, MascotPalette.storageKey,
-                             SearchEngine.storageKey, NewTabPage.storageKey, TabLayout.storageKey,
+                             SearchEngine.storageKey, NewTabPage.storageKey, TabLayout.storageKey, BrowserToolbarLayout.storageKey,
                              BookmarksBarVisibility.storageKey, SessionPreferences.restoresWindowsKey,
                              DownloadPreferences.asksWhereToSaveKey, "blocksTrackers", "trackerBlockingExceptions",
                              "offersToSavePasswords", "neverSavePasswordSites", "pageZoomLevels", "bookmarks"]

@@ -35,7 +35,7 @@ struct DownloadsButton: View {
     }
 }
 
-private struct DownloadsList: View {
+struct DownloadsList: View {
     let downloads: DownloadManager
 
     var body: some View {
@@ -57,6 +57,12 @@ private struct DownloadsList: View {
 
             ScrollView {
                 VStack(spacing: 2) {
+                    if downloads.items.isEmpty {
+                        Text("No downloads yet")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                    }
                     ForEach(downloads.items) { item in
                         DownloadRow(item: item, downloads: downloads)
                     }

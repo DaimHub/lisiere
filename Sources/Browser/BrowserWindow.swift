@@ -24,6 +24,8 @@ struct BrowserWindow: View {
     @State private var hoverCardTabID: UUID?
     let isFullScreen: Bool
     @State private var addressIsFocused = false
+    @State private var toolbarWidth: CGFloat = 800
+    @State private var isShowingDownloads = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
@@ -307,111 +309,169 @@ struct BrowserWindow: View {
     }
 
     private var navigationBar: some View {
-        let tab = browser.activeTab
-        let isLoading = tab?.isLoading == true
-
+        let presentation = browser.preferences.toolbarLayout.presentation(
+            width: toolbarWidth, hasDownloads: !browser.downloads.items.isEmpty)
         return HStack(spacing: 6) {
-            HStack(spacing: 0) {
-                Button { browser.goBack() } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .disabled(!(tab?.canNavigateBack ?? false))
-                .help("Back (⌘[)")
-                .contextMenu {
-                    historyMenu(for: Array((tab?.backList ?? []).reversed()))
-                }
-
-                Button { browser.goForward() } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .disabled(!(tab?.canGoForward ?? false))
-                .help("Forward (⌘])")
-                .contextMenu {
-                    historyMenu(for: tab?.forwardList ?? [])
-                }
-
-                Button {
-                    if isLoading { browser.stopLoading() } else { browser.reload() }
-                } label: {
-                    Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .disabled(tab?.isNewTab ?? true)
-                .help(isLoading ? "Stop Loading" : "Reload (⌘R)")
+            ForEach(presentation.visible) { item in
+                toolbarItem(item, compactProfile: presentation.compactProfile)
             }
-            .buttonStyle(ChromeIconButtonStyle(size: 30))
-            .padding(2)
-            .background(Color.primary.opacity(0.035),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            if !browser.isPrivate {
+            if !presentation.overflow.isEmpty {
                 Menu {
-                    Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
-                    ForEach(profiles.availableProfiles) { profile in
-                        Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
-                            Label(profile.name, systemImage: profile.icon.rawValue)
+                    ForEach(presentation.overflow) { item in
+                        Button { performToolbarAction(item) } label: {
+                            Label(item.title, systemImage: item.symbol)
                         }
-                    }
-                    Divider()
-                    Button("Manage Profiles…") {
-                        profiles.settingsTab = .profiles
-                        openSettings()
+                        .disabled(toolbarActionDisabled(item))
                     }
                 } label: {
-                    Label(profileID.map(profiles.name) ?? "Private", systemImage: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle")
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    Image(systemName: "ellipsis")
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.visible)
-                .padding(.horizontal, 10)
-                .frame(width: 132, height: BrowserChrome.navigationControlHeight)
-                .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.primary.opacity(0.035))
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(accent.opacity(colorScheme == .dark ? 0.14 : 0.09))
-                }
-                .help("Profile: \(profileID.map(profiles.name) ?? "Private")")
-                .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
-
-            }
-            HStack(spacing: 7) {
-                Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-                AddressField(text: $address, isFocused: $addressIsFocused, completionStart: completionStart,
-                             focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
-                             edit: editAddress, perform: performAddressCommand)
-                zoomButton
-                passwordButton
-                trackerBlockingButton
-                bookmarkButton
-            }
-            .padding(.leading, 11)
-            .padding(.trailing, 4)
-            .frame(height: BrowserChrome.navigationControlHeight)
-            .background(Color.primary.opacity(0.065),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(addressIsFocused ? accent : .clear, lineWidth: 2)
-            }
-            .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
-
-            if browser.isPrivate {
-                privateLabel
-            }
-
-            if !browser.downloads.items.isEmpty {
-                DownloadsButton(downloads: browser.downloads)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(ChromeIconButtonStyle(size: 30))
+                .toolbarControlBackground()
+                .help("More Toolbar Actions")
+                .accessibilityLabel("More Toolbar Actions")
             }
         }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { toolbarWidth = $0 }
         .padding(.trailing, BrowserChrome.edgeInset)
         .frame(height: BrowserChrome.navigationBarHeight)
-        .animation(.snappy(duration: 0.2), value: browser.downloads.items.isEmpty)
+        .popover(isPresented: $isShowingDownloads) { DownloadsList(downloads: browser.downloads) }
+    }
+
+    @ViewBuilder
+    private func toolbarItem(_ item: BrowserToolbarItem, compactProfile: Bool) -> some View {
+        switch item {
+        case .profile:
+            if browser.isPrivate { privateLabel } else { profileMenu(compact: compactProfile) }
+        case .navigation: navigationButtons
+        case .address: addressControl.frame(minWidth: 160, maxWidth: .infinity)
+        case .downloads:
+            DownloadsButton(downloads: browser.downloads)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        default:
+            Button { performToolbarAction(item) } label: {
+                Image(systemName: item.symbol)
+            }
+            .buttonStyle(ChromeIconButtonStyle(size: 30))
+            .toolbarControlBackground()
+            .disabled(toolbarActionDisabled(item))
+            .help(item == .newTab ? "New Tab (⌘T)" : item.title)
+            .accessibilityLabel(item.title)
+        }
+    }
+
+    private func toolbarActionDisabled(_ item: BrowserToolbarItem) -> Bool {
+        browser.isPrivate && (item == .history || item == .bookmarks)
+    }
+
+    private func performToolbarAction(_ item: BrowserToolbarItem) {
+        switch item {
+        case .newTab: browser.addTab()
+        case .home: browser.goHome()
+        case .privateWindow: openWindow(id: BrowserApp.privateWindowID)
+        case .history: browser.isShowingHistory = true
+        case .downloads: isShowingDownloads = true
+        case .bookmarks:
+            browser.preferences.bookmarksBarVisibility = bookmarksBarVisibility == .never ? .always : .never
+        case .settings: openSettings()
+        default: break
+        }
+    }
+
+    private var navigationButtons: some View {
+        let tab = browser.activeTab
+        let isLoading = tab?.isLoading == true
+        return HStack(spacing: 0) {
+            Button { browser.goBack() } label: {
+                Image(systemName: "chevron.left")
+            }
+            .disabled(!(tab?.canNavigateBack ?? false))
+            .help("Back (⌘[)")
+            .contextMenu {
+                historyMenu(for: Array((tab?.backList ?? []).reversed()))
+            }
+
+            Button { browser.goForward() } label: {
+                Image(systemName: "chevron.right")
+            }
+            .disabled(!(tab?.canGoForward ?? false))
+            .help("Forward (⌘])")
+            .contextMenu {
+                historyMenu(for: tab?.forwardList ?? [])
+            }
+
+            Button {
+                if isLoading { browser.stopLoading() } else { browser.reload() }
+            } label: {
+                Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .disabled(tab?.isNewTab ?? true)
+            .help(isLoading ? "Stop Loading" : "Reload (⌘R)")
+        }
+        .buttonStyle(ChromeIconButtonStyle(size: 30))
+        .toolbarControlBackground()
+    }
+
+    private func profileMenu(compact: Bool) -> some View {
+        Menu {
+            Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
+            ForEach(profiles.availableProfiles) { profile in
+                Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
+                    Label(profile.name, systemImage: profile.icon.rawValue)
+                }
+            }
+            Divider()
+            Button("Manage Profiles…") {
+                profiles.settingsTab = .profiles
+                openSettings()
+            }
+        } label: {
+            Label(profileID.map(profiles.name) ?? "Private", systemImage: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle")
+                .labelStyle(ToolbarProfileLabelStyle(compact: compact))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(compact ? .hidden : .visible)
+        .padding(.horizontal, compact ? 0 : 10)
+        .frame(width: compact ? 34 : 132, height: BrowserChrome.navigationControlHeight)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(accent.opacity(colorScheme == .dark ? 0.14 : 0.09))
+        }
+        .help("Profile: \(profileID.map(profiles.name) ?? "Private")")
+        .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
+    }
+
+    private var addressControl: some View {
+        HStack(spacing: 7) {
+            Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            AddressField(text: $address, isFocused: $addressIsFocused, completionStart: completionStart,
+                         focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
+                         edit: editAddress, perform: performAddressCommand)
+            zoomButton
+            passwordButton
+            trackerBlockingButton
+            bookmarkButton
+        }
+        .padding(.leading, 11)
+        .padding(.trailing, 4)
+        .frame(height: BrowserChrome.navigationControlHeight)
+        .background(Color.primary.opacity(0.065),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(addressIsFocused ? accent : .clear, lineWidth: 2)
+        }
+        .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
     }
 
     @ViewBuilder

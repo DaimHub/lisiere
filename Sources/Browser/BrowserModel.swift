@@ -152,6 +152,17 @@ final class BrowserModel {
         requestAddressFocus()
     }
 
+    /// Reuse an empty tab when possible; Home never discards the current page or its history.
+    func goHome() {
+        if let home = tabs.first(where: \.isNewTab) {
+            activeTabID = home.id
+        } else {
+            addTab()
+        }
+        activeTab?.showsHomePage = true
+        requestAddressFocus()
+    }
+
     func duplicateTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let original = tabs[index]
