@@ -173,6 +173,11 @@ final class ExternalURLRouter {
         browser.openInNewTabs(urls)
     }
 
+    /// SwiftUI can retain a closed window's view and model. Never send a link to that invisible window.
+    func unregister(_ browser: BrowserModel) {
+        browsers.removeAll { $0.browser == nil || $0.browser === browser }
+    }
+
     func open(_ urls: [URL]) {
         let urls = urls.filter(Self.canOpen)
         guard !urls.isEmpty else { return }

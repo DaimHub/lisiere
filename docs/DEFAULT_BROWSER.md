@@ -13,6 +13,12 @@ Lisière uses the native Settings form and AppKit's asynchronous default-applica
 
 Apple documents consent as conditional: the system asks before completion when a change requires it. Do not click **Make Default…** during unattended validation on a user's Mac, even if you intend to cancel a dialog. See [NSWorkspace's default-application API](https://developer.apple.com/documentation/appkit/nsworkspace/setdefaultapplication(at:toopenurlswithscheme:completion:)) and [Apple's default-browser instructions](https://support.apple.com/102362).
 
+## External links
+
+SwiftUI selects a scene before the app delegate receives an external URL. The normal window's `handlesExternalEvents(preferring:allowing:)` modifier makes an existing scene eligible, avoiding a new window for every link. The normal scene is also the fallback for new windows; the private scene never matches external events. See [Apple's scene-selection rules](https://developer.apple.com/documentation/swiftui/scene/handlesexternalevents(matching:)).
+
+`BrowserAppDelegate` remains the single URL entry point. `ExternalURLRouter` opens links in the frontmost registered normal window through `BrowserModel.openInNewTabs`, preserving existing tabs and restoring a minimized destination. A sole blank tab is reused. If no normal window is available, links wait for a normal window. Closing a window unregisters its model immediately, even if SwiftUI retains that model.
+
 ## Validation
 
 `DefaultBrowserFlowTests` injects a fake system service. It covers both schemes, split and unknown states, one or two requests, cancellation, permission failure, unchanged results, delayed refresh, repeated clicks, and System Settings failure. It never calls the real default-application setter. Existing `DefaultBrowserTests` checks the built app's declarations and external URL routing.
@@ -23,5 +29,6 @@ Safe native inspection:
 2. Open General settings. Check the current state, labels, layout, and keyboard navigation without clicking **Make Default…**.
 3. Follow **Open System Settings…**. Verify Desktop & Dock opens, then return to Lisière and check the status again. Do not select another browser.
 4. Compare the system's HTTP/HTTPS handlers before and after. Explicitly launching a URL in the test app verifies delivery, not the system's default-browser selection.
+5. Send HTTP and HTTPS URLs with `open -a /path/to/the/isolated/Lisiere.app URL...`. With an existing page open, both URLs must append tabs to the same normal window. Also check multiple normal windows, a frontmost private window, a minimized normal window, and a closed normal window with only private browsing remaining. Existing tabs must survive, and private browsing must not receive external links.
 
 The following requires the user's own action or a disposable macOS account: accept the native default-browser change, verify both schemes, open HTTP and HTTPS links from another app without specifying an application, then choose a different browser in System Settings and verify Lisière refreshes on return. Test keeping the current browser in a separate run. Do not infer these outcomes from mock tests or a successful build.

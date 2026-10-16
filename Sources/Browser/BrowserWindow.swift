@@ -88,6 +88,7 @@ struct BrowserWindow: View {
                                              isFullScreen: $isFullScreen,
                                              onWindowChange: { [browser] in browser.window = $0 }) {
             session?.detach(browser)
+            ExternalURLRouter.shared.unregister(browser)
         })
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
