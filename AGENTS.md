@@ -28,5 +28,6 @@
 ## Git
 
 - `origin` is `DaimHub/lisiere`; `upstream` is `athasdev/browser`.
+- `main` is the integration baseline. Before reusing an older worktree, fetch `origin` and compare its history with `origin/main`. Preserve pending work before updating, and integrate current `main` before building or installing a new version.
 - Verify the personal account before GitHub writes. Do not change globally active GitHub accounts or Git identity.
 - Preserve unrelated work. Consult docs/DEVELOPMENT.md before syncing upstream.

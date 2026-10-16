@@ -51,3 +51,13 @@ Les trois concepts raster sont conservés dans `black-options/`, sans être emba
   `collection/settings-white.png` ; prompts et provenance dans `collection/README.md`.
 
 La limite Finder/Dock et la portée de la capture du Dock décrites plus haut restent applicables.
+
+## Correction : accueil sans fond de mascotte
+
+- Suppression du fond ajouté par `NewTabView` pour toutes les mascottes et les deux palettes.
+- Les 18 SVG `Mascot-*` contiennent uniquement le corps, les yeux et les pupilles, sans fond.
+- Compilation Release réussie et `codesign --verify --deep --strict` valide.
+- Lutin noir puis blanc inspectés sur la page de nouvel onglet en apparence claire : aucun carré derrière la mascotte.
+- Contrôle dans une copie du binaire Release avec un identifiant de bundle isolé ; l'application installée,
+  ses profils et ses préférences n'ont pas été remplacés. L'apparence sombre n'a pas été inspectée visuellement.
+- Journal et capture dans `.build/design/transparent-mascots/` (ignorés par Git).

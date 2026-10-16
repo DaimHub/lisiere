@@ -82,6 +82,7 @@ sélectionné. Les préférences `mascot` et `mascotPalette` sont indépendantes
 restaurées au lancement. L'ancien choix de mascotte reste valable ; la palette
 par défaut est noire.
 
-La palette choisie s'applique à l'accueil et au Dock. Pour garder le contraste,
-les mascottes blanches ont un fond noir sur l'accueil ; les noires disposent d'un
-fond clair quand l'app est en apparence sombre. Finder garde l'icône native Lutin.
+La palette choisie s'applique à l'accueil et au Dock. Sur la page de nouvel onglet,
+toujours utiliser les variantes transparentes `Mascot-*`, sans fond ajouté, dans les
+deux palettes et les deux apparences. Les variantes `Dock-*` conservent leur fond
+pour les icônes et leurs aperçus. Finder garde l'icône native Lutin.
