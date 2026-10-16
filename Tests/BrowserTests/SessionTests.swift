@@ -130,4 +130,28 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(relaunched.attach(restored), 0)
         XCTAssertEqual(restored.activeTab?.title, "Saved")
     }
+    func testLegacySessionsDecodeWithoutParkedWindowsOrWindowIdentity() throws {
+        let bytes = try PropertyListEncoder.binary.encode(SessionSnapshot(windows: [window(["Legacy"])]))
+        var legacy = try XCTUnwrap(PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any])
+        legacy.removeValue(forKey: "parkedWindows")
+        let data = try PropertyListSerialization.data(fromPropertyList: legacy, format: .binary, options: 0)
+        let restored = try PropertyListDecoder().decode(SessionSnapshot.self, from: data)
+        XCTAssertEqual(restored.windows.first?.tabs.first?.title, "Legacy")
+        XCTAssertNil(restored.windows.first?.profileWindowID)
+        XCTAssertTrue(restored.parkedWindows.isEmpty)
+    }
+
+    func testClosingRestoredWindowPreservesItsUnvisitedParkedTabsForManualReopen() throws {
+        let file = makeFile()
+        let ownerID = UUID()
+        var parked = window(["NotVisitedYet"])
+        parked.profileWindowID = ownerID
+        file.writeNow(try PropertyListEncoder.binary.encode(SessionSnapshot(parkedWindows: [parked])))
+        let session = SessionStore(file: file)
+        XCTAssertFalse(session.hasPendingWindows)
+        session.closeParkedWindow(ownerID: ownerID)
+        XCTAssertTrue(session.snapshot.parkedWindows.isEmpty)
+        XCTAssertEqual(session.reopenableWindows.first?.tabs.first?.title, "NotVisitedYet")
+    }
+
 }

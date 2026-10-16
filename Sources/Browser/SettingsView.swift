@@ -2,38 +2,62 @@ import LocalAuthentication
 import SwiftUI
 import WebKit
 
-/// Lisière ▸ Settings (⌘,).
+enum SettingsTab: Hashable {
+    case general, appearance, privacy, passwords, sites, downloads, profiles
+}
+
+/// Lisière ▸ Settings (⌘,). Manage Profiles routes to this same window's Profiles tab.
 struct SettingsView: View {
-    var profileID: UUID? = nil
-    var profileName: String? = nil
-    let browsingData: BrowsingData
-    let contentBlocker: ContentBlocker
-    let sitePermissions: SitePermissions
-    let zoomLevels: ZoomStore
-    let passwords: PasswordManager
+    @Bindable var profiles: ProfileStore
     let passkeys: Passkeys
     let updater: AppUpdater
 
     var body: some View {
-        TabView {
-            GeneralSettings(updater: updater)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            AppearanceSettings()
-                .tabItem { Label("Appearance", systemImage: "macwindow") }
-            PrivacySettings(browsingData: browsingData, contentBlocker: contentBlocker, profileName: profileName)
-                .id("privacy-\(profileID?.uuidString ?? "")")
-                .tabItem { Label("Privacy", systemImage: "hand.raised") }
-            PasswordSettings(passwords: passwords, passkeys: passkeys)
-                .id("passwords-\(profileID?.uuidString ?? "")")
-                .tabItem { Label("Passwords", systemImage: "key") }
-            SiteSettings(contentBlocker: contentBlocker, sitePermissions: sitePermissions, zoomLevels: zoomLevels)
-                .id("sites-\(profileID?.uuidString ?? "")")
-                .tabItem { Label("Site Settings", systemImage: "globe") }
-            DownloadSettings()
-                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+        VStack(spacing: 0) {
+            if profiles.settingsTab != .profiles {
+                Picker("Profile", selection: Binding(get: { profiles.selectedID }, set: { id in
+                    do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
+                })) {
+                    ForEach(profiles.availableProfiles) { profile in
+                        Label(profile.name, systemImage: profile.icon.rawValue).tag(profile.id)
+                    }
+                }
+                .padding()
+                Divider()
+            }
+            TabView(selection: $profiles.settingsTab) {
+                if let context = profiles.context(for: profiles.selectedID) {
+                    profileTabs(context)
+                        .environment(context.preferences)
+                        .environment(context.favicons)
+                }
+                ProfilesView(profiles: profiles)
+                    .tabItem { Label("Profiles", systemImage: "person.2") }.tag(SettingsTab.profiles)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 580, height: 500)
+        .frame(width: 580, height: 560)
+        .onAppear { if profiles.loadError != nil { profiles.settingsTab = .profiles } }
+    }
+
+    @ViewBuilder private func profileTabs(_ context: ProfileContext) -> some View {
+        GeneralSettings(updater: updater)
+            .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
+        AppearanceSettings()
+            .tabItem { Label("Appearance", systemImage: "macwindow") }.tag(SettingsTab.appearance)
+        PrivacySettings(browsingData: context.browsingData, contentBlocker: context.contentBlocker,
+                        profileName: profiles.name(context.id))
+            .id("privacy-\(context.id)")
+            .tabItem { Label("Privacy", systemImage: "hand.raised") }.tag(SettingsTab.privacy)
+        PasswordSettings(passwords: context.passwords, passkeys: passkeys)
+            .id("passwords-\(context.id)")
+            .tabItem { Label("Passwords", systemImage: "key") }.tag(SettingsTab.passwords)
+        SiteSettings(contentBlocker: context.contentBlocker, sitePermissions: context.sitePermissions,
+                     zoomLevels: context.zoomLevels)
+            .id("sites-\(context.id)")
+            .tabItem { Label("Site Settings", systemImage: "globe") }.tag(SettingsTab.sites)
+        DownloadSettings()
+            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(SettingsTab.downloads)
     }
 }
 

@@ -7,7 +7,6 @@ struct BrowserApp: App {
     static let privateWindowID = "private"
 
     @NSApplicationDelegateAdaptor(BrowserAppDelegate.self) private var appDelegate
-    static let profilesWindowID = "profiles"
     @State private var profiles: ProfileStore
 
     init() {
@@ -24,7 +23,7 @@ struct BrowserApp: App {
             ProfileBrowserWindow(profiles: profiles, profileID: request.profileID)
                 .frame(minWidth: 680, minHeight: 440)
         } defaultValue: {
-            ProfileWindowRequest(profileID: profiles.selectedID)
+            ProfileWindowRequest(profileID: profiles.defaultWindowProfileID)
         }
         .windowStyle(.hiddenTitleBar)
         .restorationBehavior(.disabled)
@@ -39,12 +38,6 @@ struct BrowserApp: App {
             ProfileWindowRequest(profileID: profiles.selectedID)
         }
         .windowStyle(.hiddenTitleBar)
-        .restorationBehavior(.disabled)
-
-        Window("Profiles", id: Self.profilesWindowID) {
-            ProfilesView(profiles: profiles)
-        }
-        .windowResizability(.contentSize)
         .restorationBehavior(.disabled)
 
         Settings { ProfileSettings(profiles: profiles) }
@@ -67,6 +60,7 @@ private struct BrowserCommands: Commands {
     let updater: AppUpdater
     @FocusedValue(\.browserModel) private var browser
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     private var bookmarks: BookmarkStore? { context?.bookmarks }
     private var bookmarksBarVisibility: BookmarksBarVisibility {
         get { context?.preferences.bookmarksBarVisibility ?? .always }
@@ -193,21 +187,24 @@ private struct BrowserCommands: Commands {
         CommandMenu("Profiles") {
             ForEach(profiles.availableProfiles) { profile in
                 Button {
-                    profiles.activate(profile.id, openWindow: openWindow)
+                    profiles.activate(profile.id, in: browser, openWindow: openWindow)
                 } label: {
                     if profile.id == profileID { Label(profile.name, systemImage: "checkmark") }
                     else { Label(profile.name, systemImage: profile.icon.rawValue) }
                 }
             }
             Divider()
-            Button("Next Profile") { profiles.switchProfile(from: profileID, direction: 1, openWindow: openWindow) }
+            Button("Next Profile") { profiles.switchProfile(from: profileID, direction: 1, in: browser, openWindow: openWindow) }
                 .keyboardShortcut("]", modifiers: [.command, .option])
                 .disabled(profiles.availableProfiles.count < 2)
-            Button("Previous Profile") { profiles.switchProfile(from: profileID, direction: -1, openWindow: openWindow) }
+            Button("Previous Profile") { profiles.switchProfile(from: profileID, direction: -1, in: browser, openWindow: openWindow) }
                 .keyboardShortcut("[", modifiers: [.command, .option])
                 .disabled(profiles.availableProfiles.count < 2)
             Divider()
-            Button("Manage Profiles…") { openWindow(id: BrowserApp.profilesWindowID) }
+            Button("Manage Profiles…") {
+                profiles.settingsTab = .profiles
+                openSettings()
+            }
         }
         CommandMenu("History") {
             Button("Back") { browser?.goBack() }

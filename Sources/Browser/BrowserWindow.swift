@@ -13,7 +13,6 @@ struct BrowserWindow: View {
     let profiles: ProfileStore
     let profileID: UUID
     let bookmarks: BookmarkStore
-    let session: SessionStore?
     @Bindable private var browser: BrowserModel
     @State private var address = ""
     /// What the user typed, without the inline completion.
@@ -23,7 +22,7 @@ struct BrowserWindow: View {
     @State private var selectedSuggestion: Int?
     @State private var addressBlurRequest = 0
     @State private var hoverCardTabID: UUID?
-    @State private var isFullScreen = false
+    let isFullScreen: Bool
     @State private var addressIsFocused = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
@@ -37,11 +36,11 @@ struct BrowserWindow: View {
     }
 
     init(bookmarks: BookmarkStore, context: ProfileContext, profiles: ProfileStore,
-         browser: BrowserModel) {
+         browser: BrowserModel, isFullScreen: Bool) {
         self.bookmarks = bookmarks
         self.profiles = profiles
         self.profileID = context.id
-        self.session = browser.isPrivate ? nil : context.session
+        self.isFullScreen = isFullScreen
         self.browser = browser
     }
 
@@ -85,14 +84,6 @@ struct BrowserWindow: View {
                 BrowserChrome.privateTint.ignoresSafeArea()
             }
         }
-        .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
-                                             isFullScreen: $isFullScreen,
-                                             onWindowChange: { [browser] in browser.window = $0 }) {
-            session?.detach(browser)
-            profiles.unregister(browser)
-            ExternalURLRouter.shared.unregister(browser)
-            browser.releaseClosedWindow()
-        })
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
@@ -119,19 +110,7 @@ struct BrowserWindow: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
-            guard let window = notification.object as? NSWindow, window === browser.window else { return }
-            do { try profiles.select(profileID) } catch { profiles.errorMessage = error.localizedDescription }
-        }
         .onAppear {
-            profiles.register(browser)
-            if let session {
-                for _ in 0..<session.attach(browser) {
-                    openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID))
-                }
-            }
-            if !browser.isPrivate { profiles.restoreOtherProfiles(except: profileID, openWindow: openWindow) }
-            ExternalURLRouter.shared.register(browser, openWindow: openWindow)
             if browser.activeTab?.isNewTab == true {
                 browser.requestAddressFocus()
             }
@@ -141,7 +120,7 @@ struct BrowserWindow: View {
     private var profileSwipeArea: some View {
         ProfileSwipeArea(enabled: profiles.availableProfiles.count > 1) { direction in
             hoverCardTabID = nil
-            profiles.switchProfile(from: profileID, direction: direction, openWindow: openWindow)
+            browser.profileWindow?.switchBy(direction)
         }
     }
 
@@ -369,19 +348,25 @@ struct BrowserWindow: View {
             Menu {
                 Text("Profile: \(profiles.name(profileID))")
                 ForEach(profiles.availableProfiles) { profile in
-                    Button { profiles.activate(profile.id, openWindow: openWindow) } label: {
+                    Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
                         Label(profile.name, systemImage: profile.icon.rawValue)
                     }
                 }
                 Divider()
-                Button("Manage Profiles…") { openWindow(id: BrowserApp.profilesWindowID) }
+                Button("Manage Profiles…") {
+                    profiles.settingsTab = .profiles
+                    openSettings()
+                }
             } label: {
                 Label(profiles.name(profileID), systemImage: profiles.profile(profileID)?.icon.rawValue ?? "person.crop.circle")
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 110)
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.visible)
+            .padding(.horizontal, 10)
+            .frame(width: 132, height: BrowserChrome.navigationControlHeight)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .help("Profile: \(profiles.name(profileID))")
             .accessibilityLabel("Profile: \(profiles.name(profileID))")
 
@@ -404,7 +389,7 @@ struct BrowserWindow: View {
             }
             .padding(.leading, 11)
             .padding(.trailing, 4)
-            .frame(height: 34)
+            .frame(height: BrowserChrome.navigationControlHeight)
             .background(Color.primary.opacity(0.065),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
@@ -446,7 +431,7 @@ struct BrowserWindow: View {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(accent)
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: BrowserChrome.navigationControlHeight)
             .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .help("Private Window: history, cookies, and website data aren’t kept after it closes")
             .accessibilityLabel("Private Window")

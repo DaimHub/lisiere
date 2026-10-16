@@ -6,6 +6,7 @@ enum BrowserChrome {
     static let tabRowHeight: CGFloat = 40
     static let tabHeight: CGFloat = 30
     static let navigationBarHeight: CGFloat = 46
+    static let navigationControlHeight: CGFloat = 34
     static let sidebarWidth: CGFloat = 236
     static let sidebarTabHeight: CGFloat = 32
     /// Inset shared by the navigation bar and the page, so their edges line up.
