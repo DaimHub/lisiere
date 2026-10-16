@@ -392,37 +392,10 @@ private struct AppearanceSettings: View {
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                     ForEach(Mascot.allCases) { choice in
-                        Button {
+                        MascotChoiceButton(choice: choice, palette: preferences.mascotPalette,
+                                           isSelected: preferences.mascot == choice) {
                             preferences.mascot = choice
-                        } label: {
-                            VStack(spacing: 8) {
-                                Image(choice.iconName(for: preferences.mascotPalette))
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 64, height: 64)
-                                HStack(spacing: 5) {
-                                    Image(systemName: preferences.mascot == choice ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(preferences.mascot == choice ? Color.accentColor : Color.secondary)
-                                    Text(choice.title)
-                                }
-                                .font(.callout)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .contentShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        .buttonStyle(.plain)
-                        .background(preferences.mascot == choice ? Color.accentColor.opacity(0.08) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 10))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(preferences.mascot == choice ? Color.accentColor : Color.primary.opacity(0.12),
-                                              lineWidth: 1)
-                        }
-                        .accessibilityLabel("\(choice.title), \(preferences.mascotPalette.title)")
-                        .accessibilityValue(preferences.mascot == choice ? "Selected" : "Not selected")
-                        .accessibilityAddTraits(preferences.mascot == choice ? [.isSelected] : [])
-                        .help("Use \(choice.title) on the start page and in the Dock")
                     }
                 }
             } header: {
@@ -437,6 +410,44 @@ private struct AppearanceSettings: View {
         }
         .onChange(of: preferences.mascot) { _, choice in choice.applyDockIcon(palette: preferences.mascotPalette) }
         .onChange(of: preferences.mascotPalette) { _, palette in preferences.mascot.applyDockIcon(palette: palette) }
+    }
+}
+
+private struct MascotChoiceButton: View {
+    let choice: Mascot
+    let palette: MascotPalette
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 8) {
+                Image(choice.iconName(for: palette))
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 64, height: 64)
+                HStack(spacing: 5) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Text(choice.title)
+                }
+                .font(.callout)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityLabel("\(choice.title), \(palette.title)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .help("Use \(choice.title) on the start page and in the Dock")
     }
 }
 
