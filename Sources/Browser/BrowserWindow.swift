@@ -1,21 +1,39 @@
 import SwiftUI
 import WebKit
 
+private struct AddressBarFrameKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
 struct BrowserWindow: View {
     let bookmarks: BookmarkStore
+    let session: SessionStore?
     @State private var browser: BrowserModel
     @State private var address = ""
+    /// What the user typed, without the inline completion.
+    @State private var typedAddress = ""
+    @State private var completionStart: Int?
+    @State private var suggestions: [AddressSuggestion] = []
+    @State private var selectedSuggestion: Int?
+    @State private var addressBlurRequest = 0
     @State private var hoverCardTabID: UUID?
     @State private var isFullScreen = false
-    @FocusState private var addressIsFocused: Bool
+    @State private var addressIsFocused = false
+    @Environment(\.openWindow) private var openWindow
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
 
     private let accent = Color(red: 0.38, green: 0.49, blue: 0.54)
 
-    init(bookmarks: BookmarkStore, downloads: DownloadManager) {
+    /// Pass `nil` for the history and session of a window whose pages aren't remembered.
+    init(bookmarks: BookmarkStore, downloads: DownloadManager, history: HistoryStore?, session: SessionStore?) {
         self.bookmarks = bookmarks
-        _browser = State(initialValue: BrowserModel(downloads: downloads))
+        self.session = session
+        _browser = State(initialValue: BrowserModel(downloads: downloads, history: history))
     }
 
     var body: some View {
@@ -39,27 +57,137 @@ struct BrowserWindow: View {
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
         }
+        .overlayPreferenceValue(AddressBarFrameKey.self) { anchor in
+            suggestionList(below: anchor)
+        }
         .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
         .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
         .animation(.snappy(duration: 0.25), value: tabLayout)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background(WindowGlassBackground())
         .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
-                                             isFullScreen: $isFullScreen))
+                                             isFullScreen: $isFullScreen) { session?.detach(browser) })
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
         .focusedSceneValue(\.browserModel, browser)
         .onChange(of: browser.activeTabID) { _, _ in
             address = browser.activeTab?.url?.absoluteString ?? ""
+            closeSuggestions()
         }
-        .onChange(of: browser.addressFocusRequest) { _, _ in
-            addressIsFocused = true
-        }
-        .onAppear {
-            if browser.activeTab?.isNewTab == true {
-                addressIsFocused = true
+        .onChange(of: addressIsFocused) { _, isFocused in
+            guard !isFocused else { return }
+            // A click on a suggestion takes focus first, so the list stays a moment for the click to land.
+            Task {
+                try? await Task.sleep(for: .milliseconds(150))
+                if !addressIsFocused { closeSuggestions() }
             }
         }
+        .sheet(isPresented: $browser.isShowingHistory) {
+            if let history = browser.history {
+                HistoryView(history: history) { url, inNewTab in
+                    browser.isShowingHistory = false
+                    browser.open(url, inNewTab: inNewTab)
+                }
+            }
+        }
+        .onAppear {
+            if let session {
+                for _ in 0..<session.attach(browser) {
+                    openWindow(id: BrowserApp.windowID)
+                }
+            }
+            if browser.activeTab?.isNewTab == true {
+                browser.requestAddressFocus()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func suggestionList(below anchor: Anchor<CGRect>?) -> some View {
+        if let anchor, !suggestions.isEmpty {
+            GeometryReader { geometry in
+                let frame = geometry[anchor]
+                AddressSuggestionList(suggestions: suggestions, selectedIndex: selectedSuggestion) { suggestion in
+                    open(suggestion)
+                }
+                .frame(width: frame.width)
+                .offset(x: frame.minX, y: frame.maxY + 4)
+            }
+            .transition(.opacity)
+        }
+    }
+
+    // MARK: Address bar
+
+    private func editAddress(_ text: String) {
+        // Typing more of the text completes it again; deleting doesn't, so the deleted completion stays gone.
+        let isAppending = text.count > typedAddress.count && text.hasPrefix(typedAddress)
+        typedAddress = text
+        selectedSuggestion = nil
+        suggestions = AddressSuggestions.rank(text, pages: browser.history?.pages ?? [],
+                                              bookmarks: bookmarks.bookmarks)
+        if isAppending, let completion = AddressSuggestions.inlineCompletion(of: text, with: suggestions.first) {
+            completionStart = (text as NSString).length
+            address = completion
+        } else {
+            completionStart = nil
+        }
+    }
+
+    private func performAddressCommand(_ command: AddressField.Command) -> Bool {
+        switch command {
+        case .moveDown, .moveUp:
+            guard !suggestions.isEmpty else { return false }
+            let offset = command == .moveDown ? 1 : -1
+            let index = (selectedSuggestion ?? -1) + offset
+            completionStart = nil
+            if index < 0 {
+                selectedSuggestion = nil
+                address = typedAddress
+            } else {
+                selectedSuggestion = min(index, suggestions.count - 1)
+                address = suggestions[min(index, suggestions.count - 1)].url.absoluteString
+            }
+            return true
+        case .submit:
+            if let selectedSuggestion, suggestions.indices.contains(selectedSuggestion) {
+                open(suggestions[selectedSuggestion])
+            } else {
+                browser.navigate(to: address)
+                finishEditingAddress()
+            }
+            return true
+        case .cancel:
+            if suggestions.isEmpty {
+                address = browser.activeTab?.url?.absoluteString ?? ""
+                typedAddress = address
+            } else {
+                address = typedAddress
+                closeSuggestions()
+            }
+            completionStart = nil
+            return true
+        }
+    }
+
+    private func open(_ suggestion: AddressSuggestion) {
+        // The list can report a click more than once before it closes.
+        guard !suggestions.isEmpty else { return }
+        address = suggestion.url.absoluteString
+        browser.open(suggestion.url)
+        finishEditingAddress()
+    }
+
+    private func finishEditingAddress() {
+        closeSuggestions()
+        completionStart = nil
+        addressBlurRequest += 1
+    }
+
+    private func closeSuggestions() {
+        suggestions = []
+        selectedSuggestion = nil
+        typedAddress = ""
     }
 
     /// Navigation, bookmarks, and the page. In the vertical layout the sidebar supplies the leading inset.
@@ -124,6 +252,14 @@ struct BrowserWindow: View {
                     PageErrorView(error: error, isLoading: tab.isLoading) { tab.retry() }
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if tab.isFindBarVisible {
+                    FindBar(tab: tab, browser: browser)
+                        .padding(10)
+                        .transition(.opacity.combined(with: .offset(y: -4)))
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: tab.isFindBarVisible)
             .overlay(alignment: .topLeading) {
                 if tab.isLoading {
                     GeometryReader { geometry in
@@ -189,15 +325,10 @@ struct BrowserWindow: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 14)
-                TextField("Search or enter address", text: $address)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .focused($addressIsFocused)
-                    .onSubmit {
-                        browser.navigate(to: address)
-                        addressIsFocused = false
-                    }
-                    .accessibilityLabel("Address and search")
+                AddressField(text: $address, isFocused: $addressIsFocused, completionStart: completionStart,
+                             focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
+                             edit: editAddress, perform: performAddressCommand)
+                zoomButton
                 bookmarkButton
             }
             .padding(.leading, 11)
@@ -209,6 +340,7 @@ struct BrowserWindow: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
             }
+            .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
 
             if !browser.downloads.items.isEmpty {
                 DownloadsButton(downloads: browser.downloads)
@@ -218,6 +350,24 @@ struct BrowserWindow: View {
         .padding(.trailing, BrowserChrome.edgeInset)
         .frame(height: BrowserChrome.navigationBarHeight)
         .animation(.snappy(duration: 0.2), value: browser.downloads.items.isEmpty)
+    }
+
+    @ViewBuilder
+    private var zoomButton: some View {
+        if let tab = browser.activeTab, !tab.isNewTab, tab.pageZoom != 1 {
+            Button { browser.resetZoom() } label: {
+                Text(tab.pageZoom, format: .percent.precision(.fractionLength(0)))
+                    .font(.system(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Reset Zoom (⌘0)")
+            .accessibilityLabel("Zoom \(Int((tab.pageZoom * 100).rounded())) percent, reset")
+        }
     }
 
     @ViewBuilder

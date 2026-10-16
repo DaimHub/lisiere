@@ -8,6 +8,9 @@ import WebKit
 final class BrowserModel {
     let downloads: DownloadManager
     let sitePermissions: SitePermissions
+    /// `nil` for a window whose pages aren't remembered.
+    let history: HistoryStore?
+    let zoomLevels: ZoomStore
 
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []
@@ -24,6 +27,8 @@ final class BrowserModel {
         }
     }
     var addressFocusRequest = 0
+    var findFocusRequest = 0
+    var isShowingHistory = false
     @ObservationIgnored private var suspender: TabSuspender?
 
     private struct ClosedTab {
@@ -33,9 +38,12 @@ final class BrowserModel {
         let interactionState: Any?
     }
 
-    init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared) {
+    init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared,
+         history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared) {
         self.downloads = downloads
         self.sitePermissions = sitePermissions
+        self.history = history
+        self.zoomLevels = zoomLevels
         addTab()
         suspender = TabSuspender(browser: self)
     }
@@ -224,6 +232,105 @@ final class BrowserModel {
 
     func requestAddressFocus() {
         addressFocusRequest += 1
+    }
+
+    /// Whether the window only has a new tab, so a restored session can take its place.
+    var isBlank: Bool {
+        tabs.count == 1 && tabs[0].isNewTab
+    }
+
+    func windowSession() -> WindowSession {
+        WindowSession(tabs: tabs.map { tab in
+            let isBlank = tab.isNewTab || tab.url == nil
+            return TabSession(url: isBlank ? nil : tab.url, title: tab.pageTitle,
+                              interactionState: isBlank ? nil : tab.interactionState as? Data)
+        }, selectedIndex: tabs.firstIndex { $0.id == activeTabID } ?? 0)
+    }
+
+    /// Replaces the window's tabs with a saved window's. They start suspended, so only the selected tab loads.
+    func restoreSession(_ session: WindowSession) {
+        guard !session.tabs.isEmpty else { return }
+        tabs.forEach { $0.stopWaitingForSelection() }
+        tabs = session.tabs.map { tab in
+            tab.url == nil ? makeTab()
+                : adopt(BrowserTab(url: tab.url, title: tab.title, interactionState: tab.interactionState))
+        }
+        activeTabID = tabs[min(max(session.selectedIndex, 0), tabs.count - 1)].id
+    }
+
+    // MARK: Find
+
+    /// Shows the find bar, starting with the text last searched for in any app.
+    func showFindBar() {
+        guard let tab = activeTab, !tab.isNewTab else { return }
+        if tab.findText.isEmpty, let text = NSPasteboard(name: .find).string(forType: .string) {
+            tab.findText = text
+        }
+        tab.isFindBarVisible = true
+        findFocusRequest += 1
+    }
+
+    func findNext(backwards: Bool = false) {
+        guard let tab = activeTab, !tab.isNewTab else { return }
+        guard !tab.findText.isEmpty else { return showFindBar() }
+        tab.isFindBarVisible = true
+        tab.find(backwards: backwards)
+    }
+
+    func useSelectionForFind() {
+        guard let tab = activeTab, !tab.isNewTab else { return }
+        Task {
+            guard let text = await tab.selectedText(), !text.isEmpty else { return }
+            let pasteboard = NSPasteboard(name: .find)
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            tab.findText = text
+            tab.isFindBarVisible = true
+            tab.find()
+        }
+    }
+
+    func closeFindBar() {
+        guard let tab = activeTab else { return }
+        tab.isFindBarVisible = false
+        tab.focusPage()
+    }
+
+    // MARK: Zoom
+
+    var canZoom: Bool {
+        activeTab.map { !$0.isNewTab && !$0.isSuspended } ?? false
+    }
+
+    func zoomIn() {
+        guard canZoom, let tab = activeTab else { return }
+        tab.setZoom(ZoomStore.level(after: tab.pageZoom))
+    }
+
+    func zoomOut() {
+        guard canZoom, let tab = activeTab else { return }
+        tab.setZoom(ZoomStore.level(before: tab.pageZoom))
+    }
+
+    func resetZoom() {
+        guard canZoom else { return }
+        activeTab?.setZoom(1)
+    }
+
+    // MARK: Print
+
+    /// Prints the active page, with the print panel as a sheet on its window.
+    func printActivePage() {
+        guard let tab = activeTab, !tab.isNewTab, let webView = tab.webView, let window = webView.window else { return }
+        let printInfo = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        printInfo.isHorizontallyCentered = false
+        printInfo.isVerticallyCentered = false
+        let operation = webView.printOperation(with: printInfo)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        // WebKit prints blank pages unless the operation's view has a size.
+        operation.view?.frame = webView.bounds
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
     #if DEBUG

@@ -38,10 +38,12 @@ enum TabLayout: String, CaseIterable {
     var toggled: TabLayout { self == .vertical ? .horizontal : .vertical }
 }
 
-/// Keeps the window controls centered in the tab row, which is taller than the default title bar.
+/// Keeps the window controls centered in the tab row, which is taller than the default title bar, and reports
+/// when the user closes the window.
 struct WindowChromeConfigurator: NSViewRepresentable {
     let titlebarHeight: CGFloat
     @Binding var isFullScreen: Bool
+    var onClose: () -> Void = {}
 
     func makeNSView(context: Context) -> WindowChromeView {
         let view = WindowChromeView()
@@ -51,12 +53,14 @@ struct WindowChromeConfigurator: NSViewRepresentable {
 
     func updateNSView(_ view: WindowChromeView, context: Context) {
         view.onFullScreenChange = { isFullScreen = $0 }
+        view.onClose = onClose
         view.titlebarHeight = titlebarHeight
     }
 }
 
 final class WindowChromeView: NSView {
     var onFullScreenChange: ((Bool) -> Void)?
+    var onClose: (() -> Void)?
     var titlebarHeight = BrowserChrome.tabRowHeight {
         didSet {
             if titlebarHeight != oldValue { layoutWindowButtons() }
@@ -84,6 +88,10 @@ final class WindowChromeView: NSView {
                 MainActor.assumeIsolated { self?.layoutWindowButtons() }
             }
         }
+        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
+                                                                queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onClose?() }
+        })
         DispatchQueue.main.async { [weak self] in self?.layoutWindowButtons() }
     }
 

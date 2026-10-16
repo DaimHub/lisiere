@@ -35,6 +35,15 @@ final class BrowserTab: Identifiable {
     private(set) var loadError: PageLoadError?
     /// Whether the failed load left the previous page behind the error, so going back shows that page.
     @ObservationIgnored private var loadErrorCoversPreviousPage = false
+    private(set) var pageZoom = 1.0
+
+    var isFindBarVisible = false
+    var findText = ""
+    /// Whether the last search found nothing, shown in the find bar.
+    private(set) var findHasNoMatches = false
+    @ObservationIgnored private var findTask: Task<Void, Never>?
+    /// The page last added to history, so its title follows the page's and a reload isn't another visit.
+    @ObservationIgnored private var historyVisit: (id: UUID?, url: URL)?
 
     @ObservationIgnored private let pageDelegate = PageDelegate()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
@@ -60,6 +69,8 @@ final class BrowserTab: Identifiable {
         suspendedState = interactionState
         favicon = FaviconStore.cachedIcon(for: url)
         faviconHost = url?.host()
+        // The page is already in history, so loading it again on restore isn't another visit.
+        historyVisit = url.map { (nil, $0) }
         pageDelegate.tab = self
     }
 
@@ -89,10 +100,16 @@ final class BrowserTab: Identifiable {
         let options: NSKeyValueObservingOptions = isRestoring ? [] : .initial
         observe(webView, \.url, options) { tab, webView in
             tab.url = tab.loadError?.url ?? webView.url
-            // Same-document navigations don't load, but can still change the icon.
-            if !webView.isLoading { tab.updateFavicon() }
+            // Same-document navigations don't load, but can still change the icon and add to history.
+            if !webView.isLoading {
+                tab.updateFavicon()
+                tab.recordVisit()
+            }
         }
-        observe(webView, \.title, options) { $0.pageTitle = $1.title ?? "" }
+        observe(webView, \.title, options) { tab, webView in
+            tab.pageTitle = webView.title ?? ""
+            tab.updateVisitTitle()
+        }
         observe(webView, \.isLoading, options) { tab, webView in
             let didFinish = tab.isLoading && !webView.isLoading
             tab.isLoading = webView.isLoading
@@ -253,6 +270,97 @@ final class BrowserTab: Identifiable {
         } else {
             webView?.goBack()
         }
+    }
+
+    /// A page has started to show in the tab: it gets its site's zoom, and joins history.
+    func didCommitNavigation() {
+        clearLoadError()
+        findHasNoMatches = false
+        applyZoom()
+        recordVisit()
+    }
+
+    /// Adds the page shown to history, unless it's the same page as before, ignoring the part after `#`.
+    /// Only committed web pages count, so error pages and pop-ups that never loaded are left out.
+    private func recordVisit() {
+        guard let webView, let url = webView.url, loadError == nil,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              webView.backForwardList.currentItem?.url == url,
+              historyVisit.map({ Self.withoutFragment($0.url) != Self.withoutFragment(url) }) ?? true else { return }
+        historyVisit = (browser?.history?.recordVisit(to: url, title: webView.title ?? ""), url)
+    }
+
+    private func updateVisitTitle() {
+        guard let historyVisit, let id = historyVisit.id, url == historyVisit.url, !pageTitle.isEmpty else { return }
+        browser?.history?.updateTitle(of: id, to: pageTitle)
+    }
+
+    private static func withoutFragment(_ url: URL) -> URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return components?.url ?? url
+    }
+
+    // MARK: Zoom
+
+    private func applyZoom() {
+        let level = browser?.zoomLevels.level(for: host) ?? 1
+        pageZoom = level
+        if let webView, webView.pageZoom != level { webView.pageZoom = level }
+    }
+
+    /// Zooms the page, and remembers the level for its site.
+    func setZoom(_ level: Double) {
+        guard let webView else { return }
+        webView.pageZoom = level
+        pageZoom = level
+        browser?.zoomLevels.setLevel(level, for: host)
+    }
+
+    // MARK: Find
+
+    /// Searches from the start of the current match, so typing more of a word keeps the match it's on.
+    func findAsYouType() {
+        findTask?.cancel()
+        guard let webView, !findText.isEmpty else {
+            findHasNoMatches = false
+            return
+        }
+        findTask = Task { [weak self] in
+            let script = "(() => { const selection = getSelection(); if (selection.rangeCount) selection.collapseToStart(); })()"
+            _ = try? await webView.evaluateJavaScript(script, contentWorld: .defaultClient)
+            guard !Task.isCancelled else { return }
+            await self?.runFind(backwards: false)
+        }
+    }
+
+    func find(backwards: Bool = false) {
+        findTask?.cancel()
+        findTask = Task { [weak self] in await self?.runFind(backwards: backwards) }
+    }
+
+    /// WebKit selects and highlights the match it finds, wrapping around the page.
+    private func runFind(backwards: Bool) async {
+        guard let webView, !findText.isEmpty else { return }
+        let text = findText
+        let configuration = WKFindConfiguration()
+        configuration.backwards = backwards
+        configuration.caseSensitive = false
+        configuration.wraps = true
+        let result = try? await webView.find(text, configuration: configuration)
+        guard !Task.isCancelled, findText == text else { return }
+        findHasNoMatches = result?.matchFound != true
+    }
+
+    func selectedText() async -> String? {
+        guard let webView else { return nil }
+        return try? await webView.evaluateJavaScript("getSelection().toString()", contentWorld: .defaultClient) as? String
+    }
+
+    /// Gives the page keyboard focus.
+    func focusPage() {
+        guard let webView, let window = webView.window else { return }
+        window.makeFirstResponder(webView)
     }
 
     func showLoadError(_ error: PageLoadError, coversPreviousPage: Bool) {

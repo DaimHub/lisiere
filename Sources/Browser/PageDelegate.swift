@@ -75,7 +75,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         isLoadingFromBrowser = false
         dialogs = DialogLimiter()
-        tab?.clearLoadError()
+        tab?.didCommitNavigation()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
