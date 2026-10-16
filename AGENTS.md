@@ -19,6 +19,7 @@
 
 - `make test`: upstream XCTest suite in a locally signed Debug host without sandbox/hardened runtime, for XCTest injection and the deliberate WebKit process termination test. These overrides apply only to tests; Release retains both protections.
 - `make build`: locally signed Release. Verify with `codesign --verify --deep --strict`.
+- Local ad hoc builds use Config/Browser-Local.entitlements for Sparkle library validation. Never use that exception for Developer ID releases. `make smoke` checks startup as well as signatures.
 - Check user-facing changes in the Release app. Report unverified account, hardware, entitlement, and distribution paths when relevant.
 - Never commit build output, generated projects, browser profiles, signing assets, or credentials.
 - Keep Sparkle pointed at the fork and disabled until its own keys are configured. Passkeys require Apple's approval for this fork's App ID.

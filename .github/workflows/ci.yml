@@ -25,5 +25,5 @@ jobs:
         run: xcodebuild -version
       - name: Test
         run: make test
-      - name: Build and verify local Release
-        run: make verify
+      - name: Build, verify, and launch local Release
+        run: make smoke

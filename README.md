@@ -17,7 +17,9 @@ make test
 make run
 ```
 
-`make build` creates an ad hoc signed Release app at `~/Library/Developer/Xcode/DerivedData/Lisiere/Build/Products/Release/Lisiere.app`. This is a local development build, not a notarized distribution. `make test` runs the upstream XCTest suite in a locally signed Debug host without the app sandbox or hardened runtime. This supports XCTest injection and the test that deliberately terminates a WebKit process. Release builds retain both protections.
+`make build` creates an ad hoc signed Release app at `~/Library/Developer/Xcode/DerivedData/Lisiere/Build/Products/Release/Lisiere.app`. This is a local development build, not a notarized distribution. It retains the sandbox and hardened runtime, with a local-only library-validation exception so Sparkle can load without an Apple Team ID. The distribution workflow uses the original entitlements without this exception.
+
+`make test` runs the upstream XCTest suite in a locally signed Debug host without the app sandbox or hardened runtime. This supports XCTest injection and the test that deliberately terminates a WebKit process. `make smoke` also builds, verifies the signature, and checks that the local app survives startup; CI runs both checks.
 
 Build output stays in Xcode's standard Library location so launching embedded frameworks does not require access to a protected Documents or Desktop folder. Override it with `DERIVED_DATA=/your/build/path` when needed.
 

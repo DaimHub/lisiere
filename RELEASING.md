@@ -2,6 +2,8 @@
 
 Local development needs no release credentials: use `make build` and `make test`. Public releases need Lisière's own signing identity and update keys; none are configured by this fork setup.
 
+The local Make build uses a library-validation exception for ad hoc signing. Do not distribute that build as a notarized release or use `Config/Browser-Local.entitlements` in the archive workflow. Developer ID releases retain library validation.
+
 The feed is `https://github.com/DaimHub/lisiere/releases/latest/download/appcast.xml`. Never point it at Athas's feed. Each release includes the corresponding app and Sparkle source archives, `LICENSE`, `NOTICE.md`, and `THIRD_PARTY_NOTICES.md` beside the binary.
 
 Pushing a version tag runs [the release workflow](.github/workflows/release.yml). It builds the Release configuration, signs it with the Developer ID certificate, notarizes and staples the app, makes a signed and notarized disk image, signs the update for Sparkle, adds it to the appcast, and publishes a GitHub release with the disk image and `appcast.xml`.

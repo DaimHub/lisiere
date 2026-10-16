@@ -12,3 +12,4 @@ Initial independent fork of Athas Browser at `f7a7e4c6232aa9c8ca2e9c926fa3d79efc
 - Adapt the release workflow and include corresponding source and notices with each release.
 - Use AGPL contributions without a separate CLA; archive the upstream agreement for provenance.
 - Await JavaScript results before XCTest assertions in the inherited password-origin test, preserving its checks.
+- Fix local startup with Sparkle by scoping a library-validation exception to ad hoc builds. Keep distribution entitlements unchanged and exercise real startup in CI.
