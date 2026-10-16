@@ -7,8 +7,8 @@ struct NewTabView: View {
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
     private var page: NewTabPage { browser.preferences.newTabPage }
-    @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
-    @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
+    private var mascot: Mascot { browser.preferences.mascot }
+    private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
 
     private let horizontalPadding: CGFloat = 32
     private let tileSpacing: CGFloat = 8
@@ -21,9 +21,9 @@ struct NewTabView: View {
 
     var body: some View {
         ZStack {
-            NewTabBackground()
+            NewTabBackground(accent: browser.isPrivate ? .purple : browser.preferences.accent.color)
 
-            if page == .startPage {
+            if browser.isPrivate || page == .startPage {
                 startPage
             }
         }
@@ -37,11 +37,7 @@ struct NewTabView: View {
                     privateHeading
                 } else {
                     VStack(spacing: 8) {
-                        Image(mascot.imageName(for: mascotPalette))
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 120, height: 120)
-                            .accessibilityHidden(true)
+                        MascotView(mascot: mascot, palette: mascotPalette)
                         TimelineView(.everyMinute) { context in
                             Text(Self.greeting(for: context.date))
                                 .font(.system(size: 28, weight: .medium))
@@ -53,7 +49,7 @@ struct NewTabView: View {
 
                 searchField
 
-                favorites
+                if !browser.isPrivate { favorites }
             }
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, 48)
@@ -70,8 +66,7 @@ struct NewTabView: View {
                 .font(.system(size: 28, weight: .medium))
                 .tracking(-0.7)
                 .foregroundStyle(.primary.opacity(0.85))
-            Text("Pages you visit in this window aren’t added to history, and their cookies and website data are "
-                 + "removed when you close it. Downloads and bookmarks are kept.")
+            Text("A fresh session, separate from every profile. History, cookies and website data disappear when you close this window. Files you download remain on your Mac.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -179,6 +174,7 @@ private struct FavoriteTile: View {
 
 /// A soft, slowly drifting wash of color behind the new tab content.
 private struct NewTabBackground: View {
+    let accent: Color
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -192,7 +188,7 @@ private struct NewTabBackground: View {
                 [0, 0], [0.5 + sway, 0], [1, 0],
                 [0, 0.5 + drift], [0.5 + drift, 0.5 - sway], [1, 0.5 - drift],
                 [0, 1], [0.5 - sway, 1], [1, 1],
-            ], colors: colors)
+            ], colors: colors.map { $0.mix(with: accent, by: 0.24) })
             // Low enough that the window's translucent material shows through.
             .opacity(colorScheme == .dark ? 0.28 : 0.3)
         }

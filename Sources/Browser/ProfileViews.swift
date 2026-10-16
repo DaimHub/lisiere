@@ -8,23 +8,33 @@ struct ProfileBrowserWindow: View {
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
-            if let owner, let id = owner.browser.profileID, let context = profiles.context(for: id) {
-                BrowserWindow(bookmarks: context.bookmarks, context: context, profiles: profiles,
+            if let owner, owner.isPrivate, let browsingData = owner.privateBrowsingData {
+                BrowserWindow(bookmarks: owner.privateBookmarks, profiles: profiles,
+                              browser: owner.browser, isFullScreen: isFullScreen)
+                    .environment(browsingData)
+                    .environment(owner.browser.preferences)
+                    .environment(owner.browser.favicons)
+            } else if let owner, let id = owner.browser.profileID, let context = profiles.context(for: id) {
+                BrowserWindow(bookmarks: context.bookmarks, profiles: profiles,
                               browser: owner.browser, isFullScreen: isFullScreen)
                     .id(id)
+                    .transition(.opacity)
                     .environment(context.browsingData)
                     .environment(context.preferences)
                     .environment(context.favicons)
-            } else if profiles.context(for: profileID) == nil {
+            } else if !isPrivate, profiles.context(for: profileID) == nil {
                 ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
                                        description: Text(profiles.loadError ?? "This profile is unavailable."))
             } else {
                 Color.clear
             }
         }
+        .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.selection.colorScheme)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: owner?.browser.profileID)
         .background {
             if let owner {
                 WindowChromeConfigurator(
@@ -99,8 +109,8 @@ struct ProfilesView: View {
                 Text("Sign-ins, website data, history, tabs, bookmarks, saved passwords, downloads and settings stay separate. Swipe horizontally with two fingers over the tabs to switch profiles.")
             }
             Section("Outside Profiles") {
-                Text("Themes, the mascot and Dock icon, passkeys, the default browser and app updates apply across profiles. Downloaded files stay where you saved them.")
-                Text("Private windows use fresh temporary website data. They never save history or passwords and never reopen with a session. Bookmarks and downloads stay in the originating profile.")
+                Text("Passkeys, the default browser and app updates apply across profiles. Themes, accent colors and mascots belong to each profile. Downloaded files stay where you saved them.")
+                Text("Private windows are independent of every profile and always open dark with a fresh temporary session. They do not load saved bookmarks, history, passwords, cookies or download lists.")
             }
             if let error = profiles.loadError {
                 Section { Text(error).foregroundStyle(.red) }
@@ -148,6 +158,7 @@ private struct ProfileNameEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var icon: ProfileIcon
+    @State private var accent: ProfileAccent
     @State private var sourceID: UUID?
     @State private var errorMessage: String?
 
@@ -156,6 +167,7 @@ private struct ProfileNameEditor: View {
         self.profiles = profiles
         _name = State(initialValue: profile?.name ?? "")
         _icon = State(initialValue: profile?.icon ?? .person)
+        _accent = State(initialValue: profile.flatMap { profiles.context(for: $0.id)?.preferences.accent } ?? .sage)
     }
 
     var body: some View {
@@ -168,13 +180,20 @@ private struct ProfileNameEditor: View {
                         Image(systemName: option.rawValue)
                             .font(.system(size: 20))
                             .frame(width: 42, height: 36)
-                            .background(icon == option ? Color.accentColor.opacity(0.18) : .clear,
+                            .background(icon == option ? accent.color.opacity(0.18) : .clear,
                                         in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                     .help(option.title)
                     .accessibilityLabel(option.title)
                     .accessibilityAddTraits(icon == option ? .isSelected : [])
+                }
+            }
+            Picker("Accent color", selection: $accent) {
+                ForEach(ProfileAccent.allCases) { option in
+                    Label { Text(option.title) } icon: {
+                        Image(systemName: "circle.fill").foregroundStyle(option.color)
+                    }.tag(option)
                 }
             }
             if profile == nil {
@@ -198,6 +217,10 @@ private struct ProfileNameEditor: View {
         }
         .padding(20)
         .frame(width: 380)
+        .tint(accent.color)
+        .onChange(of: sourceID) { _, source in
+            accent = source.flatMap { profiles.context(for: $0)?.preferences.accent } ?? .sage
+        }
         .alert("Profile Could Not Be Saved", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK") { errorMessage = nil }
@@ -206,8 +229,14 @@ private struct ProfileNameEditor: View {
 
     private func save() {
         do {
-            if let profile { try profiles.rename(profile.id, to: name, icon: icon) }
-            else { _ = try profiles.create(name: name, icon: icon, copying: sourceID) }
+            let savedProfile: BrowserProfile
+            if let profile {
+                try profiles.rename(profile.id, to: name, icon: icon)
+                savedProfile = profile
+            } else {
+                savedProfile = try profiles.create(name: name, icon: icon, copying: sourceID)
+            }
+            profiles.context(for: savedProfile.id)?.preferences.accent = accent
             dismiss()
         } catch { errorMessage = error.localizedDescription }
     }

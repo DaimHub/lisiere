@@ -35,11 +35,9 @@ struct BrowserApp: App {
             BrowserCommands(profiles: profiles, updater: .shared)
         }
 
-        WindowGroup("Private Window", id: Self.privateWindowID, for: ProfileWindowRequest.self) { $request in
-            ProfileBrowserWindow(profiles: profiles, profileID: request.profileID, isPrivate: true)
+        WindowGroup("Private Window", id: Self.privateWindowID) {
+            ProfileBrowserWindow(profiles: profiles, profileID: BrowserProfile.initialID, isPrivate: true)
                 .frame(minWidth: 680, minHeight: 440)
-        } defaultValue: {
-            ProfileWindowRequest(profileID: profiles.selectedID)
         }
         // External links must create a normal window when only private windows remain.
         .handlesExternalEvents(matching: [])
@@ -78,10 +76,10 @@ private struct BrowserCommands: Commands {
     }
 
     private var profileID: UUID { browser?.profileID ?? profiles.selectedID }
-    private var context: ProfileContext? { profiles.context(for: profileID) }
+    private var context: ProfileContext? { browser?.isPrivate == true ? nil : profiles.context(for: profileID) }
 
     private var bookmarkableTab: BrowserTab? {
-        guard let tab = browser?.activeTab, !tab.isNewTab, tab.url != nil else { return nil }
+        guard browser?.isPrivate == false, let tab = browser?.activeTab, !tab.isNewTab, tab.url != nil else { return nil }
         return tab
     }
 
@@ -100,7 +98,7 @@ private struct BrowserCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID)) }
                 .keyboardShortcut("n", modifiers: .command)
-            Button("New Private Window") { openWindow(id: BrowserApp.privateWindowID, value: ProfileWindowRequest(profileID: profileID)) }
+            Button("New Private Window") { openWindow(id: BrowserApp.privateWindowID) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Tab") { browser?.addTab() }
                 .keyboardShortcut("t", modifiers: .command)

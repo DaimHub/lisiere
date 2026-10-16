@@ -15,11 +15,23 @@ final class ProfileWindowController {
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored private var browsers: [UUID: BrowserModel] = [:]
     @ObservationIgnored var onActivate: ((BrowserModel) -> Void)?
+    let privateBookmarks = BookmarkStore(defaults: nil)
+    private(set) var privateBrowsingData: BrowsingData?
 
     init(profiles: ProfileStore, profileID: UUID, isPrivate: Bool = false) throws {
-        guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
         self.profiles = profiles
         self.isPrivate = isPrivate
+        if isPrivate {
+            id = UUID()
+            browser = .makePrivate()
+            additionalWindows = 0
+            browsers[id] = browser
+            privateBrowsingData = BrowsingData(history: HistoryStore(file: nil), session: SessionStore(file: nil),
+                                               dataStore: browser.websiteDataStore, favicons: browser.favicons)
+            browser.profileWindow = self
+            return
+        }
+        guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
         let ownerID = isPrivate ? UUID() : context.session.nextWindowID ?? UUID()
         let model = context.makeBrowser(isPrivate: isPrivate)
         id = ownerID
@@ -39,6 +51,7 @@ final class ProfileWindowController {
     func becameKey() {
         guard !isClosed, let id = browser.profileID else { return }
         profiles.lastActiveWindow = self
+        browser.preferences.mascot.applyDockIcon(palette: browser.preferences.mascotPalette)
         do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
     }
 
@@ -48,7 +61,7 @@ final class ProfileWindowController {
     }
 
     func switchTo(_ profileID: UUID) {
-        guard !isClosed, browser.profileID != profileID else { return }
+        guard !isClosed, !isPrivate, browser.profileID != profileID else { return }
         do {
             guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
             try profiles.select(profileID)
@@ -67,10 +80,13 @@ final class ProfileWindowController {
                 profiles.context(for: previousID)?.session.setParked(true, for: browser)
             }
             ExternalURLRouter.shared.unregister(browser)
+            browser.setWorkspaceActive(false)
             browser.window = nil
             browser = next
+            browser.setWorkspaceActive(true)
             browser.window = window
             profiles.lastActiveWindow = self
+            browser.preferences.mascot.applyDockIcon(palette: browser.preferences.mascotPalette)
             onActivate?(browser)
         } catch { profiles.errorMessage = error.localizedDescription }
     }
@@ -91,6 +107,8 @@ final class ProfileWindowController {
             }
         }
         browsers = [:]
+        privateBrowsingData?.releaseDataStore()
+        privateBrowsingData = nil
         if profiles.lastActiveWindow === self { profiles.lastActiveWindow = nil }
         window = nil
         onActivate = nil

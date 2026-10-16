@@ -107,7 +107,7 @@ final class ProfileWindowTests: XCTestCase {
         restarted.context(for: b.id)?.prepareForDeletion()
     }
 
-    func testPrivateSwitchUsesFreshSeparateStoresAndNeverPersistsParkedSessions() throws {
+    func testPrivateWindowIsIndependentAndCannotSwitchProfiles() throws {
         let a = try profiles.create(name: "A")
         let b = try profiles.create(name: "B")
         let first = try owner(a.id, privateMode: true)
@@ -116,7 +116,10 @@ final class ProfileWindowTests: XCTestCase {
         XCTAssertTrue(first.browser.isPrivate)
         XCTAssertNil(first.browser.history)
         XCTAssertNil(first.browser.passwords)
-        XCTAssertFalse(first.browser.websiteDataStore === original.websiteDataStore)
+        XCTAssertTrue(first.browser === original)
+        XCTAssertNil(first.browser.profileID)
+        XCTAssertEqual(first.browser.appearance.selection, .dark)
+        XCTAssertTrue(first.privateBookmarks.bookmarks.isEmpty)
         XCTAssertEqual(profiles.context(for: a.id)?.session.snapshot, SessionSnapshot())
         XCTAssertEqual(profiles.context(for: b.id)?.session.snapshot, SessionSnapshot())
         first.switchTo(a.id)

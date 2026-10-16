@@ -22,7 +22,8 @@ final class MascotTests: XCTestCase {
     func testEveryChoiceHasBundledMascotAndDockImages() throws {
         for mascot in Mascot.allCases {
             for palette in MascotPalette.allCases {
-                for name in [mascot.imageName(for: palette), mascot.iconName(for: palette)] {
+                for name in [mascot.imageName(for: palette), mascot.iconName(for: palette)]
+                    + ["body", "eyes", "pupils"].map({ "\(mascot.imageName(for: palette))-\($0)" }) {
                     let image = try XCTUnwrap(NSImage(named: name), "Missing bundled asset: \(name)")
                     XCTAssertTrue(image.isValid, name)
                     XCTAssertGreaterThan(image.size.width, 0, name)

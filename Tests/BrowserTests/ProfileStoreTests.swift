@@ -107,12 +107,13 @@ final class ProfileStoreTests: XCTestCase {
         let b = try profiles.create(name: "B")
         defaults.set("shared", forKey: "bookmarks")
         let context = try XCTUnwrap(profiles.context(for: a.id))
-        let browser = context.makeBrowser(downloads: DownloadManager(), isPrivate: true)
+        let browser = context.makeBrowser(downloads: DownloadManager())
         profiles.register(browser)
         do { try await profiles.delete(a.id); XCTFail("Deleted an open profile") }
         catch { XCTAssertTrue(error is ProfileStore.Failure) }
         XCTAssertFalse(try XCTUnwrap(profiles.profile(a.id)).pendingDeletion)
         profiles.unregister(browser)
+        browser.releaseClosedWindow()
         await context.history.waitUntilLoaded()
         context.history.recordVisit(to: URL(string: "https://example.com")!, title: "A")
         try profiles.select(a.id)

@@ -201,7 +201,7 @@ final class BrowserTab: Identifiable {
     /// Returns `false` if the tab is closed or suspended first.
     func waitUntilSelected() async -> Bool {
         guard acceptsPageRequests, let browser, browser.tab(withID: id) === self else { return false }
-        if browser.activeTabID == id { return true }
+        if browser.isActiveInWorkspace, browser.activeTabID == id { return true }
         return await withCheckedContinuation { selectionWaiters.append($0) }
     }
 
@@ -223,6 +223,7 @@ final class BrowserTab: Identifiable {
     }
 
     func didBecomeSelected() {
+        guard browser?.isActiveInWorkspace == true else { return }
         resumeSelectionWaiters(true)
     }
 
@@ -517,6 +518,11 @@ final class BrowserTab: Identifiable {
     /// Reads the icon from the loaded page, showing the host's last known icon until then.
     private func updateFavicon() {
         faviconTask?.cancel()
+        guard browser?.isPrivate != true else {
+            favicon = nil
+            faviconHost = nil
+            return
+        }
         guard let url, let host = url.host(), url.scheme == "http" || url.scheme == "https" else {
             favicon = nil
             faviconHost = nil

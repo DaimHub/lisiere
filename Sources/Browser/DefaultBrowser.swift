@@ -206,7 +206,8 @@ final class ExternalURLRouter {
 
 final class BrowserAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        _ = AppearanceStore.shared
+        // Each regular profile and private window owns its native appearance.
+        NSApp.appearance = nil
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

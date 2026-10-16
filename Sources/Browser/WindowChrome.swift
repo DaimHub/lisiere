@@ -148,7 +148,7 @@ final class WindowChromeView: NSView {
 }
 
 extension BrowserChrome {
-    /// Private windows follow the chosen appearance while retaining their violet identity.
+    /// Private windows use a dark violet identity independently of saved profiles.
     static func privateTint(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark
             ? Color(red: 0.11, green: 0.08, blue: 0.20).opacity(0.72)

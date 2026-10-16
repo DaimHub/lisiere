@@ -25,40 +25,48 @@ struct SettingsView: View {
                 .padding()
                 Divider()
             }
+            // Keep tab metadata outside profile-dependent view identity. macOS otherwise
+            // creates empty toolbar items for tabs whose content has an explicit .id.
             TabView(selection: $profiles.settingsTab) {
-                if let context = profiles.context(for: profiles.selectedID) {
-                    profileTabs(context)
-                        .environment(context.preferences)
-                        .environment(context.favicons)
-                }
-                ProfilesView(profiles: profiles)
-                    .tabItem { Label("Profiles", systemImage: "person.2") }.tag(SettingsTab.profiles)
+                Tab("General", systemImage: "gearshape", value: SettingsTab.general) { profileContent(.general) }
+                Tab("Appearance", systemImage: "macwindow", value: SettingsTab.appearance) { profileContent(.appearance) }
+                Tab("Privacy", systemImage: "hand.raised", value: SettingsTab.privacy) { profileContent(.privacy) }
+                Tab("Passwords", systemImage: "key", value: SettingsTab.passwords) { profileContent(.passwords) }
+                Tab("Site Settings", systemImage: "globe", value: SettingsTab.sites) { profileContent(.sites) }
+                Tab("Downloads", systemImage: "arrow.down.circle", value: SettingsTab.downloads) { profileContent(.downloads) }
+                Tab("Profiles", systemImage: "person.2", value: SettingsTab.profiles) { ProfilesView(profiles: profiles) }
             }
         }
+        .preferredColorScheme(profiles.context(for: profiles.selectedID)?.preferences.appearance.selection.colorScheme)
+        .tint(profiles.context(for: profiles.selectedID)?.preferences.accent.color ?? .accentColor)
         .formStyle(.grouped)
         .frame(width: 580, height: 560)
         .onAppear { if profiles.loadError != nil { profiles.settingsTab = .profiles } }
     }
 
-    @ViewBuilder private func profileTabs(_ context: ProfileContext) -> some View {
-        GeneralSettings(updater: updater)
-            .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
-        AppearanceSettings()
-            .tabItem { Label("Appearance", systemImage: "macwindow") }.tag(SettingsTab.appearance)
-        PrivacySettings(browsingData: context.browsingData, contentBlocker: context.contentBlocker,
-                        profileName: profiles.name(context.id))
-            .id("privacy-\(context.id)")
-            .tabItem { Label("Privacy", systemImage: "hand.raised") }.tag(SettingsTab.privacy)
-        PasswordSettings(passwords: context.passwords, passkeys: passkeys)
-            .id("passwords-\(context.id)")
-            .tabItem { Label("Passwords", systemImage: "key") }.tag(SettingsTab.passwords)
-        SiteSettings(contentBlocker: context.contentBlocker, sitePermissions: context.sitePermissions,
-                     zoomLevels: context.zoomLevels)
-            .id("sites-\(context.id)")
-            .tabItem { Label("Site Settings", systemImage: "globe") }.tag(SettingsTab.sites)
-        DownloadSettings()
-            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(SettingsTab.downloads)
+    @ViewBuilder private func profileContent(_ tab: SettingsTab) -> some View {
+        if let context = profiles.context(for: profiles.selectedID) {
+            Group {
+                switch tab {
+                case .general: GeneralSettings(updater: updater)
+                case .appearance: AppearanceSettings()
+                case .privacy:
+                    PrivacySettings(browsingData: context.browsingData, contentBlocker: context.contentBlocker,
+                                    profileName: profiles.name(context.id))
+                case .passwords: PasswordSettings(passwords: context.passwords, passkeys: passkeys)
+                case .sites:
+                    SiteSettings(contentBlocker: context.contentBlocker, sitePermissions: context.sitePermissions,
+                                 zoomLevels: context.zoomLevels)
+                case .downloads: DownloadSettings()
+                case .profiles: EmptyView()
+                }
+            }
+            .environment(context.preferences)
+            .environment(context.favicons)
+            .id(context.id)
+        }
     }
+
 }
 
 private struct GeneralSettings: View {
@@ -318,15 +326,13 @@ private struct PasswordSettings: View {
 }
 
 private struct AppearanceSettings: View {
-    @Bindable private var appearance = AppearanceStore.shared
-    @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
-    @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
     @Environment(ProfilePreferences.self) private var preferences
 
     var body: some View {
         @Bindable var preferences = preferences
+        @Bindable var appearance = preferences.appearance
         Form {
-            Picker("App theme", selection: $appearance.selection) {
+            Picker("Profile theme", selection: $appearance.selection) {
                 ForEach(BrowserAppearance.allCases) { theme in
                     Text(theme.title).tag(theme)
                 }
@@ -361,7 +367,7 @@ private struct AppearanceSettings: View {
             }
 
             Section {
-                Picker("Mascot colors", selection: $mascotPalette) {
+                Picker("Mascot colors", selection: $preferences.mascotPalette) {
                     ForEach(MascotPalette.allCases) { palette in
                         Text(palette.title).tag(palette)
                     }
@@ -372,16 +378,16 @@ private struct AppearanceSettings: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                     ForEach(Mascot.allCases) { choice in
                         Button {
-                            mascot = choice
+                            preferences.mascot = choice
                         } label: {
                             VStack(spacing: 8) {
-                                Image(choice.iconName(for: mascotPalette))
+                                Image(choice.iconName(for: preferences.mascotPalette))
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: 64, height: 64)
                                 HStack(spacing: 5) {
-                                    Image(systemName: mascot == choice ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(mascot == choice ? Color.accentColor : Color.secondary)
+                                    Image(systemName: preferences.mascot == choice ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(preferences.mascot == choice ? Color.accentColor : Color.secondary)
                                     Text(choice.title)
                                 }
                                 .font(.callout)
@@ -391,16 +397,16 @@ private struct AppearanceSettings: View {
                             .contentShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)
-                        .background(mascot == choice ? Color.accentColor.opacity(0.08) : Color.clear,
+                        .background(preferences.mascot == choice ? Color.accentColor.opacity(0.08) : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 10))
                         .overlay {
                             RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(mascot == choice ? Color.accentColor : Color.primary.opacity(0.12),
+                                .strokeBorder(preferences.mascot == choice ? Color.accentColor : Color.primary.opacity(0.12),
                                               lineWidth: 1)
                         }
-                        .accessibilityLabel("\(choice.title), \(mascotPalette.title)")
-                        .accessibilityValue(mascot == choice ? "Selected" : "Not selected")
-                        .accessibilityAddTraits(mascot == choice ? [.isSelected] : [])
+                        .accessibilityLabel("\(choice.title), \(preferences.mascotPalette.title)")
+                        .accessibilityValue(preferences.mascot == choice ? "Selected" : "Not selected")
+                        .accessibilityAddTraits(preferences.mascot == choice ? [.isSelected] : [])
                         .help("Use \(choice.title) on the start page and in the Dock")
                     }
                 }
@@ -411,8 +417,8 @@ private struct AppearanceSettings: View {
                      + "Finder keeps the Lutin icon.")
             }
         }
-        .onChange(of: mascot) { _, choice in choice.applyDockIcon(palette: mascotPalette) }
-        .onChange(of: mascotPalette) { _, palette in mascot.applyDockIcon(palette: palette) }
+        .onChange(of: preferences.mascot) { _, choice in choice.applyDockIcon(palette: preferences.mascotPalette) }
+        .onChange(of: preferences.mascotPalette) { _, palette in preferences.mascot.applyDockIcon(palette: palette) }
     }
 }
 

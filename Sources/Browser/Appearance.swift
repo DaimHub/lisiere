@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 import WebKit
 
 /// The appearance of the browser interface, including every native window and panel.
@@ -16,6 +17,14 @@ enum BrowserAppearance: String, CaseIterable, Identifiable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
         }
     }
 
@@ -64,21 +73,20 @@ final class AppearanceStore {
     var selection: BrowserAppearance {
         didSet {
             guard selection != oldValue else { return }
-            defaults.set(selection.rawValue, forKey: BrowserAppearance.storageKey)
-            applyAppearance(selection.appearance)
+            defaults?.set(selection.rawValue, forKey: BrowserAppearance.storageKey)
+            if appliesToApplication { applyAppearance(selection.appearance) }
+            refreshWebViews()
         }
     }
 
     var pageSelection: WebPageAppearance {
         didSet {
             guard pageSelection != oldValue else { return }
-            defaults.set(pageSelection.rawValue, forKey: WebPageAppearance.storageKey)
+            defaults?.set(pageSelection.rawValue, forKey: WebPageAppearance.storageKey)
             if pageSelection != .followApp {
-                defaults.set(pageSelection.rawValue, forKey: WebPageAppearance.separateStorageKey)
+                defaults?.set(pageSelection.rawValue, forKey: WebPageAppearance.separateStorageKey)
             }
-            for webView in webViews.allObjects {
-                webView.appearance = pageSelection.appearance
-            }
+            refreshWebViews()
         }
     }
 
@@ -88,9 +96,10 @@ final class AppearanceStore {
         set {
             guard newValue != usesSeparatePageTheme else { return }
             if newValue {
-                let saved = defaults.string(forKey: WebPageAppearance.separateStorageKey)
+                let saved = defaults?.string(forKey: WebPageAppearance.separateStorageKey)
                     .flatMap(WebPageAppearance.init)
-                let current: WebPageAppearance = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let appAppearance = selection.appearance ?? NSApp.effectiveAppearance
+                let current: WebPageAppearance = appAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
                     ? .dark : .light
                 pageSelection = saved.flatMap { $0 == .followApp ? nil : $0 } ?? current
             } else {
@@ -101,22 +110,41 @@ final class AppearanceStore {
 
     // Background tabs must update too, without retaining closed or suspended web views.
     @ObservationIgnored private let webViews = NSHashTable<WKWebView>.weakObjects()
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let defaults: UserDefaults?
+    @ObservationIgnored private let appliesToApplication: Bool
     @ObservationIgnored private let applyAppearance: (NSAppearance?) -> Void
 
-    init(defaults: UserDefaults = .standard,
+    init(defaults: UserDefaults? = .standard, appliesToApplication: Bool = true,
          applyAppearance: @escaping (NSAppearance?) -> Void = { NSApp.appearance = $0 }) {
         self.defaults = defaults
+        self.appliesToApplication = appliesToApplication
         self.applyAppearance = applyAppearance
-        selection = defaults.string(forKey: BrowserAppearance.storageKey).flatMap(BrowserAppearance.init) ?? .system
-        pageSelection = defaults.string(forKey: WebPageAppearance.storageKey).flatMap(WebPageAppearance.init) ?? .followApp
+        selection = defaults?.string(forKey: BrowserAppearance.storageKey).flatMap(BrowserAppearance.init) ?? .system
+        pageSelection = defaults?.string(forKey: WebPageAppearance.storageKey).flatMap(WebPageAppearance.init) ?? .followApp
         // Set this before the first window appears. nil returns ownership to macOS, including live system changes.
-        applyAppearance(selection.appearance)
+        if appliesToApplication { applyAppearance(selection.appearance) }
     }
 
     /// Called for every new web view, including pop-ups and recreated suspended tabs, before it loads a page.
     func attach(_ webView: WKWebView) {
         webViews.add(webView)
-        webView.appearance = pageSelection.appearance
+        applyPageAppearance(to: webView)
+    }
+
+    private func refreshWebViews() {
+        for webView in webViews.allObjects {
+            applyPageAppearance(to: webView)
+        }
+    }
+
+    private func applyPageAppearance(to webView: WKWebView) {
+        // Private pages always advertise dark mode, regardless of a regular profile's preferences.
+        if !webView.configuration.websiteDataStore.isPersistent {
+            webView.appearance = NSAppearance(named: .darkAqua)
+        } else if pageSelection == .followApp, !appliesToApplication {
+            webView.appearance = selection.appearance
+        } else {
+            webView.appearance = pageSelection.appearance
+        }
     }
 }

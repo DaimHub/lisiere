@@ -7,6 +7,8 @@ import WebKit
 @Observable
 final class BrowserModel {
     let profileID: UUID?
+    let appearance: AppearanceStore
+    private(set) var isActiveInWorkspace = true
     let preferences: ProfilePreferences
     let contentBlocker: ContentBlocker
     let favicons: FaviconStore
@@ -55,29 +57,35 @@ final class BrowserModel {
          history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared,
          websiteDataStore: WKWebsiteDataStore = .default(), passwords: PasswordManager? = nil, profileID: UUID? = nil,
          preferences: ProfilePreferences? = nil, contentBlocker: ContentBlocker = .shared,
-         favicons: FaviconStore = .shared) {
-        self.preferences = preferences ?? ProfilePreferences(defaults: .standard)
-        self.contentBlocker = contentBlocker
-        self.favicons = favicons
-        self.profileID = profileID
-        self.downloads = downloads
-        self.sitePermissions = sitePermissions
-        self.history = history
-        self.zoomLevels = zoomLevels
+         favicons: FaviconStore = .shared, appearance: AppearanceStore? = nil) {
+        let privateMode = !websiteDataStore.isPersistent
+        let ownedPreferences = privateMode ? ProfilePreferences() : (preferences ?? ProfilePreferences(defaults: .standard))
+        if privateMode {
+            ownedPreferences.appearance.selection = .dark
+            ownedPreferences.appearance.pageSelection = .dark
+        }
+        self.appearance = privateMode ? ownedPreferences.appearance : (appearance ?? ownedPreferences.appearance)
+        self.preferences = ownedPreferences
+        self.contentBlocker = privateMode ? ContentBlocker(defaults: nil, store: .default(), identifier: "Private-Trackers") : contentBlocker
+        self.favicons = privateMode
+            ? FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: "Private-\(UUID())")) : favicons
+        self.profileID = privateMode ? nil : profileID
+        self.downloads = privateMode ? DownloadManager(preferences: ownedPreferences) : downloads
+        self.sitePermissions = privateMode ? SitePermissions() : sitePermissions
+        self.history = privateMode ? nil : history
+        self.zoomLevels = privateMode ? ZoomStore(defaults: nil) : zoomLevels
         self.websiteDataStore = websiteDataStore
-        self.passwords = websiteDataStore.isPersistent ? passwords : nil
+        self.passwords = privateMode ? nil : passwords
         addTab()
         suspender = TabSuspender(browser: self)
     }
 
     /// A window that keeps nothing once it closes: no history, zoom levels, site permissions, or passwords, and
     /// cookies and site data its tabs share only with each other. Downloads still save.
-    static func makePrivate(downloads: DownloadManager, profileID: UUID? = nil,
-                            preferences: ProfilePreferences? = nil, contentBlocker: ContentBlocker = .shared) -> BrowserModel {
-        BrowserModel(downloads: downloads, sitePermissions: SitePermissions(), history: nil,
-                     zoomLevels: ZoomStore(defaults: nil), websiteDataStore: .nonPersistent(), profileID: profileID,
-                     preferences: preferences, contentBlocker: contentBlocker,
-                     favicons: FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: "Private-\(UUID())")))
+    static func makePrivate(downloads: DownloadManager? = nil, profileID: UUID? = nil,
+                            preferences: ProfilePreferences? = nil, contentBlocker: ContentBlocker? = nil) -> BrowserModel {
+        // Compatibility arguments never import state into an independent private window.
+        BrowserModel(websiteDataStore: .nonPersistent())
     }
 
     var isPrivate: Bool {
@@ -110,7 +118,7 @@ final class BrowserModel {
     }
 
     private func makeTab(configuration: WKWebViewConfiguration? = nil) -> BrowserTab {
-        adopt(BrowserTab(configuration: configuration ?? makeConfiguration()))
+        adopt(BrowserTab(configuration: configuration ?? makeConfiguration(), appearance: appearance))
     }
 
     private func adopt(_ tab: BrowserTab) -> BrowserTab {
@@ -121,7 +129,13 @@ final class BrowserModel {
     }
 
     /// A closed window must release every WebKit view before its profile can be deleted.
+    func setWorkspaceActive(_ active: Bool) {
+        isActiveInWorkspace = active
+        if active { activeTab?.didBecomeSelected() }
+    }
+
     func releaseClosedWindow() {
+        isActiveInWorkspace = false
         tabs.forEach { $0.close() }
         activeTabID = nil
         tabs = []
@@ -143,7 +157,7 @@ final class BrowserModel {
         let original = tabs[index]
         // The copy starts suspended, so selecting it restores the original's history and scroll position.
         let tab = original.url == nil ? makeTab()
-            : adopt(BrowserTab(url: original.url, title: original.pageTitle, interactionState: original.interactionState))
+            : adopt(BrowserTab(url: original.url, title: original.pageTitle, interactionState: original.interactionState, appearance: appearance))
         tabs.insert(tab, at: index + 1)
         activeTabID = tab.id
     }
@@ -209,7 +223,7 @@ final class BrowserModel {
         }
         // Selecting the suspended tab restores its history, or loads its address.
         let tab = adopt(BrowserTab(url: closedTab.url, title: closedTab.title,
-                                   interactionState: closedTab.interactionState))
+                                   interactionState: closedTab.interactionState, appearance: appearance))
         tabs.append(tab)
         activeTabID = tab.id
     }
@@ -321,7 +335,7 @@ final class BrowserModel {
         tabs.forEach { $0.cancelPendingPageWork() }
         tabs = session.tabs.map { tab in
             tab.url == nil ? makeTab()
-                : adopt(BrowserTab(url: tab.url, title: tab.title, interactionState: tab.interactionState))
+                : adopt(BrowserTab(url: tab.url, title: tab.title, interactionState: tab.interactionState, appearance: appearance))
         }
         activeTabID = tabs[min(max(session.selectedIndex, 0), tabs.count - 1)].id
     }
@@ -331,7 +345,7 @@ final class BrowserModel {
     /// Shows the find bar, starting with the text last searched for in any app.
     func showFindBar() {
         guard let tab = activeTab, !tab.isNewTab else { return }
-        if tab.findText.isEmpty, let text = NSPasteboard(name: .find).string(forType: .string) {
+        if !isPrivate, tab.findText.isEmpty, let text = NSPasteboard(name: .find).string(forType: .string) {
             tab.findText = text
         }
         tab.isFindBarVisible = true
@@ -349,9 +363,11 @@ final class BrowserModel {
         guard let tab = activeTab, !tab.isNewTab else { return }
         Task {
             guard let text = await tab.selectedText(), !text.isEmpty else { return }
-            let pasteboard = NSPasteboard(name: .find)
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            if !isPrivate {
+                let pasteboard = NSPasteboard(name: .find)
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+            }
             tab.findText = text
             tab.isFindBarVisible = true
             tab.find()

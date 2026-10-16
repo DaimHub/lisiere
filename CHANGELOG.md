@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-- Add persisted System, Light, and Dark appearance choices for all native windows, including private browsing.
+- Make private windows independent, always dark and fresh, without profile cookies, cache or saved browsing state.
+- Animate the transparent mascot and track the cursor with its pupils; respect Reduce Motion.
+- Fade between profiles in the same window while preserving live tabs.
+- Save themes, website appearance, accent colors and mascot choices per profile. Choose the accent when creating or editing a profile.
+- Keep every Settings tab label and icon visible when switching profiles.
+
+- Add persisted System, Light, and Dark appearance choices for regular profile windows; private windows always use Dark.
 - Let websites follow Lisière by default, with a switch to choose a separate Light or Dark website theme. Preferences persist without forcing site colors or reloading pages.
 - Improve address focus, selected suggestions, bookmark hints, and private-window badge contrast.
 

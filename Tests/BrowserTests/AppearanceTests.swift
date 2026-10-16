@@ -67,7 +67,7 @@ final class AppearanceTests: XCTestCase {
         XCTAssertNil(NSApp.appearance, "System must remove the override so future macOS changes propagate.")
     }
 
-    func testRegularAndPrivateWebPagesFollowThemeWithoutReloadOrInversion() async throws {
+    func testRegularPagesFollowThemeAndPrivatePagesStayDarkWithoutReloadOrInversion() async throws {
         let original = NSApp.appearance
         defer { NSApp.appearance = original }
         let store = AppearanceStore(defaults: defaults())
@@ -101,7 +101,7 @@ final class AppearanceTests: XCTestCase {
                 let appIsDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
                 for pageChoice in [WebPageAppearance.light, .dark, .followApp] {
                     store.pageSelection = pageChoice
-                    let dark = pageChoice == .dark || (pageChoice == .followApp && appIsDark)
+                    let dark = isPrivate || pageChoice == .dark || (pageChoice == .followApp && appIsDark)
                     try await assertPage(webView, dark: dark, background: dark ? "rgb(20, 20, 20)" : "rgb(250, 250, 250)")
                     XCTAssertEqual(NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
                                    appIsDark ? .darkAqua : .aqua, "Website choices must not change the app theme.")
@@ -171,6 +171,80 @@ final class AppearanceTests: XCTestCase {
             XCTAssertNil(newTab.appearance)
         }
         XCTAssertNil(releasedView, "Appearance tracking must not keep a closed or suspended web view alive.")
+    }
+
+    func testPrivateWebViewsAlwaysOverrideLightAndSystemPreferences() {
+        let store = AppearanceStore(defaults: defaults(), applyAppearance: { _ in })
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        store.pageSelection = .light
+        let existing = WKWebView(frame: .zero, configuration: configuration)
+        store.attach(existing)
+        XCTAssertEqual(existing.appearance?.name, .darkAqua)
+        for appChoice in BrowserAppearance.allCases {
+            store.selection = appChoice
+            for pageChoice in WebPageAppearance.allCases {
+                store.pageSelection = pageChoice
+                let newView = WKWebView(frame: .zero, configuration: configuration)
+                store.attach(newView)
+                XCTAssertEqual(existing.appearance?.name, .darkAqua)
+                XCTAssertEqual(newView.appearance?.name, .darkAqua)
+            }
+        }
+    }
+
+    func testSceneThemePreferenceMatchesNativeThemeAndReleasesSystemOverride() {
+        XCTAssertNil(BrowserAppearance.system.colorScheme)
+        XCTAssertEqual(BrowserAppearance.light.colorScheme, .light)
+        XCTAssertEqual(BrowserAppearance.dark.colorScheme, .dark)
+        XCTAssertNil(BrowserAppearance.system.appearance)
+        XCTAssertEqual(BrowserAppearance.light.appearance?.name, .aqua)
+        XCTAssertEqual(BrowserAppearance.dark.appearance?.name, .darkAqua)
+    }
+
+    func testProfileThemesUpdateOnlyTheirOwnWebViews() {
+        var globalUpdates = 0
+        let first = AppearanceStore(defaults: defaults(), appliesToApplication: false) { _ in globalUpdates += 1 }
+        let second = AppearanceStore(defaults: defaults(), appliesToApplication: false) { _ in globalUpdates += 1 }
+        let firstPage = WKWebView()
+        let secondPage = WKWebView()
+        first.attach(firstPage)
+        second.attach(secondPage)
+        first.selection = .dark
+        second.selection = .light
+        XCTAssertEqual(firstPage.appearance?.name, .darkAqua)
+        XCTAssertEqual(secondPage.appearance?.name, .aqua)
+        first.selection = .light
+        first.pageSelection = .dark
+        XCTAssertEqual(firstPage.appearance?.name, .darkAqua)
+        XCTAssertEqual(secondPage.appearance?.name, .aqua)
+        first.pageSelection = .followApp
+        XCTAssertEqual(firstPage.appearance?.name, .aqua)
+        first.selection = .system
+        XCTAssertNil(firstPage.appearance)
+        XCTAssertEqual(globalUpdates, 0, "A profile's theme must not change other windows or the app's appearance.")
+    }
+
+    func testPopUpsAndRestoredTabsKeepTheirProfilesAppearance() throws {
+        let store = AppearanceStore(defaults: defaults(), appliesToApplication: false)
+        store.selection = .dark
+        let browser = BrowserModel(appearance: store)
+        let opener = try XCTUnwrap(browser.activeTab)
+        let configuration = try XCTUnwrap(opener.webView?.configuration)
+        let popUp = browser.openChildTab(of: opener, configuration: configuration, select: false)
+        XCTAssertEqual(popUp.webView?.appearance?.name, .darkAqua)
+        browser.restoreSession(WindowSession(tabs: [
+            TabSession(url: URL(string: "data:text/html,<title>Profile</title>")!, title: "Profile", interactionState: nil),
+        ], selectedIndex: 0))
+        XCTAssertEqual(browser.activeTab?.webView?.appearance?.name, .darkAqua)
+        store.selection = .light
+        browser.duplicateTab(try XCTUnwrap(browser.activeTabID))
+        XCTAssertEqual(browser.activeTab?.webView?.appearance?.name, .aqua)
+        browser.closeActiveTab()
+        browser.reopenClosedTab()
+        XCTAssertEqual(browser.activeTab?.webView?.appearance?.name, .aqua)
+        store.pageSelection = .dark
+        XCTAssertTrue(browser.tabs.allSatisfy { $0.webView?.appearance?.name == .darkAqua })
     }
 
     func testSeparateThemeSwitchFollowsAppByDefaultAndRemembersItsChoice() {

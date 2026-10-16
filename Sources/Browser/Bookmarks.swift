@@ -48,12 +48,12 @@ enum BookmarksBarVisibility: String, CaseIterable, Identifiable {
 @Observable
 final class BookmarkStore {
     private(set) var bookmarks: [Bookmark] = []
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let defaults: UserDefaults?
     private static let storageKey = "bookmarks"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults? = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Self.storageKey),
+        if let data = defaults?.data(forKey: Self.storageKey),
            let bookmarks = try? JSONDecoder().decode([Bookmark].self, from: data) {
             self.bookmarks = bookmarks
         }
@@ -105,7 +105,7 @@ final class BookmarkStore {
 
     private func save() {
         guard let data = try? JSONEncoder().encode(bookmarks) else { return }
-        defaults.set(data, forKey: Self.storageKey)
+        defaults?.set(data, forKey: Self.storageKey)
     }
 }
 

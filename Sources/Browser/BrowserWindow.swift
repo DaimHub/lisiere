@@ -11,7 +11,7 @@ private struct AddressBarFrameKey: PreferenceKey {
 
 struct BrowserWindow: View {
     let profiles: ProfileStore
-    let profileID: UUID
+    let profileID: UUID?
     let bookmarks: BookmarkStore
     @Bindable private var browser: BrowserModel
     @State private var address = ""
@@ -38,14 +38,14 @@ struct BrowserWindow: View {
                 ? Color(red: 0.70, green: 0.62, blue: 0.96)
                 : Color(red: 0.35, green: 0.25, blue: 0.60)
         }
-        return Color(red: 0.38, green: 0.49, blue: 0.54)
+        return browser.preferences.accent.color
     }
 
-    init(bookmarks: BookmarkStore, context: ProfileContext, profiles: ProfileStore,
+    init(bookmarks: BookmarkStore, profiles: ProfileStore,
          browser: BrowserModel, isFullScreen: Bool) {
         self.bookmarks = bookmarks
         self.profiles = profiles
-        self.profileID = context.id
+        self.profileID = browser.profileID
         self.isFullScreen = isFullScreen
         self.browser = browser
     }
@@ -102,7 +102,7 @@ struct BrowserWindow: View {
             }
         }
         .sheet(isPresented: $browser.isShowingClearData) {
-            ClearDataView(data: browsingData, profileName: profiles.name(profileID))
+            ClearDataView(data: browsingData, profileName: profileID.map(profiles.name) ?? "Private")
         }
         .sheet(isPresented: $browser.isShowingHistory) {
             if let history = browser.history {
@@ -120,7 +120,7 @@ struct BrowserWindow: View {
     }
 
     private var profileSwipeArea: some View {
-        ProfileSwipeArea(enabled: profiles.availableProfiles.count > 1) { direction in
+        ProfileSwipeArea(enabled: !browser.isPrivate && profiles.availableProfiles.count > 1) { direction in
             hoverCardTabID = nil
             browser.profileWindow?.switchBy(direction)
         }
@@ -222,7 +222,7 @@ struct BrowserWindow: View {
             navigationBar
                 .padding(.leading, leadingInset)
 
-            if bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
+            if !browser.isPrivate, bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
                 BookmarksBar(bookmarks: bookmarks, browser: browser)
                     .padding(.leading, leadingInset - BrowserChrome.edgeInset)
                     .padding(.bottom, 4)
@@ -344,31 +344,33 @@ struct BrowserWindow: View {
             .background(Color.primary.opacity(0.035),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Menu {
-                Text("Profile: \(profiles.name(profileID))")
-                ForEach(profiles.availableProfiles) { profile in
-                    Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
-                        Label(profile.name, systemImage: profile.icon.rawValue)
+            if !browser.isPrivate {
+                Menu {
+                    Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
+                    ForEach(profiles.availableProfiles) { profile in
+                        Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
+                            Label(profile.name, systemImage: profile.icon.rawValue)
+                        }
                     }
+                    Divider()
+                    Button("Manage Profiles…") {
+                        profiles.settingsTab = .profiles
+                        openSettings()
+                    }
+                } label: {
+                    Label(profileID.map(profiles.name) ?? "Private", systemImage: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                Divider()
-                Button("Manage Profiles…") {
-                    profiles.settingsTab = .profiles
-                    openSettings()
-                }
-            } label: {
-                Label(profiles.name(profileID), systemImage: profiles.profile(profileID)?.icon.rawValue ?? "person.crop.circle")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.visible)
-            .padding(.horizontal, 10)
-            .frame(width: 132, height: BrowserChrome.navigationControlHeight)
-            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .help("Profile: \(profiles.name(profileID))")
-            .accessibilityLabel("Profile: \(profiles.name(profileID))")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.visible)
+                .padding(.horizontal, 10)
+                .frame(width: 132, height: BrowserChrome.navigationControlHeight)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .help("Profile: \(profileID.map(profiles.name) ?? "Private")")
+                .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
 
+            }
             HStack(spacing: 7) {
                 Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
@@ -389,7 +391,7 @@ struct BrowserWindow: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(addressIsFocused ? Color(nsColor: .keyboardFocusIndicatorColor) : .clear, lineWidth: 2)
+                    .strokeBorder(addressIsFocused ? accent : .clear, lineWidth: 2)
             }
             .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
 
@@ -496,7 +498,7 @@ struct BrowserWindow: View {
 
     @ViewBuilder
     private var bookmarkButton: some View {
-        if let tab = browser.activeTab, !tab.isNewTab, let url = tab.url {
+        if !browser.isPrivate, let tab = browser.activeTab, !tab.isNewTab, let url = tab.url {
             let isBookmarked = bookmarks.isBookmarked(url)
             Button { bookmarks.toggle(title: tab.pageTitle, url: url) } label: {
                 Image(systemName: isBookmarked ? "star.fill" : "star")

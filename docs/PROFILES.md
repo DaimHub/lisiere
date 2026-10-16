@@ -1,6 +1,6 @@
 # Independent browser profiles
 
-Use the profile menu beside the address field or **Profiles** in the menu bar. Switching changes the profile inside the current window. Each window retains an independent set of tabs for each visited profile; switching back restores those same live pages, including unsaved form fields. Another window already showing that profile is not focused or modified. With no browser window open, choosing a profile opens one. New normal/private windows use the focused window's profile. External links use the frontmost normal window; with none open, they use the last selected profile.
+Use the profile menu beside the address field or **Profiles** in the menu bar. Switching changes the profile inside the current window. Each window retains an independent set of tabs for each visited profile; switching back restores those same live pages, including unsaved form fields. Another window already showing that profile is not focused or modified. With no browser window open, choosing a profile opens one. New normal windows use the focused window's profile. New private windows are independent of all profiles. External links use the frontmost normal window; with none open, they use the last selected profile.
 
 Swipe horizontally with two fingers over the vertical sidebar or horizontal tab strip to move through profiles. One gesture changes one profile, wrapping at either end. Vertical sidebar scrolling, page gestures and scroll momentum do not trigger a switch. The menu and **⌥⌘[ / ⌥⌘]** also provide previous/next navigation. With one profile, scrolling keeps its existing behavior.
 
@@ -24,12 +24,12 @@ A new profile can start empty, or copy settings, bookmarks and tab addresses fro
 | Search engine, new-tab page, tab layout and session restoration | Per profile |
 | Tracker-blocking preference and site exceptions | Per profile, with separately identified compiled rules |
 | Passkeys and OS credential providers | Managed by macOS, not partitioned by this browser |
-| App and website themes, mascot and Dock icon | Application-wide |
+| App and website themes, accent, mascot | Per profile; Dock follows the active regular window |
 | Default browser registration, software updates and OS permissions | Application/OS-wide |
 
-Settings has an explicit profile selector. Its browsing controls and website-data clearing act on that profile; themes and the mascot remain application-wide. Switching the selected profile resets sensitive password and site-data UI state. Profiles separate browser-managed state; they are not macOS accounts, separate filesystem sandboxes or an anonymity service.
+Settings has an explicit profile selector. Its browsing controls and website-data clearing act on that profile; themes, accent colors and mascots also belong to the selected profile. Switching the selected profile resets sensitive password and site-data UI state. Profiles separate browser-managed state; they are not macOS accounts, separate filesystem sandboxes or an anonymity service.
 
-Each profile visited in a private window gets a fresh `WKWebsiteDataStore.nonPersistent()`. Switching profiles stays private and returns to the same temporary pages when switching back. Tabs/pop-ups within it share that temporary store; other private windows and normal profiles do not. Private windows keep no persistent history, session, permissions, zoom or password manager, and never restore on restart. Search/layout preferences, bookmarks and downloads belong to their originating profile.
+Every private window starts independently with a fresh `WKWebsiteDataStore.nonPersistent()`, empty preferences, no profile identity and dark native/page appearance. Tabs and pop-ups share only that window's temporary data. Private windows cannot switch profiles; they do not load saved bookmarks, downloads, permissions, zoom, tracker exceptions, favicon caches, Find text or passwords. Closing releases the temporary store; another private window starts empty. Files explicitly downloaded remain on disk.
 
 ## Existing installations and persistence
 
@@ -43,13 +43,13 @@ Session files distinguish visible windows from parked profile sessions, linked b
 
 ## Explicit deletion
 
-Deletion requires the native destructive confirmation, names the target profile and lists affected data. At least one available profile must remain. All normal/private windows retaining the target profile, including windows currently showing another profile, must be closed and its downloads finished or cancelled. A durable pending-deletion record blocks reopening while deletion runs.
+Deletion requires the native destructive confirmation, names the target profile and lists affected data. At least one available profile must remain. All normal windows retaining the target profile, including windows currently showing another profile, must be closed and its downloads finished or cancelled. A durable pending-deletion record blocks reopening while deletion runs.
 
 The app removes its passwords, compiled tracker rules, site icons, WebKit website data, named WebKit store, files and preferences, then drops the registry entry. The initial default WebKit store is cleared through the public data-removal API; its directory is not manually removed. Its owned legacy files/keys are deleted individually so app-wide settings and the profile registry remain intact. Files already downloaded are kept. Late queued history/session writes are disabled before removing files.
 
 If deletion fails or the app stops midway, the unavailable profile offers **Retry Delete**. Retrying requires confirmation; destructive work never silently resumes at launch.
 
-## Validation
+## Historical validation
 
 `make test` covers registry migration/persistence, icon persistence, name validation, corruption handling, data boundaries, copying without credentials/form state, deletion guards/retry, late-write prevention, Keychain separation and gesture filtering. Live WebKit tests use `Tests/Fixtures/profile_site.py`, a loopback-only server, for cookies, localStorage, IndexedDB, Cache Storage, service workers and numbered cacheable HTTP responses. They check two persistent profiles, fresh private windows, pop-ups, duplicate/suspended/restored tabs and clearing one store without changing the other.
 
@@ -72,3 +72,5 @@ Validated on the integrated themes/mascots Release base `c06b7e5`, in the isolat
 Native menu and Next Profile actions switched Personal/Research in `browser-AppWindow-1`, including the change between vertical and horizontal tab layouts. Returning to Personal preserved an unsaved form value and its separate `alpha` site data and HTTP cache response 5. A process restart restored one visible session plus its parked profile; returning to the parked profile did not create another window. A private Research-to-Personal switch retained `private-AppWindow-1` and private chrome. The profile control's 34-point height was visually checked against navigation/address controls in both layouts. The Private indicator sits immediately to the right of the address field, verified in both layouts in the final Release.
 
 The integrated XCTest suite passed 164 tests. Added coverage includes the same NSWindow identity and window count, two windows on the same profile, live form and same-origin storage preservation, private switching, legacy session decoding, visible/parked restoration, deletion guards, pending-window ownership and copying parked tabs without ownership or interaction state. Release build and strict signature checks passed; the validation copy retained sandbox and hardened runtime. Physical trackpad input remains unverified; gesture filtering and the resulting window transition are covered in tests. No installed app was replaced.
+
+Accent colors are edited with the profile name and icon in Settings > Profiles > New Profile / Edit. The editor commits the color only on Save; Cancel leaves it unchanged. Copying a profile initializes the editor with the source profile color.

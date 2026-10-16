@@ -106,8 +106,7 @@ final class ProfileContext {
 
     func makeBrowser(downloads: DownloadManager? = nil, isPrivate: Bool = false) -> BrowserModel {
         if isPrivate {
-            return .makePrivate(downloads: downloads ?? self.downloads, profileID: id,
-                                preferences: preferences, contentBlocker: contentBlocker)
+            return .makePrivate()
         }
         return BrowserModel(downloads: downloads ?? self.downloads, sitePermissions: sitePermissions, history: history,
                             zoomLevels: zoomLevels, websiteDataStore: browsingData.dataStore,
@@ -318,8 +317,9 @@ final class ProfileStore {
     /// Change the focused browser's profile without opening or stealing another window.
     /// Settings reuses the last active browser; only an app with no browser window opens a new one.
     func activate(_ id: UUID, in browser: BrowserModel? = nil, openWindow: OpenWindowAction) {
-        let visible = browsers.compactMap(\.value).filter { $0.window != nil }.compactMap(\.profileWindow)
-        if let owner = browser?.profileWindow ?? lastActiveWindow ?? visible.first, !owner.isClosed {
+        let visible = browsers.compactMap(\.value).filter { $0.window != nil && !$0.isPrivate }.compactMap(\.profileWindow)
+        let requestedOwner = browser?.isPrivate == false ? browser?.profileWindow : nil
+        if let owner = requestedOwner ?? lastActiveWindow ?? visible.first, !owner.isClosed, !owner.isPrivate {
             owner.switchTo(id)
             if owner.window?.isMiniaturized == true { owner.window?.deminiaturize(nil) }
             owner.window?.makeKeyAndOrderFront(nil)
