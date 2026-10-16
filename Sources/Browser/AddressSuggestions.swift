@@ -156,21 +156,24 @@ struct AddressSuggestionList: View {
                 .layoutPriority(1)
             Text(AddressSuggestions.strippedAddress(suggestion.url))
                 .lineLimit(1)
-                .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
+                .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                                            : AnyShapeStyle(.secondary))
             Spacer(minLength: 0)
             if suggestion.isBookmarked {
                 Image(systemName: "star.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                                                : AnyShapeStyle(.secondary))
             }
         }
         .font(.system(size: 13))
-        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                                    : AnyShapeStyle(.primary))
         .padding(.horizontal, 8)
         .frame(height: 28)
         .background {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? AnyShapeStyle(.tint)
+                .fill(isSelected ? AnyShapeStyle(Color(nsColor: .selectedContentBackgroundColor))
                       : AnyShapeStyle(Color.primary.opacity(hoveredID == suggestion.id ? 0.07 : 0)))
         }
         .contentShape(Rectangle())

@@ -15,7 +15,7 @@ struct BookmarksBar: View {
             if bookmarks.bookmarks.isEmpty {
                 Label("Bookmark pages with ⌘D or the star in the address bar", systemImage: "star")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .padding(.leading, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {

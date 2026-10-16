@@ -253,11 +253,35 @@ private struct PasswordSettings: View {
 }
 
 private struct AppearanceSettings: View {
+    @Bindable private var appearance = AppearanceStore.shared
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
 
     var body: some View {
         Form {
+            Picker("App theme", selection: $appearance.selection) {
+                ForEach(BrowserAppearance.allCases) { theme in
+                    Text(theme.title).tag(theme)
+                }
+            }
+            .help("System follows your Mac’s appearance.")
+            Toggle(isOn: $appearance.usesSeparatePageTheme) {
+                Text("Use a separate theme for websites")
+                Text("When off, websites follow Lisière’s theme.")
+            }
+            .toggleStyle(.switch)
+            .accessibilityLabel("Use a separate theme for websites")
+            .accessibilityHint("When off, websites follow Lisière’s theme.")
+            if appearance.usesSeparatePageTheme {
+                Picker("Website theme", selection: $appearance.pageSelection) {
+                    ForEach(WebPageAppearance.separateChoices) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+            }
+            Text("Websites use this preference when they support it. Their colors aren’t forced.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Picker("Tabs", selection: $tabLayout) {
                 ForEach(TabLayout.allCases) { layout in
                     Text(layout.title).tag(layout)

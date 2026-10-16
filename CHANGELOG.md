@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add persisted System, Light, and Dark appearance choices for all native windows, including private browsing.
+- Let websites follow Lisière by default, with a switch to choose a separate Light or Dark website theme. Preferences persist without forcing site colors or reloading pages.
+- Improve address focus, selected suggestions, bookmark hints, and private-window badge contrast.
+
 ## 0.1.0 — 2026-10-16
 
 Initial independent fork of Athas Browser at `f7a7e4c6232aa9c8ca2e9c926fa3d79efc9953b5`.
