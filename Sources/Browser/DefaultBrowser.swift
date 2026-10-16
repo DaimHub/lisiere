@@ -79,6 +79,10 @@ final class ExternalURLRouter {
         browser.openInNewTabs(urls)
     }
 
+    func unregister(_ browser: BrowserModel) {
+        browsers.removeAll { $0.browser == nil || $0.browser === browser }
+    }
+
     func open(_ urls: [URL]) {
         let urls = urls.filter(Self.canOpen)
         guard !urls.isEmpty else { return }

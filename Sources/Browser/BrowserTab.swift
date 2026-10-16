@@ -70,7 +70,6 @@ final class BrowserTab: Identifiable {
         self.url = url
         pageTitle = title
         suspendedState = interactionState
-        favicon = FaviconStore.cachedIcon(for: url)
         faviconHost = url?.host()
         // The page is already in history, so loading it again on restore isn't another visit.
         historyVisit = url.map { (nil, $0) }
@@ -98,7 +97,7 @@ final class BrowserTab: Identifiable {
         contentView.addSubview(webView)
         webView.navigationDelegate = pageDelegate
         webView.uiDelegate = pageDelegate
-        ContentBlocker.shared.attach(webView.configuration.userContentController)
+        browser?.contentBlocker.attach(webView.configuration.userContentController)
         self.webView = webView
 
         let options: NSKeyValueObservingOptions = isRestoring ? [] : .initial
@@ -126,6 +125,21 @@ final class BrowserTab: Identifiable {
         observe(webView, \.canGoBack, options) { $0.canGoBack = $1.canGoBack }
         observe(webView, \.canGoForward, options) { $0.canGoForward = $1.canGoForward }
         observe(webView, \.hasOnlySecureContent, options) { $0.hasOnlySecureContent = $1.hasOnlySecureContent }
+    }
+
+    /// Final window closure also releases a blank page and cancels pending page work.
+    func close() {
+        stopWaitingForSelection()
+        thumbnailTask?.cancel()
+        faviconTask?.cancel()
+        findTask?.cancel()
+        observations.forEach { $0.invalidate() }
+        observations = []
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
+        webView?.removeFromSuperview()
+        webView = nil
     }
 
     /// Releases the web view, and with it the page's memory, keeping what the tab strip shows and the state to restore.
@@ -446,14 +460,14 @@ final class BrowserTab: Identifiable {
         }
         if faviconHost != host {
             faviconHost = host
-            favicon = FaviconStore.cachedIcon(for: url)
+            favicon = browser?.favicons.cachedIcon(for: url)
         }
         faviconTask = Task { [weak self] in
             // Pages often set their icon from script just after loading or changing their URL.
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !Task.isCancelled, let webView, !webView.isLoading, webView.url == url else { return }
             let candidates = await FaviconStore.candidates(in: webView)
-            guard let icon = await FaviconStore.icon(forPage: url, candidates: candidates,
+            guard let icon = await browser?.favicons.icon(forPage: url, candidates: candidates,
                                                      remember: !(browser?.isPrivate ?? false)),
                   !Task.isCancelled, self.url == url else { return }
             favicon = icon

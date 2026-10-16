@@ -39,15 +39,24 @@ struct ClearDataOptions: OptionSet, Hashable {
 final class BrowsingData {
     let history: HistoryStore
     let session: SessionStore
-    @ObservationIgnored let dataStore: WKWebsiteDataStore
+    let favicons: FaviconStore
+    @ObservationIgnored private(set) var dataStore: WKWebsiteDataStore
     /// Sites with cookies, storage, or cache, sorted by name. Empty until `loadSiteRecords()`.
     private(set) var siteRecords: [WKWebsiteDataRecord] = []
     private(set) var hasLoadedSiteRecords = false
 
-    init(history: HistoryStore, session: SessionStore, dataStore: WKWebsiteDataStore = .default()) {
+    init(history: HistoryStore, session: SessionStore, dataStore: WKWebsiteDataStore = .default(),
+         favicons: FaviconStore = .shared) {
+        self.favicons = favicons
         self.history = history
         self.session = session
         self.dataStore = dataStore
+    }
+
+    /// A settings view may outlive a deleted profile; it must not keep that profile's network session alive.
+    func releaseDataStore() {
+        dataStore = .nonPersistent()
+        siteRecords = []
     }
 
     /// Removes what the options name from the time range. Clearing all history also forgets the closed windows
@@ -63,7 +72,7 @@ final class BrowsingData {
             await dataStore.removeData(ofTypes: types, modifiedSince: start)
         }
         if options.contains(.favicons) {
-            await FaviconStore.clear(since: start)
+            await favicons.clear(since: start)
         }
         if hasLoadedSiteRecords { await loadSiteRecords() }
     }
@@ -98,6 +107,7 @@ final class BrowsingData {
 /// History ▸ Clear History and Website Data, also opened from Settings ▸ Privacy.
 struct ClearDataView: View {
     let data: BrowsingData
+    var profileName: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var range = HistoryClearRange.lastHour
     @State private var options: ClearDataOptions = [.history, .siteData, .cache]
@@ -107,6 +117,8 @@ struct ClearDataView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Clear History and Website Data")
                 .font(.system(size: 15, weight: .semibold))
+
+            if let profileName { Text("Profile: \(profileName)").foregroundStyle(.secondary) }
 
             Picker("Clear:", selection: $range) {
                 ForEach(HistoryClearRange.allCases) { range in

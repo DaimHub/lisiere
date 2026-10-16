@@ -6,7 +6,7 @@ struct NewTabView: View {
     let browser: BrowserModel
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
-    @AppStorage(NewTabPage.storageKey) private var page = NewTabPage.startPage
+    private var page: NewTabPage { browser.preferences.newTabPage }
 
     private let horizontalPadding: CGFloat = 32
     private let tileSpacing: CGFloat = 8

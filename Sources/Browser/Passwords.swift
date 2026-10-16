@@ -64,12 +64,19 @@ enum PasswordStorageError: Error {
 final class KeychainPasswordStorage: PasswordStorage {
     /// Marks the items this app saves, so it never lists or reads another app's.
     private static let itemDescription = "io.github.daimhub.lisiere website password"
+    private let securityDomain: String
+
+    init(profileID: UUID? = nil) {
+        // Security domain participates in Keychain's unique key; description alone does not.
+        securityDomain = profileID.map { "io.github.daimhub.lisiere.profile.\($0)" } ?? ""
+    }
 
     private func query(for origin: PasswordOrigin? = nil, username: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrProtocol as String: kSecAttrProtocolHTTPS,
             kSecAttrDescription as String: Self.itemDescription,
+            kSecAttrSecurityDomain as String: securityDomain,
         ]
         if let origin {
             query[kSecAttrServer as String] = origin.host
@@ -156,6 +163,11 @@ final class PasswordManager {
         self.defaults = defaults
         offersToSave = defaults?.object(forKey: Self.offersToSaveKey) as? Bool ?? true
         neverSaveSites = defaults?.stringArray(forKey: Self.neverSaveKey) ?? []
+    }
+
+    func removeAll() throws {
+        for account in try storage.savedPasswords() { try storage.remove(account) }
+        passwords = []
     }
 
     func reload() {

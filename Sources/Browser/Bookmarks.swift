@@ -113,11 +113,12 @@ final class BookmarkStore {
 struct SiteIcon: View {
     let url: URL
     var size: CGFloat = 16
+    @Environment(FaviconStore.self) private var favicons
     @State private var icon: Image?
 
     var body: some View {
         Group {
-            if let icon = icon ?? FaviconStore.cachedIcon(for: url) {
+            if let icon = icon ?? favicons.cachedIcon(for: url) {
                 icon
                     .resizable()
                     .scaledToFit()
@@ -127,7 +128,7 @@ struct SiteIcon: View {
             }
         }
         .frame(width: size, height: size)
-        .task(id: url) { icon = await FaviconStore.icon(for: url) }
+        .task(id: url) { icon = await favicons.icon(for: url) }
     }
 
     private var monogram: some View {

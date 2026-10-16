@@ -6,6 +6,10 @@ import WebKit
 @MainActor
 @Observable
 final class BrowserModel {
+    let profileID: UUID?
+    let preferences: ProfilePreferences
+    let contentBlocker: ContentBlocker
+    let favicons: FaviconStore
     let downloads: DownloadManager
     let sitePermissions: SitePermissions
     /// `nil` for a window whose pages aren't remembered.
@@ -13,7 +17,7 @@ final class BrowserModel {
     let zoomLevels: ZoomStore
     /// Shared by the window's tabs. A private window's keeps its cookies and site data in memory, apart from
     /// other windows, until the window closes.
-    let websiteDataStore: WKWebsiteDataStore
+    private(set) var websiteDataStore: WKWebsiteDataStore
     /// Offers to save sign-ins and fills them in. `nil` for a window whose pages aren't remembered.
     let passwords: PasswordManager?
     /// The window showing these tabs, so links from other apps can open in the frontmost one.
@@ -48,7 +52,13 @@ final class BrowserModel {
 
     init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared,
          history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared,
-         websiteDataStore: WKWebsiteDataStore = .default(), passwords: PasswordManager? = nil) {
+         websiteDataStore: WKWebsiteDataStore = .default(), passwords: PasswordManager? = nil, profileID: UUID? = nil,
+         preferences: ProfilePreferences? = nil, contentBlocker: ContentBlocker = .shared,
+         favicons: FaviconStore = .shared) {
+        self.preferences = preferences ?? ProfilePreferences(defaults: .standard)
+        self.contentBlocker = contentBlocker
+        self.favicons = favicons
+        self.profileID = profileID
         self.downloads = downloads
         self.sitePermissions = sitePermissions
         self.history = history
@@ -61,9 +71,12 @@ final class BrowserModel {
 
     /// A window that keeps nothing once it closes: no history, zoom levels, site permissions, or passwords, and
     /// cookies and site data its tabs share only with each other. Downloads still save.
-    static func makePrivate(downloads: DownloadManager) -> BrowserModel {
+    static func makePrivate(downloads: DownloadManager, profileID: UUID? = nil,
+                            preferences: ProfilePreferences? = nil, contentBlocker: ContentBlocker = .shared) -> BrowserModel {
         BrowserModel(downloads: downloads, sitePermissions: SitePermissions(), history: nil,
-                     zoomLevels: ZoomStore(defaults: nil), websiteDataStore: .nonPersistent())
+                     zoomLevels: ZoomStore(defaults: nil), websiteDataStore: .nonPersistent(), profileID: profileID,
+                     preferences: preferences, contentBlocker: contentBlocker,
+                     favicons: FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: "Private-\(UUID())")))
     }
 
     var isPrivate: Bool {
@@ -101,7 +114,20 @@ final class BrowserModel {
 
     private func adopt(_ tab: BrowserTab) -> BrowserTab {
         tab.browser = self
+        if let controller = tab.webView?.configuration.userContentController { contentBlocker.attach(controller) }
+        if !isPrivate { tab.favicon = favicons.cachedIcon(for: tab.url) }
         return tab
+    }
+
+    /// A closed window must release every WebKit view before its profile can be deleted.
+    func releaseClosedWindow() {
+        tabs.forEach { $0.close() }
+        activeTabID = nil
+        tabs = []
+        closedTabs = []
+        // SwiftUI may retain a closed window model. Release its persistent store too.
+        websiteDataStore = .nonPersistent()
+        window = nil
     }
 
     func addTab() {
@@ -241,7 +267,7 @@ final class BrowserModel {
     }
 
     func navigate(to input: String) {
-        guard let url = BrowserAddress.url(for: input) else { return }
+        guard let url = BrowserAddress.url(for: input, searchEngine: preferences.searchEngine) else { return }
         activeTab?.load(url)
     }
 

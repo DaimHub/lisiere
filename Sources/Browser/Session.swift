@@ -65,14 +65,16 @@ final class SessionStore {
         browsers.compactMap(\.browser)
     }
 
+    var hasPendingWindows: Bool { !pendingWindows.isEmpty }
+
     var snapshot: SessionSnapshot {
-        SessionSnapshot(windows: openBrowsers.map { $0.windowSession() }, closedWindows: reopenableWindows)
+        SessionSnapshot(windows: openBrowsers.map { $0.windowSession() } + pendingWindows, closedWindows: reopenableWindows)
     }
 
     /// Remembers a window from now on. A window that opens while saved windows are waiting restores the next one.
     /// Returns how many more windows to open for the rest.
     func attach(_ browser: BrowserModel) -> Int {
-        guard !openBrowsers.contains(where: { $0 === browser }) else { return 0 }
+        guard !browser.isPrivate, !openBrowsers.contains(where: { $0 === browser }) else { return 0 }
         browsers.removeAll { $0.browser == nil }
         browsers.append(WeakBrowser(browser: browser))
         defer {

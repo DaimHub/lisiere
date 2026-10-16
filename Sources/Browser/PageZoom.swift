@@ -8,16 +8,17 @@ final class ZoomStore {
     /// The steps Zoom In and Zoom Out move between.
     static let levels: [Double] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
     static let shared = ZoomStore()
-    private static let storageKey = "pageZoomLevels"
+    private let storageKey: String
 
     /// `nil` keeps the levels in memory only.
     @ObservationIgnored private let defaults: UserDefaults?
     /// Only levels other than 100%.
     private(set) var levelsByHost: [String: Double]
 
-    init(defaults: UserDefaults? = .standard) {
+    init(defaults: UserDefaults? = .standard, storageKey: String = "pageZoomLevels") {
+        self.storageKey = storageKey
         self.defaults = defaults
-        levelsByHost = defaults?.dictionary(forKey: Self.storageKey) as? [String: Double] ?? [:]
+        levelsByHost = defaults?.dictionary(forKey: storageKey) as? [String: Double] ?? [:]
     }
 
     func level(for host: String?) -> Double {
@@ -27,12 +28,12 @@ final class ZoomStore {
     func setLevel(_ level: Double, for host: String?) {
         guard let host else { return }
         levelsByHost[host] = level == 1 ? nil : level
-        defaults?.set(levelsByHost, forKey: Self.storageKey)
+        defaults?.set(levelsByHost, forKey: storageKey)
     }
 
     func removeAll() {
         levelsByHost = [:]
-        defaults?.removeObject(forKey: Self.storageKey)
+        defaults?.removeObject(forKey: storageKey)
     }
 
     static func level(after level: Double) -> Double {
