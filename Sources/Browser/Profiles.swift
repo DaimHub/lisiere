@@ -17,6 +17,22 @@ enum ProfileIcon: String, Codable, CaseIterable, Identifiable {
     case graduation = "graduationcap"
     case flask = "flask"
     var id: String { rawValue }
+    var browserIcon: BrowserIcon {
+        switch self {
+        case .person: .profile
+        case .briefcase: .briefcase
+        case .house: .home
+        case .book: .book
+        case .globe: .globe
+        case .code: .code
+        case .leaf: .leaf
+        case .star: .star
+        case .heart: .heart
+        case .game: .game
+        case .graduation: .graduation
+        case .flask: .flask
+        }
+    }
     var title: String {
         switch self {
         case .person: "Personal"

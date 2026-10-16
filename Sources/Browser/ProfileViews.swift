@@ -36,8 +36,11 @@ struct ProfileBrowserWindow: View {
                     .transition(reduceMotion ? .identity : .opacity)
                     .zIndex(1)
             } else if !isPrivate, profiles.context(for: profileID) == nil {
-                ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
-                                       description: Text(profiles.loadError ?? "This profile is unavailable."))
+                ContentUnavailableView {
+                    Label("Profile Unavailable", browserIcon: .profileUnavailable, size: 40)
+                } description: {
+                    Text(profiles.loadError ?? "This profile is unavailable.")
+                }
             } else {
                 Color.clear
             }
@@ -96,7 +99,7 @@ struct ProfilesView: View {
             Section {
                 ForEach(profiles.profiles) { profile in
                     HStack {
-                        Label(profile.name, systemImage: profile.icon.rawValue)
+                        Label(profile.name, browserIcon: profile.icon.browserIcon)
                             .lineLimit(1)
                             .help(profile.name)
                         Spacer()
@@ -113,7 +116,9 @@ struct ProfilesView: View {
                         .disabled(profiles.availableProfiles.filter { $0.id != profile.id }.isEmpty)
                     }
                 }
-                Button("New Profile…", systemImage: "plus") { editor = EditorRequest(profile: nil) }
+                Button { editor = EditorRequest(profile: nil) } label: {
+                    Label("New Profile…", browserIcon: .add)
+                }
             } header: {
                 Text("Profiles")
             } footer: {
@@ -195,8 +200,7 @@ private struct ProfileNameEditor: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 8) {
                 ForEach(ProfileIcon.allCases) { option in
                     Button { icon = option } label: {
-                        Image(systemName: option.rawValue)
-                            .font(.system(size: 20))
+                        Image(browserIcon: option.browserIcon, size: 20)
                             .frame(width: 42, height: 36)
                             .background(icon == option ? accentColor.opacity(0.18) : .clear,
                                         in: RoundedRectangle(cornerRadius: 8))

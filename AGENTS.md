@@ -10,6 +10,7 @@
 
 ## Architecture and interface
 
+- Use `BrowserIcon` (Hugeicons Free Stroke Rounded) for interface icons in SwiftUI and AppKit. Keep persisted `ProfileIcon` raw values stable; use `browserIcon` for rendering.
 - Preserve native SwiftUI/AppKit/WebKit patterns and BrowserChrome layout values unless a redesign is requested.
 - Always use the transparent `Mascot-*` artwork on the new-tab page, in both palettes and appearances. Do not add a background behind it or use the `Dock-*` icon variants there.
 - Keep navigation and tab state in BrowserModel/BrowserTab, page callbacks in PageDelegate, and persistence in existing stores.

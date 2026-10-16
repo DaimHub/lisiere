@@ -27,21 +27,21 @@ enum BrowserToolbarItem: String, CaseIterable, Identifiable {
         }
     }
 
-    var symbol: String {
+    var icon: BrowserIcon {
         switch self {
-        case .profile: "person.crop.circle"
-        case .back: "chevron.left"
-        case .forward: "chevron.right"
-        case .reload: "arrow.clockwise"
-        case .address: "magnifyingglass"
-        case .newTab: "plus"
-        case .home: "house"
-        case .privateWindow: "eyeglasses"
-        case .history: "clock.arrow.circlepath"
-        case .downloads: "arrow.down.circle"
-        case .bookmarks: "book"
-        case .settings: "gearshape"
-        case .allActions: "ellipsis"
+        case .profile: .profile
+        case .back: .back
+        case .forward: .forward
+        case .reload: .reload
+        case .address: .search
+        case .newTab: .add
+        case .home: .home
+        case .privateWindow: .privateWindow
+        case .history: .history
+        case .downloads: .downloads
+        case .bookmarks: .book
+        case .settings: .settings
+        case .allActions: .more
         }
     }
 }

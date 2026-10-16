@@ -3,7 +3,7 @@ import SwiftUI
 /// The full badge is the menu label, so its padding participates in hit testing.
 struct ToolbarProfileMenu<Content: View>: View {
     let name: String
-    let symbol: String
+    let icon: BrowserIcon
     let compact: Bool
     let accent: Color
     @ViewBuilder var content: () -> Content
@@ -12,10 +12,10 @@ struct ToolbarProfileMenu<Content: View>: View {
     var body: some View {
         Menu(content: content) {
             HStack(spacing: 5) {
-                Image(systemName: symbol)
+                Image(browserIcon: icon)
                 if !compact {
                     Text(name).lineLimit(1).truncationMode(.tail)
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    Image(browserIcon: .chevronDown, size: 9)
                 }
             }
             .padding(.horizontal, compact ? 0 : 10)

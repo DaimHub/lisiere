@@ -92,11 +92,11 @@ struct PageLoadError: Equatable {
         }
     }
 
-    var symbolName: String {
+    var icon: BrowserIcon {
         switch kind {
-        case .offline: "wifi.slash"
-        case .invalidCertificate, .secureConnectionFailed: "lock.slash"
-        default: "exclamationmark.triangle"
+        case .offline: .wifiOff
+        case .invalidCertificate, .secureConnectionFailed: .secureError
+        default: .warning
         }
     }
 }
@@ -109,8 +109,7 @@ struct PageErrorView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: error.symbolName)
-                .font(.system(size: 34, weight: .light))
+            Image(browserIcon: error.icon, size: 34)
                 .foregroundStyle(.secondary)
             Text(error.title)
                 .font(.system(size: 20, weight: .semibold))

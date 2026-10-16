@@ -17,10 +17,12 @@ struct HistoryView: View {
             header
             Divider()
             if days.isEmpty {
-                ContentUnavailableView(query.isEmpty ? "No History" : "No Results",
-                                       systemImage: query.isEmpty ? "clock" : "magnifyingglass",
-                                       description: Text(query.isEmpty ? "Pages you visit show up here."
-                                                                       : "No pages match “\(query)”."))
+                ContentUnavailableView {
+                    Label(query.isEmpty ? "No History" : "No Results",
+                          browserIcon: query.isEmpty ? .history : .search, size: 40)
+                } description: {
+                    Text(query.isEmpty ? "Pages you visit show up here." : "No pages match “\(query)”.")
+                }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
@@ -52,8 +54,7 @@ struct HistoryView: View {
                 .font(.system(size: 15, weight: .semibold))
 
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
+                Image(browserIcon: .search, size: 11)
                     .foregroundStyle(.secondary)
                 TextField("Search History", text: $query)
                     .textFieldStyle(.plain)
@@ -89,10 +90,11 @@ struct HistoryView: View {
             Spacer(minLength: 8)
             if hoveredEntryID == entry.id {
                 Button { delete(entry) } label: {
-                    Image(systemName: "xmark")
+                    Image(browserIcon: .close)
                 }
                 .buttonStyle(ChromeIconButtonStyle(size: 20))
                 .help("Delete")
+                .accessibilityLabel("Delete history entry")
             }
             Text(entry.date, format: .dateTime.hour().minute())
                 .foregroundStyle(.secondary)

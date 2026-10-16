@@ -19,7 +19,7 @@ struct SettingsView: View {
                     do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
                 })) {
                     ForEach(profiles.availableProfiles) { profile in
-                        Label(profile.name, systemImage: profile.icon.rawValue).tag(profile.id)
+                        Label(profile.name, browserIcon: profile.icon.browserIcon).tag(profile.id)
                     }
                 }
                 .padding()
@@ -28,13 +28,27 @@ struct SettingsView: View {
             // Keep tab metadata outside profile-dependent view identity. macOS otherwise
             // creates empty toolbar items for tabs whose content has an explicit .id.
             TabView(selection: $profiles.settingsTab) {
-                Tab("General", systemImage: "gearshape", value: SettingsTab.general) { profileContent(.general) }
-                Tab("Appearance", systemImage: "macwindow", value: SettingsTab.appearance) { profileContent(.appearance) }
-                Tab("Privacy", systemImage: "hand.raised", value: SettingsTab.privacy) { profileContent(.privacy) }
-                Tab("Passwords", systemImage: "key", value: SettingsTab.passwords) { profileContent(.passwords) }
-                Tab("Site Settings", systemImage: "globe", value: SettingsTab.sites) { profileContent(.sites) }
-                Tab("Downloads", systemImage: "arrow.down.circle", value: SettingsTab.downloads) { profileContent(.downloads) }
-                Tab("Profiles", systemImage: "person.2", value: SettingsTab.profiles) { ProfilesView(profiles: profiles) }
+                Tab(value: SettingsTab.general) { profileContent(.general) } label: {
+                    Label("General", browserIcon: .settings)
+                }
+                Tab(value: SettingsTab.appearance) { profileContent(.appearance) } label: {
+                    Label("Appearance", browserIcon: .appearance)
+                }
+                Tab(value: SettingsTab.privacy) { profileContent(.privacy) } label: {
+                    Label("Privacy", browserIcon: .privacy)
+                }
+                Tab(value: SettingsTab.passwords) { profileContent(.passwords) } label: {
+                    Label("Passwords", browserIcon: .key)
+                }
+                Tab(value: SettingsTab.sites) { profileContent(.sites) } label: {
+                    Label("Site Settings", browserIcon: .globe)
+                }
+                Tab(value: SettingsTab.downloads) { profileContent(.downloads) } label: {
+                    Label("Downloads", browserIcon: .downloads)
+                }
+                Tab(value: SettingsTab.profiles) { ProfilesView(profiles: profiles) } label: {
+                    Label("Profiles", browserIcon: .profiles)
+                }
             }
         }
         .preferredColorScheme(profiles.context(for: profiles.selectedID)?.preferences.appearance.selection.colorScheme)
@@ -80,7 +94,7 @@ private struct GeneralSettings: View {
             Section {
                 LabeledContent("Default web browser") {
                     if defaultBrowser.isDefault {
-                        Label("Lisière is your default browser", systemImage: "checkmark.circle")
+                        Label("Lisière is your default browser", browserIcon: .checkmarkCircle)
                             .foregroundStyle(.secondary)
                     } else {
                         HStack {
@@ -212,10 +226,11 @@ private struct PasswordSettings: View {
                             Text(site)
                             Spacer()
                             Button { passwords.allowSaving(on: site) } label: {
-                                Image(systemName: "minus.circle")
+                                Image(browserIcon: .remove)
                             }
                             .buttonStyle(.borderless)
                             .help("Offer to Save Passwords Again")
+                            .accessibilityLabel("Offer to save passwords again")
                         }
                     }
                 }
@@ -264,17 +279,20 @@ private struct PasswordSettings: View {
                 Button {
                     revealed[account.id] = revealed[account.id] == nil ? passwords.password(for: account) : nil
                 } label: {
-                    Image(systemName: revealed[account.id] == nil ? "eye" : "eye.slash")
+                    Image(browserIcon: revealed[account.id] == nil ? .view : .viewOff)
                 }
                 .help(revealed[account.id] == nil ? "Show Password" : "Hide Password")
+                .accessibilityLabel(revealed[account.id] == nil ? "Show password" : "Hide password")
                 Button { copy(account) } label: {
-                    Image(systemName: "doc.on.doc")
+                    Image(browserIcon: .copy)
                 }
                 .help("Copy Password")
+                .accessibilityLabel("Copy password")
                 Button { removing = account } label: {
-                    Image(systemName: "minus.circle")
+                    Image(browserIcon: .remove)
                 }
                 .help("Remove Password")
+                .accessibilityLabel("Remove password")
             }
             .buttonStyle(.borderless)
         }
@@ -401,7 +419,7 @@ private struct AppearanceSettings: View {
                                     .scaledToFit()
                                     .frame(width: 64, height: 64)
                                 HStack(spacing: 5) {
-                                    Image(systemName: preferences.mascot == choice ? "checkmark.circle.fill" : "circle")
+                                    Image(browserIcon: preferences.mascot == choice ? .checkmarkCircle : .circle)
                                         .foregroundStyle(preferences.mascot == choice ? Color.accentColor : Color.secondary)
                                     Text(choice.title)
                                 }
@@ -602,10 +620,11 @@ private struct SiteSettings: View {
 
     private func removeButton(_ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: "minus.circle")
+            Image(browserIcon: .remove)
         }
         .buttonStyle(.borderless)
         .help("Reset")
+        .accessibilityLabel("Reset site setting")
     }
 
     private func sectionHeader(_ title: String, isEmpty: Bool, resetAll: @escaping () -> Void) -> some View {

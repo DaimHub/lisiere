@@ -91,8 +91,7 @@ struct InterfaceColorSettings: View {
                                 .overlay { Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1) }
                                 .overlay {
                                     if appearance.interfaceColor == choice {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 12, weight: .bold))
+                                        Image(browserIcon: .checkmark, size: 12)
                                             .foregroundStyle(.white)
                                             .padding(4)
                                             .background(.black.opacity(0.65), in: Circle())

@@ -79,8 +79,7 @@ struct NewTabView: View {
     private var searchField: some View {
         Button(action: focusAddress) {
             HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .medium))
+                Image(browserIcon: .search, size: 15)
                     .foregroundStyle(.secondary)
                 Text("Search")
                     .foregroundStyle(.secondary)

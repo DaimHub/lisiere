@@ -13,7 +13,7 @@ struct BookmarksBar: View {
     var body: some View {
         HStack(spacing: 2) {
             if bookmarks.bookmarks.isEmpty {
-                Label("Bookmark pages with ⌘D or the star in the address bar", systemImage: "star")
+                Label("Bookmark pages with ⌘D or the bookmark button in the address bar", browserIcon: .bookmark)
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 8)
@@ -33,14 +33,14 @@ struct BookmarksBar: View {
                         Button(bookmark.displayTitle) { open(bookmark) }
                     }
                 } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                    Image(browserIcon: .chevronDown, size: 10)
                 }
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
                 .buttonStyle(ChromeIconButtonStyle(size: 24))
                 .fixedSize()
                 .help("All Bookmarks")
+            .accessibilityLabel("All bookmarks")
             }
         }
         .padding(.horizontal, BrowserChrome.edgeInset)

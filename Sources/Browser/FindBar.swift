@@ -8,8 +8,7 @@ struct FindBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+            Image(browserIcon: .search, size: 11)
                 .foregroundStyle(.secondary)
             TextField("Find on Page", text: $tab.findText)
                 .textFieldStyle(.plain)
@@ -30,20 +29,23 @@ struct FindBar: View {
 
             Group {
                 Button { browser.findNext(backwards: true) } label: {
-                    Image(systemName: "chevron.up")
+                    Image(browserIcon: .chevronUp)
                 }
                 .help("Previous Match (⇧⌘G)")
+                .accessibilityLabel("Previous match")
                 Button { browser.findNext() } label: {
-                    Image(systemName: "chevron.down")
+                    Image(browserIcon: .chevronDown)
                 }
                 .help("Next Match (⌘G)")
+                .accessibilityLabel("Next match")
             }
             .disabled(tab.findText.isEmpty)
 
             Button { browser.closeFindBar() } label: {
-                Image(systemName: "xmark")
+                Image(browserIcon: .close)
             }
             .help("Done")
+            .accessibilityLabel("Close find bar")
         }
         .buttonStyle(ChromeIconButtonStyle(size: 24))
         .padding(.leading, 10)
