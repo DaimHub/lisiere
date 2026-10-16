@@ -37,7 +37,9 @@ struct NewTabView: View {
                     privateHeading
                 } else {
                     VStack(spacing: 8) {
-                        MascotView(mascot: mascot, palette: mascotPalette)
+                        if browser.preferences.showsMascot {
+                            MascotView(mascot: mascot, palette: mascotPalette)
+                        }
                         TimelineView(.everyMinute) { context in
                             Text(Self.greeting(for: context.date))
                                 .font(.system(size: 28, weight: .medium))

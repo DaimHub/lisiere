@@ -373,7 +373,15 @@ private struct AppearanceSettings: View {
                 }
             }
 
+            InterfaceColorSettings(appearance: appearance)
+
             Section {
+                Toggle(isOn: $preferences.showsMascot) {
+                    Text("Show mascot on the start page")
+                    Text("The Dock icon still uses your selected mascot.")
+                }
+                .toggleStyle(.switch)
+
                 Picker("Mascot colors", selection: $preferences.mascotPalette) {
                     ForEach(MascotPalette.allCases) { palette in
                         Text(palette.title).tag(palette)
@@ -420,7 +428,7 @@ private struct AppearanceSettings: View {
             } header: {
                 Text("Mascot & Dock Icon")
             } footer: {
-                Text("Your choice appears on the start page and in the Dock while Lisière is running. "
+                Text("Your choice appears in the Dock and, when enabled, on the start page while Lisière is running. "
                      + "Finder keeps the Lutin icon.")
             }
         }

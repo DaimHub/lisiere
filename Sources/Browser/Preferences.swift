@@ -51,6 +51,8 @@ enum NewTabPage: String, CaseIterable, Identifiable {
     case blank
 
     static let storageKey = "newTabPage"
+    /// Independent of the Dock icon choice, and stored with the profile.
+    static let showsMascotKey = "showsStartPageMascot"
 
     var id: Self { self }
 

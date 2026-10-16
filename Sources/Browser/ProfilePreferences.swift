@@ -16,6 +16,7 @@ final class ProfilePreferences {
     var mascotPalette: MascotPalette { didSet { defaults?.set(mascotPalette.rawValue, forKey: MascotPalette.storageKey) } }
     var searchEngine: SearchEngine { didSet { defaults?.set(searchEngine.rawValue, forKey: SearchEngine.storageKey) } }
     var newTabPage: NewTabPage { didSet { defaults?.set(newTabPage.rawValue, forKey: NewTabPage.storageKey) } }
+    var showsMascot: Bool { didSet { defaults?.set(showsMascot, forKey: NewTabPage.showsMascotKey) } }
     var toolbarLayout: BrowserToolbarLayout {
         didSet { defaults?.set(toolbarLayout.storedValue, forKey: BrowserToolbarLayout.storageKey) }
     }
@@ -35,6 +36,7 @@ final class ProfilePreferences {
         mascotPalette = defaults?.string(forKey: MascotPalette.storageKey).flatMap(MascotPalette.init(rawValue:)) ?? (defaults == nil ? .defaultChoice : .current())
         searchEngine = defaults?.string(forKey: SearchEngine.storageKey).flatMap(SearchEngine.init) ?? .google
         newTabPage = defaults?.string(forKey: NewTabPage.storageKey).flatMap(NewTabPage.init) ?? .startPage
+        showsMascot = defaults?.object(forKey: NewTabPage.showsMascotKey) as? Bool ?? true
         toolbarLayout = BrowserToolbarLayout(data: defaults?.data(forKey: BrowserToolbarLayout.storageKey),
                                              legacyValue: defaults?.stringArray(forKey: BrowserToolbarLayout.legacyStorageKey))
         tabLayout = defaults?.string(forKey: TabLayout.storageKey).flatMap(TabLayout.init) ?? .horizontal
@@ -46,6 +48,7 @@ final class ProfilePreferences {
 
     // Copy explicit settings only: never credentials, grants, history, caches, or WebKit interaction state.
     static let copiedKeys = ["profileAccent", "profileCustomAccent", BrowserAppearance.storageKey, WebPageAppearance.storageKey,
+                             BrowserInterfaceColor.storageKey, BrowserInterfaceColor.customStorageKey, NewTabPage.showsMascotKey,
                              WebPageAppearance.separateStorageKey, Mascot.storageKey, MascotPalette.storageKey,
                              SearchEngine.storageKey, NewTabPage.storageKey, TabLayout.storageKey, BrowserToolbarLayout.storageKey, BrowserToolbarLayout.legacyStorageKey,
                              BookmarksBarVisibility.storageKey, SessionPreferences.restoresWindowsKey,

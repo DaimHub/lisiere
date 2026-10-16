@@ -70,6 +70,23 @@ enum WebPageAppearance: String, CaseIterable, Identifiable {
 final class AppearanceStore {
     static let shared = AppearanceStore()
 
+    var interfaceColor: BrowserInterfaceColor {
+        didSet {
+            guard interfaceColor != oldValue else { return }
+            defaults?.set(interfaceColor.rawValue, forKey: BrowserInterfaceColor.storageKey)
+        }
+    }
+
+    private var customInterfaceColorHex: String
+    var customInterfaceColor: NSColor {
+        get { BrowserInterfaceColor.color(hex: customInterfaceColorHex)! }
+        set {
+            guard let hex = BrowserInterfaceColor.hex(for: newValue), hex != customInterfaceColorHex else { return }
+            customInterfaceColorHex = hex
+            defaults?.set(hex, forKey: BrowserInterfaceColor.customStorageKey)
+        }
+    }
+
     var selection: BrowserAppearance {
         didSet {
             guard selection != oldValue else { return }
@@ -119,6 +136,10 @@ final class AppearanceStore {
         self.defaults = defaults
         self.appliesToApplication = appliesToApplication
         self.applyAppearance = applyAppearance
+        interfaceColor = defaults?.string(forKey: BrowserInterfaceColor.storageKey).flatMap(BrowserInterfaceColor.init) ?? .original
+        let customHex = defaults?.string(forKey: BrowserInterfaceColor.customStorageKey) ?? ""
+        customInterfaceColorHex = BrowserInterfaceColor.color(hex: customHex) == nil
+            ? BrowserInterfaceColor.defaultCustomHex : customHex
         selection = defaults?.string(forKey: BrowserAppearance.storageKey).flatMap(BrowserAppearance.init) ?? .system
         pageSelection = defaults?.string(forKey: WebPageAppearance.storageKey).flatMap(WebPageAppearance.init) ?? .followApp
         // Set this before the first window appears. nil returns ownership to macOS, including live system changes.

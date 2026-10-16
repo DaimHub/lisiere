@@ -86,6 +86,9 @@ struct BrowserWindow: View {
         .background {
             if browser.isPrivate {
                 BrowserChrome.privateTint(for: colorScheme).ignoresSafeArea()
+            } else if let tint = browser.appearance.interfaceColor.tint(
+                for: colorScheme, customColor: browser.appearance.customInterfaceColor) {
+                Color(nsColor: tint).ignoresSafeArea()
             }
         }
         .ignoresSafeArea(.container, edges: .top)
