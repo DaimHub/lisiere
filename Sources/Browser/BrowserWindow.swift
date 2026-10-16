@@ -23,6 +23,7 @@ struct BrowserWindow: View {
     @State private var hoverCardTabID: UUID?
     @State private var isFullScreen = false
     @State private var addressIsFocused = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @Environment(BrowsingData.self) private var browsingData
@@ -32,7 +33,12 @@ struct BrowserWindow: View {
     private let contentBlocker = ContentBlocker.shared
 
     private var accent: Color {
-        browser.isPrivate ? Color(red: 0.58, green: 0.50, blue: 0.86) : Color(red: 0.38, green: 0.49, blue: 0.54)
+        if browser.isPrivate {
+            return colorScheme == .dark
+                ? Color(red: 0.70, green: 0.62, blue: 0.96)
+                : Color(red: 0.35, green: 0.25, blue: 0.60)
+        }
+        return Color(red: 0.38, green: 0.49, blue: 0.54)
     }
 
     /// Pass `nil` for the history and session of a window whose pages aren't remembered. A private window keeps
@@ -52,7 +58,6 @@ struct BrowserWindow: View {
             if tabLayout == .vertical {
                 TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
                          hoverCardTabID: $hoverCardTabID)
-                    .privateChrome(browser.isPrivate)
                     .frame(width: BrowserChrome.sidebarWidth)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
@@ -60,7 +65,6 @@ struct BrowserWindow: View {
                 if tabLayout == .horizontal {
                     TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
                              hoverCardTabID: $hoverCardTabID)
-                        .privateChrome(browser.isPrivate)
                         .transition(.opacity)
                 }
                 mainColumn
@@ -68,20 +72,18 @@ struct BrowserWindow: View {
         }
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
-                .privateChrome(browser.isPrivate)
         }
         .overlayPreferenceValue(AddressBarFrameKey.self) { anchor in
             suggestionList(below: anchor)
-                .privateChrome(browser.isPrivate)
         }
         .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
         .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
         .animation(.snappy(duration: 0.25), value: tabLayout)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background {
-            WindowGlassBackground(isDark: browser.isPrivate)
+            WindowGlassBackground()
             if browser.isPrivate {
-                BrowserChrome.privateTint.ignoresSafeArea()
+                BrowserChrome.privateTint(for: colorScheme).ignoresSafeArea()
             }
         }
         .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
@@ -223,13 +225,11 @@ struct BrowserWindow: View {
         return VStack(spacing: 0) {
             navigationBar
                 .padding(.leading, leadingInset)
-                .privateChrome(browser.isPrivate)
 
             if bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
                 BookmarksBar(bookmarks: bookmarks, browser: browser)
                     .padding(.leading, leadingInset - BrowserChrome.edgeInset)
                     .padding(.bottom, 4)
-                    .privateChrome(browser.isPrivate)
                     .transition(.opacity)
             }
 
@@ -237,7 +237,6 @@ struct BrowserWindow: View {
                 Group {
                     if tab.isNewTab {
                         NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
-                            .privateChrome(browser.isPrivate)
                     } else {
                         webView(for: tab)
                     }
@@ -373,7 +372,7 @@ struct BrowserWindow: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
+                    .strokeBorder(addressIsFocused ? Color(nsColor: .keyboardFocusIndicatorColor) : .clear, lineWidth: 2)
             }
             .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
 

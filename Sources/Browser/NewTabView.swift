@@ -103,7 +103,7 @@ struct NewTabView: View {
             if bookmarks.bookmarks.isEmpty {
                 Text("Bookmarks appear here")
                     .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             } else {
                 let columns = Array(repeating: GridItem(.fixed(FavoriteTile.width), spacing: tileSpacing),
                                     count: favoriteColumnCount)

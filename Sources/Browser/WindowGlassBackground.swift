@@ -2,9 +2,6 @@ import AppKit
 import SwiftUI
 
 struct WindowGlassBackground: NSViewRepresentable {
-    /// Keeps the glass dark whatever the system appearance, for a private window.
-    var isDark = false
-
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = TransparentWindowMaterialView()
         view.material = .underWindowBackground
@@ -14,7 +11,8 @@ struct WindowGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.appearance = isDark ? NSAppearance(named: .darkAqua) : nil
+        // Inherit the application appearance, including a return to System.
+        view.appearance = nil
     }
 }
 

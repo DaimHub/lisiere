@@ -48,6 +48,7 @@ final class BrowserTab: Identifiable {
     /// The page last added to history, so its title follows the page's and a reload isn't another visit.
     @ObservationIgnored private var historyVisit: (id: UUID?, url: URL)?
 
+    @ObservationIgnored private let appearance: AppearanceStore
     @ObservationIgnored private let pageDelegate = PageDelegate()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
@@ -59,13 +60,16 @@ final class BrowserTab: Identifiable {
     @ObservationIgnored private var selectionWaiters: [CheckedContinuation<Bool, Never>] = []
 
     /// Pass the configuration WebKit provides when a page opens a window, so the new page keeps its opener.
-    init(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration()) {
+    init(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration(),
+         appearance: AppearanceStore = .shared) {
+        self.appearance = appearance
         pageDelegate.tab = self
         install(WKWebView(frame: .zero, configuration: configuration))
     }
 
     /// A suspended tab for a page's saved history, such as a duplicated or reopened tab, which loads when it's selected.
-    init(url: URL?, title: String, interactionState: Any?) {
+    init(url: URL?, title: String, interactionState: Any?, appearance: AppearanceStore = .shared) {
+        self.appearance = appearance
         isNewTab = false
         self.url = url
         pageTitle = title
@@ -89,6 +93,7 @@ final class BrowserTab: Identifiable {
     /// Restoring keeps the suspended page's state until the new web view reports its own, which it only does
     /// once the page starts loading, so the tab's title and address don't flash blank.
     private func install(_ webView: WKWebView, isRestoring: Bool = false) {
+        appearance.attach(webView)
         webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true

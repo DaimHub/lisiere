@@ -106,6 +106,10 @@ final class ExternalURLRouter {
 }
 
 final class BrowserAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        _ = AppearanceStore.shared
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Passkeys.shared.requestAuthorizationIfNeeded()
     }

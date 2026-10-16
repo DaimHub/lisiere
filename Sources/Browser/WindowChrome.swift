@@ -147,18 +147,10 @@ final class WindowChromeView: NSView {
 }
 
 extension BrowserChrome {
-    /// Laid over the window's glass in a private window, so it reads as different at a glance.
-    static let privateTint = Color(red: 0.11, green: 0.08, blue: 0.20).opacity(0.72)
-}
-
-extension View {
-    /// A private window's tabs, toolbar, and new tab page are always dark. Its pages keep the system appearance.
-    @ViewBuilder
-    func privateChrome(_ isPrivate: Bool) -> some View {
-        if isPrivate {
-            environment(\.colorScheme, .dark)
-        } else {
-            self
-        }
+    /// Private windows follow the chosen appearance while retaining their violet identity.
+    static func privateTint(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.11, green: 0.08, blue: 0.20).opacity(0.72)
+            : Color(red: 0.58, green: 0.50, blue: 0.86).opacity(0.12)
     }
 }
