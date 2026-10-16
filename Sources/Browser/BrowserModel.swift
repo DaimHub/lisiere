@@ -22,6 +22,7 @@ final class BrowserModel {
     let passwords: PasswordManager?
     /// The window showing these tabs, so links from other apps can open in the frontmost one.
     @ObservationIgnored weak var window: NSWindow?
+    @ObservationIgnored weak var profileWindow: ProfileWindowController?
 
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []

@@ -1,64 +1,63 @@
 import SwiftUI
 
-/// The existing browser chrome, bound to one profile for the window's entire lifetime.
+/// The scene owns its physical window while each profile retains separate browser state.
 struct ProfileBrowserWindow: View {
     let profiles: ProfileStore
     let profileID: UUID
     var isPrivate = false
-    @State private var browser: BrowserModel?
+    @State private var owner: ProfileWindowController?
+    @State private var isFullScreen = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        if let context = profiles.context(for: profileID) {
-            Group {
-                if let browser {
-                    BrowserWindow(bookmarks: context.bookmarks, context: context, profiles: profiles, browser: browser)
-                        .environment(context.browsingData)
-                        .environment(context.preferences)
-                        .environment(context.favicons)
-                } else {
-                    Color.clear
+        Group {
+            if let owner, let id = owner.browser.profileID, let context = profiles.context(for: id) {
+                BrowserWindow(bookmarks: context.bookmarks, context: context, profiles: profiles,
+                              browser: owner.browser, isFullScreen: isFullScreen)
+                    .id(id)
+                    .environment(context.browsingData)
+                    .environment(context.preferences)
+                    .environment(context.favicons)
+            } else if profiles.context(for: profileID) == nil {
+                ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
+                                       description: Text(profiles.loadError ?? "This profile is unavailable."))
+            } else {
+                Color.clear
+            }
+        }
+        .background {
+            if let owner {
+                WindowChromeConfigurator(
+                    titlebarHeight: BrowserChrome.titlebarHeight(for: owner.browser.preferences.tabLayout),
+                    isFullScreen: $isFullScreen, onWindowChange: owner.connect, onClose: owner.close)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+            guard let owner, let window = notification.object as? NSWindow, window === owner.window else { return }
+            owner.becameKey()
+        }
+        .onAppear {
+            guard owner == nil else { return }
+            do {
+                // Construct only after SwiftUI installs State; body recomputation must not create WebViews.
+                let controller = try ProfileWindowController(profiles: profiles, profileID: profileID, isPrivate: isPrivate)
+                controller.onActivate = { browser in
+                    ExternalURLRouter.shared.register(browser, openWindow: openWindow)
                 }
-            }
-            .onAppear {
-                // Construct once after SwiftUI installs State. Eager State(initialValue:) creates spare
-                // models/web views on every profile rename or selection and can keep stores alive.
-                if browser == nil { browser = context.makeBrowser(isPrivate: isPrivate) }
-            }
-        } else {
-            ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
-                                   description: Text(profiles.loadError ?? "This profile was deleted or is waiting for deletion."))
+                owner = controller
+                controller.onActivate?(controller.browser)
+                for _ in 0..<controller.additionalWindows {
+                    openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID))
+                }
+                if !isPrivate { profiles.restoreOtherProfiles(except: profileID, openWindow: openWindow) }
+            } catch { profiles.errorMessage = error.localizedDescription }
         }
     }
 }
 
 struct ProfileSettings: View {
     let profiles: ProfileStore
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Picker("Profile", selection: Binding(get: { profiles.selectedID }, set: { id in
-                    do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
-                })) {
-                    ForEach(profiles.availableProfiles) { profile in Text(profile.name).tag(profile.id) }
-                }
-                Button("Manage Profiles…") { openWindow(id: BrowserApp.profilesWindowID) }
-            }
-            .padding()
-            Divider()
-            if let context = profiles.context(for: profiles.selectedID) {
-                SettingsView(profileID: context.id, profileName: profiles.name(context.id), browsingData: context.browsingData, contentBlocker: context.contentBlocker,
-                             sitePermissions: context.sitePermissions, zoomLevels: context.zoomLevels,
-                             passwords: context.passwords, passkeys: .shared, updater: .shared)
-                    .environment(context.preferences)
-                    .environment(context.favicons)
-            } else {
-                Text(profiles.loadError ?? "Select a profile.").padding()
-            }
-        }
-        .frame(width: 580)
-    }
+    var body: some View { SettingsView(profiles: profiles, passkeys: .shared, updater: .shared) }
 }
 
 struct ProfilesView: View {
@@ -84,7 +83,7 @@ struct ProfilesView: View {
                             Text("Deletion incomplete").foregroundStyle(.secondary)
                         } else {
                             Button("Open") { profiles.activate(profile.id, openWindow: openWindow) }
-                                .help("Open or switch to this profile’s window")
+                                .help("Use this profile in the last active browser window")
                             Button("Edit…") { editor = EditorRequest(profile: profile) }
                         }
                         Button(profile.pendingDeletion ? "Retry Delete…" : "Delete…", role: .destructive) {
@@ -108,7 +107,7 @@ struct ProfilesView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .disabled(profiles.deletingID != nil || profiles.loadError != nil)
         .overlay {
             if profiles.deletingID != nil {

@@ -13,6 +13,8 @@ struct TabSession: Codable, Equatable, Sendable {
 struct WindowSession: Codable, Equatable, Sendable {
     var tabs: [TabSession]
     var selectedIndex: Int
+    /// Links a parked profile session to its physical browser window across launches.
+    var profileWindowID: UUID? = nil
 }
 
 struct SessionSnapshot: Codable, Equatable, Sendable {
@@ -20,6 +22,19 @@ struct SessionSnapshot: Codable, Equatable, Sendable {
     var windows: [WindowSession] = []
     /// The windows that were open before the last one closed, for Reopen All Windows from Last Session.
     var closedWindows: [WindowSession] = []
+    /// Profile sessions retained behind another profile in the same physical window.
+    var parkedWindows: [WindowSession] = []
+
+    private enum CodingKeys: String, CodingKey { case windows, closedWindows, parkedWindows }
+    init(windows: [WindowSession] = [], closedWindows: [WindowSession] = [], parkedWindows: [WindowSession] = []) {
+        self.windows = windows; self.closedWindows = closedWindows; self.parkedWindows = parkedWindows
+    }
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        windows = try values.decodeIfPresent([WindowSession].self, forKey: .windows) ?? []
+        closedWindows = try values.decodeIfPresent([WindowSession].self, forKey: .closedWindows) ?? []
+        parkedWindows = try values.decodeIfPresent([WindowSession].self, forKey: .parkedWindows) ?? []
+    }
 }
 
 /// Saves the open windows and their tabs, and reopens them on launch. Windows join with `attach(_:)`; a window
@@ -35,6 +50,7 @@ final class SessionStore {
     @ObservationIgnored private var browsers: [WeakBrowser] = []
     /// Saved windows waiting for a window to restore them into.
     @ObservationIgnored private var pendingWindows: [WindowSession]
+    @ObservationIgnored private var parkedWindows: [WindowSession]
     /// Windows already asked to open for `pendingWindows`, which shouldn't ask for more.
     @ObservationIgnored private var windowsBeingOpened = 0
     @ObservationIgnored private var isTerminating = false
@@ -43,6 +59,13 @@ final class SessionStore {
 
     private struct WeakBrowser {
         weak var browser: BrowserModel?
+        var ownerID: UUID?
+        var isParked = false
+        @MainActor var snapshot: WindowSession? {
+            guard var snapshot = browser?.windowSession() else { return nil }
+            snapshot.profileWindowID = ownerID
+            return snapshot
+        }
     }
 
     /// Pass `nil` to keep nothing between launches. Without `restoresWindows`, the windows open when the app quit
@@ -53,8 +76,10 @@ final class SessionStore {
         let saved = file?.readNow().flatMap { try? PropertyListDecoder().decode(SessionSnapshot.self, from: $0) }
             ?? SessionSnapshot()
         pendingWindows = restoresWindows ? saved.windows : []
+        parkedWindows = restoresWindows ? saved.parkedWindows : []
         reopenableWindows = !restoresWindows && !saved.windows.isEmpty ? saved.windows
             : saved.windows.isEmpty ? saved.closedWindows : []
+        if !restoresWindows { reopenableWindows += saved.parkedWindows }
         _ = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                    queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveBeforeQuitting() }
@@ -67,28 +92,56 @@ final class SessionStore {
 
     var hasPendingWindows: Bool { !pendingWindows.isEmpty }
 
+    var nextWindowID: UUID? { pendingWindows.first?.profileWindowID }
+
     var snapshot: SessionSnapshot {
-        SessionSnapshot(windows: openBrowsers.map { $0.windowSession() } + pendingWindows, closedWindows: reopenableWindows)
+        SessionSnapshot(windows: browsers.filter { !$0.isParked }.compactMap(\.snapshot) + pendingWindows,
+                        closedWindows: reopenableWindows,
+                        parkedWindows: browsers.filter(\.isParked).compactMap(\.snapshot) + parkedWindows)
+    }
+
+    func setParked(_ parked: Bool, for browser: BrowserModel) {
+        guard let index = browsers.firstIndex(where: { $0.browser === browser }) else { return }
+        browsers[index].isParked = parked
+        scheduleSave()
     }
 
     /// Remembers a window from now on. A window that opens while saved windows are waiting restores the next one.
     /// Returns how many more windows to open for the rest.
-    func attach(_ browser: BrowserModel) -> Int {
+    func attach(_ browser: BrowserModel, ownerID: UUID? = nil, restoringOtherWindows: Bool = true) -> Int {
         guard !browser.isPrivate, !openBrowsers.contains(where: { $0 === browser }) else { return 0 }
         browsers.removeAll { $0.browser == nil }
-        browsers.append(WeakBrowser(browser: browser))
+        browsers.append(WeakBrowser(browser: browser, ownerID: ownerID))
         defer {
             observeBrowsers()
             scheduleSave()
         }
-        guard !pendingWindows.isEmpty else { return 0 }
-        browser.restoreSession(pendingWindows.removeFirst())
+        if let ownerID, let index = parkedWindows.firstIndex(where: { $0.profileWindowID == ownerID }) {
+            browser.restoreSession(parkedWindows.remove(at: index))
+            return 0
+        }
+        // A switch can claim copied/legacy tabs, but cannot consume another physical window's restore request.
+        guard let pendingIndex = pendingWindows.indices.first(where: {
+            restoringOtherWindows || pendingWindows[$0].profileWindowID == nil
+        }) else { return 0 }
+        browser.restoreSession(pendingWindows.remove(at: pendingIndex))
+        guard restoringOtherWindows else { return 0 }
         if windowsBeingOpened > 0 {
             windowsBeingOpened -= 1
             return 0
         }
         windowsBeingOpened = pendingWindows.count
         return pendingWindows.count
+    }
+
+    /// A closed physical window may have saved profiles that have not been visited since launch.
+    func closeParkedWindow(ownerID: UUID) {
+        guard !isTerminating else { return }
+        let closed = parkedWindows.filter { $0.profileWindowID == ownerID }
+        guard !closed.isEmpty else { return }
+        reopenableWindows += closed
+        parkedWindows.removeAll { $0.profileWindowID == ownerID }
+        scheduleSave()
     }
 
     /// Forgets a window the user closed. Closing the last one keeps the windows for reopening later.

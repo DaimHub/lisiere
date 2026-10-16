@@ -140,7 +140,7 @@ final class ProfileStore {
             case .duplicateName: "A profile already has that name."
             case .missingProfile: "This profile is unavailable."
             case .lastProfile: "Keep at least one profile."
-            case .openWindows: "Close all windows for this profile, including private windows, before deleting it."
+            case .openWindows: "Close windows that use this profile, including windows where it is in the background and private windows, before deleting it."
             case .activeDownloads: "Wait for this profile’s downloads to finish or cancel them before deleting it."
             case .invalidManifest: "The profile list could not be read. Your data has not been changed."
             }
@@ -151,6 +151,8 @@ final class ProfileStore {
     private(set) var selectedID = BrowserProfile.initialID
     private(set) var loadError: String?
     var errorMessage: String?
+    var settingsTab = SettingsTab.general
+    @ObservationIgnored weak var lastActiveWindow: ProfileWindowController?
     private(set) var deletingID: UUID?
     @ObservationIgnored private let root: URL?
     @ObservationIgnored private let defaults: UserDefaults
@@ -193,6 +195,13 @@ final class ProfileStore {
     }
 
     var availableProfiles: [BrowserProfile] { profiles.filter { !$0.pendingDeletion } }
+    /// Settings or a private window may select a parked profile before quit. Restore an actual visible
+    /// session first, so that selection alone doesn't manufacture an extra physical window on launch.
+    var defaultWindowProfileID: UUID {
+        guard !restoredAtLaunch, context(for: selectedID)?.session.hasPendingWindows != true else { return selectedID }
+        return availableProfiles.first { context(for: $0.id)?.session.hasPendingWindows == true }?.id ?? selectedID
+    }
+
     private var manifestURL: URL? { root?.appending(path: "Profiles.plist") }
     func profile(_ id: UUID) -> BrowserProfile? { profiles.first { $0.id == id } }
     func name(_ id: UUID) -> String { profile(id)?.name ?? "Profile" }
@@ -249,7 +258,8 @@ final class ProfileStore {
                     if let value = source.defaults.object(forKey: key) { target.set(value, forKey: key) }
                 }
                 let snapshot = source.session.snapshot
-                let windows = snapshot.windows.isEmpty ? snapshot.closedWindows : snapshot.windows
+                let live = snapshot.windows + snapshot.parkedWindows
+                let windows = live.isEmpty ? snapshot.closedWindows : live
                 let clean = windows.map { window in
                     WindowSession(tabs: window.tabs.map { TabSession(url: $0.url, title: $0.title, interactionState: nil) },
                                   selectedIndex: window.selectedIndex)
@@ -300,22 +310,25 @@ final class ProfileStore {
         return profiles[next].id
     }
 
-    func switchProfile(from id: UUID, direction: Int, openWindow: OpenWindowAction) {
+    func switchProfile(from id: UUID, direction: Int, in browser: BrowserModel? = nil, openWindow: OpenWindowAction) {
         guard let next = adjacentProfile(to: id, direction: direction) else { return }
-        activate(next, openWindow: openWindow)
+        activate(next, in: browser, openWindow: openWindow)
     }
 
-    /// Switching focuses that profile's window, or opens its saved session. Existing windows stay intact.
-    func activate(_ id: UUID, openWindow: OpenWindowAction) {
-        do {
-            try select(id)
-            if let window = browsers.compactMap(\.value).first(where: { $0.profileID == id && !$0.isPrivate })?.window {
-                if window.isMiniaturized { window.deminiaturize(nil) }
-                window.makeKeyAndOrderFront(nil)
-            } else {
+    /// Change the focused browser's profile without opening or stealing another window.
+    /// Settings reuses the last active browser; only an app with no browser window opens a new one.
+    func activate(_ id: UUID, in browser: BrowserModel? = nil, openWindow: OpenWindowAction) {
+        let visible = browsers.compactMap(\.value).filter { $0.window != nil }.compactMap(\.profileWindow)
+        if let owner = browser?.profileWindow ?? lastActiveWindow ?? visible.first, !owner.isClosed {
+            owner.switchTo(id)
+            if owner.window?.isMiniaturized == true { owner.window?.deminiaturize(nil) }
+            owner.window?.makeKeyAndOrderFront(nil)
+        } else {
+            do {
+                try select(id)
                 openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: id))
-            }
-        } catch { errorMessage = error.localizedDescription }
+            } catch { errorMessage = error.localizedDescription }
+        }
     }
 
     /// Once the first normal window appears, reopen the other profiles that had windows at quit.

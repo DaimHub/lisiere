@@ -136,6 +136,42 @@ final class ProfileIsolationTests: XCTestCase {
         assertMarker("beta", in: try await read(second))
     }
 
+    func testSwitchingProfilesKeepsLivePageStateAndSeparateSameOriginData() async throws {
+        let url = try startServer()
+        let suite = "ProfileSwitchWebKitTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let profiles = ProfileStore(root: nil, defaults: defaults)
+        let a = try profiles.create(name: "A")
+        let b = try profiles.create(name: "B")
+        ids += [a.id, b.id]
+        let owner = try ProfileWindowController(profiles: profiles, profileID: a.id)
+        let modelA = owner.browser
+        browsers.append(modelA)
+        let pageA = try await load(url, in: modelA)
+        try await write("alpha", in: pageA)
+        _ = try await run("document.getElementById('marker').value = 'unsaved form'; return 'ok'", in: pageA)
+        owner.switchTo(b.id)
+        browsers.append(owner.browser)
+        let pageB = try await load(url, in: owner.browser)
+        assertEmpty(try await read(pageB))
+        try await write("beta", in: pageB)
+        owner.switchTo(a.id)
+        XCTAssertTrue(owner.browser === modelA)
+        XCTAssertTrue(owner.browser.activeTab?.webView === pageA)
+        let input = try await run("return document.getElementById('marker').value", in: pageA)
+        XCTAssertEqual(input, "unsaved form")
+        assertMarker("alpha", in: try await read(pageA))
+        assertMarker("beta", in: try await read(pageB))
+        // Cleanup site records before close releases the stores (tearDown also verifies they are empty).
+        for model in browsers { await ProfileStore.clearWebsiteData(in: model.websiteDataStore) }
+        owner.close()
+        for profile in [a, b] {
+            defaults.removePersistentDomain(forName: ProfileStore.defaultsDomain(for: profile.id))
+            profiles.context(for: profile.id)?.prepareForDeletion()
+        }
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     func testPrivateWindowsAreFreshPerWindowAndCannotMutatePersistentProfiles() async throws {
         try await exercisePrivateStores()
     }
