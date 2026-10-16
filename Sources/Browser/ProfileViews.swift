@@ -159,6 +159,7 @@ private struct ProfileNameEditor: View {
     @State private var name: String
     @State private var icon: ProfileIcon
     @State private var accent: ProfileAccent
+    @State private var customHex: String
     @State private var sourceID: UUID?
     @State private var errorMessage: String?
 
@@ -167,8 +168,14 @@ private struct ProfileNameEditor: View {
         self.profiles = profiles
         _name = State(initialValue: profile?.name ?? "")
         _icon = State(initialValue: profile?.icon ?? .person)
-        _accent = State(initialValue: profile.flatMap { profiles.context(for: $0.id)?.preferences.accent } ?? .sage)
+        let preferences = profile.flatMap { profiles.context(for: $0.id)?.preferences }
+        _accent = State(initialValue: preferences?.accent ?? .sage)
+        _customHex = State(initialValue: (preferences?.customAccent ?? .defaultCustom).hex)
     }
+
+    private var customAccent: AccentColor { AccentColor(hex: customHex) ?? .defaultCustom }
+    private var accentColor: Color { accent.resolved(custom: customAccent).color }
+    private var hasValidAccent: Bool { accent != .custom || AccentColor(hex: customHex) != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -180,7 +187,7 @@ private struct ProfileNameEditor: View {
                         Image(systemName: option.rawValue)
                             .font(.system(size: 20))
                             .frame(width: 42, height: 36)
-                            .background(icon == option ? accent.color.opacity(0.18) : .clear,
+                            .background(icon == option ? accentColor.opacity(0.18) : .clear,
                                         in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
@@ -189,13 +196,7 @@ private struct ProfileNameEditor: View {
                     .accessibilityAddTraits(icon == option ? .isSelected : [])
                 }
             }
-            Picker("Accent color", selection: $accent) {
-                ForEach(ProfileAccent.allCases) { option in
-                    Label { Text(option.title) } icon: {
-                        Image(systemName: "circle.fill").foregroundStyle(option.color)
-                    }.tag(option)
-                }
-            }
+            ProfileAccentPicker(selection: $accent, customHex: $customHex)
             if profile == nil {
                 Picker("Start with", selection: $sourceID) {
                     Text("Empty profile").tag(Optional<UUID>.none)
@@ -212,14 +213,16 @@ private struct ProfileNameEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(profile == nil ? "Create Profile" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !hasValidAccent)
             }
         }
         .padding(20)
-        .frame(width: 380)
-        .tint(accent.color)
+        .frame(width: 420)
+        .tint(accentColor)
         .onChange(of: sourceID) { _, source in
-            accent = source.flatMap { profiles.context(for: $0)?.preferences.accent } ?? .sage
+            let preferences = source.flatMap { profiles.context(for: $0)?.preferences }
+            accent = preferences?.accent ?? .sage
+            customHex = (preferences?.customAccent ?? .defaultCustom).hex
         }
         .alert("Profile Could Not Be Saved", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -228,6 +231,7 @@ private struct ProfileNameEditor: View {
     }
 
     private func save() {
+        guard hasValidAccent else { return }
         do {
             let savedProfile: BrowserProfile
             if let profile {
@@ -236,7 +240,10 @@ private struct ProfileNameEditor: View {
             } else {
                 savedProfile = try profiles.create(name: name, icon: icon, copying: sourceID)
             }
-            profiles.context(for: savedProfile.id)?.preferences.accent = accent
+            if let preferences = profiles.context(for: savedProfile.id)?.preferences {
+                if let custom = AccentColor(hex: customHex) { preferences.customAccent = custom }
+                preferences.accent = accent
+            }
             dismiss()
         } catch { errorMessage = error.localizedDescription }
     }

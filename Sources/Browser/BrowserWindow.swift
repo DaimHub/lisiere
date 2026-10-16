@@ -38,7 +38,7 @@ struct BrowserWindow: View {
                 ? Color(red: 0.70, green: 0.62, blue: 0.96)
                 : Color(red: 0.35, green: 0.25, blue: 0.60)
         }
-        return browser.preferences.accent.color
+        return browser.preferences.accentColor
     }
 
     init(bookmarks: BookmarkStore, profiles: ProfileStore,
@@ -366,7 +366,12 @@ struct BrowserWindow: View {
                 .menuIndicator(.visible)
                 .padding(.horizontal, 10)
                 .frame(width: 132, height: BrowserChrome.navigationControlHeight)
-                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.035))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(accent.opacity(colorScheme == .dark ? 0.14 : 0.09))
+                }
                 .help("Profile: \(profileID.map(profiles.name) ?? "Private")")
                 .accessibilityLabel("Profile: \(profileID.map(profiles.name) ?? "Private")")
 

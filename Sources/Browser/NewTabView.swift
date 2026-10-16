@@ -21,7 +21,7 @@ struct NewTabView: View {
 
     var body: some View {
         ZStack {
-            NewTabBackground(accent: browser.isPrivate ? .purple : browser.preferences.accent.color)
+            NewTabBackground(accent: browser.isPrivate ? .purple : browser.preferences.accentColor)
 
             if browser.isPrivate || page == .startPage {
                 startPage

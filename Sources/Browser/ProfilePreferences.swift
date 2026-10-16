@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// Preferences belong to a profile; only OS integration and software updates remain app-wide.
 @MainActor
@@ -8,6 +9,9 @@ final class ProfilePreferences {
     let defaults: UserDefaults?
     let appearance: AppearanceStore
     var accent: ProfileAccent { didSet { defaults?.set(accent.rawValue, forKey: "profileAccent") } }
+    var customAccent: AccentColor { didSet { defaults?.set(customAccent.hex, forKey: "profileCustomAccent") } }
+    var resolvedAccent: AccentColor { accent.resolved(custom: customAccent) }
+    var accentColor: Color { resolvedAccent.color }
     var mascot: Mascot { didSet { defaults?.set(mascot.rawValue, forKey: Mascot.storageKey) } }
     var mascotPalette: MascotPalette { didSet { defaults?.set(mascotPalette.rawValue, forKey: MascotPalette.storageKey) } }
     var searchEngine: SearchEngine { didSet { defaults?.set(searchEngine.rawValue, forKey: SearchEngine.storageKey) } }
@@ -23,6 +27,7 @@ final class ProfilePreferences {
         self.defaults = defaults
         appearance = AppearanceStore(defaults: defaults, appliesToApplication: false)
         accent = defaults?.string(forKey: "profileAccent").flatMap(ProfileAccent.init(rawValue:)) ?? .sage
+        customAccent = defaults?.string(forKey: "profileCustomAccent").flatMap(AccentColor.init(hex:)) ?? .defaultCustom
         mascot = defaults?.string(forKey: Mascot.storageKey).flatMap(Mascot.init(rawValue:)) ?? (defaults == nil ? .defaultChoice : .current())
         mascotPalette = defaults?.string(forKey: MascotPalette.storageKey).flatMap(MascotPalette.init(rawValue:)) ?? (defaults == nil ? .defaultChoice : .current())
         searchEngine = defaults?.string(forKey: SearchEngine.storageKey).flatMap(SearchEngine.init) ?? .google
@@ -35,7 +40,7 @@ final class ProfilePreferences {
     }
 
     // Copy explicit settings only: never credentials, grants, history, caches, or WebKit interaction state.
-    static let copiedKeys = ["profileAccent", BrowserAppearance.storageKey, WebPageAppearance.storageKey,
+    static let copiedKeys = ["profileAccent", "profileCustomAccent", BrowserAppearance.storageKey, WebPageAppearance.storageKey,
                              WebPageAppearance.separateStorageKey, Mascot.storageKey, MascotPalette.storageKey,
                              SearchEngine.storageKey, NewTabPage.storageKey, TabLayout.storageKey,
                              BookmarksBarVisibility.storageKey, SessionPreferences.restoresWindowsKey,

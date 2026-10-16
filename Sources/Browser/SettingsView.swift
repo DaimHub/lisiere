@@ -38,7 +38,7 @@ struct SettingsView: View {
             }
         }
         .preferredColorScheme(profiles.context(for: profiles.selectedID)?.preferences.appearance.selection.colorScheme)
-        .tint(profiles.context(for: profiles.selectedID)?.preferences.accent.color ?? .accentColor)
+        .tint(profiles.context(for: profiles.selectedID)?.preferences.accentColor ?? .accentColor)
         .formStyle(.grouped)
         .frame(width: 580, height: 560)
         .onAppear { if profiles.loadError != nil { profiles.settingsTab = .profiles } }
