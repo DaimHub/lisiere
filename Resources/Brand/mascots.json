@@ -1,0 +1,11 @@
+[
+  { "id": "veilleur", "title": "Veilleur", "source": "docs/design/mascot/black-options/option-1.png" },
+  { "id": "eclaireur", "title": "Éclaireur", "source": "docs/design/mascot/black-options/option-2.png" },
+  { "id": "lutin", "title": "Lutin", "source": "docs/design/mascot/black-options/option-3.png" },
+  { "id": "lapin", "title": "Lapin", "source": "docs/design/mascot/collection/lapin.png" },
+  { "id": "ourson", "title": "Ourson", "source": "docs/design/mascot/collection/ourson.png" },
+  { "id": "nuage", "title": "Nuage", "source": "docs/design/mascot/collection/nuage.png" },
+  { "id": "flamme", "title": "Flamme", "source": "docs/design/mascot/collection/flamme.png" },
+  { "id": "goutte", "title": "Goutte", "source": "docs/design/mascot/collection/goutte.png" },
+  { "id": "pollen", "title": "Pollen", "source": "docs/design/mascot/collection/pollen.png" }
+]

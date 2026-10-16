@@ -2,11 +2,14 @@ import AppKit
 import SwiftUI
 
 struct NewTabView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let bookmarks: BookmarkStore
     let browser: BrowserModel
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
     @AppStorage(NewTabPage.storageKey) private var page = NewTabPage.startPage
+    @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
+    @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
 
     private let horizontalPadding: CGFloat = 32
     private let tileSpacing: CGFloat = 8
@@ -34,11 +37,19 @@ struct NewTabView: View {
                 if browser.isPrivate {
                     privateHeading
                 } else {
-                    TimelineView(.everyMinute) { context in
-                        Text(Self.greeting(for: context.date))
-                            .font(.system(size: 28, weight: .medium))
-                            .tracking(-0.7)
-                            .foregroundStyle(.primary.opacity(0.85))
+                    VStack(spacing: 8) {
+                        Image(mascot.imageName(for: mascotPalette))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 120, height: 120)
+                            .background(mascotBackground, in: RoundedRectangle(cornerRadius: 28))
+                            .accessibilityHidden(true)
+                        TimelineView(.everyMinute) { context in
+                            Text(Self.greeting(for: context.date))
+                                .font(.system(size: 28, weight: .medium))
+                                .tracking(-0.7)
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
                     }
                 }
 
@@ -53,6 +64,12 @@ struct NewTabView: View {
         }
         .scrollIndicators(.never)
         .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var mascotBackground: Color {
+        if mascotPalette == .white { return .black }
+        // Keep the selected black artwork readable on the dark start page.
+        return colorScheme == .dark ? .white : .clear
     }
 
     private var privateHeading: some View {

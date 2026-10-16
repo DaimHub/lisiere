@@ -1,0 +1,38 @@
+{
+  "fill": {
+    "solid": "extended-srgb:0.00000,0.00000,0.00000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "pupils.svg",
+          "name": "pupils"
+        },
+        {
+          "glass": false,
+          "image-name": "eyes.svg",
+          "name": "eyes"
+        },
+        {
+          "glass": false,
+          "image-name": "body.svg",
+          "name": "body"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.3
+      },
+      "name": "Pollen — White"
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

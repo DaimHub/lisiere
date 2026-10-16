@@ -1,0 +1,41 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "extended-srgb:1.00000,1.00000,1.00000,1.00000",
+      "extended-srgb:0.91000,0.92000,0.93000,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "pupils.svg",
+          "name": "pupils"
+        },
+        {
+          "glass": false,
+          "image-name": "eyes.svg",
+          "name": "eyes"
+        },
+        {
+          "glass": false,
+          "image-name": "body.svg",
+          "name": "body"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.12
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.3
+      },
+      "name": "Flamme"
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

@@ -27,11 +27,18 @@ targetTemplates:
         buildPhase: resources
       - path: Resources/Credits.rtf
         buildPhase: resources
+      - path: Resources/Assets.xcassets
+      - path: Resources/Lisiere.icon
+        type: file
+        buildPhase: resources
+      - path: Resources/Brand/LICENSE-bloub.txt
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: Lisiere
         # Keep the upstream Swift module and source paths to simplify future merges.
         PRODUCT_MODULE_NAME: Browser
+        ASSETCATALOG_COMPILER_APPICON_NAME: Lisiere
         PRODUCT_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere
         # XcodeGen writes the complete plist below; preserve its Unicode product name.
         GENERATE_INFOPLIST_FILE: NO

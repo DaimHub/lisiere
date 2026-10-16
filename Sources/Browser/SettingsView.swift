@@ -256,6 +256,8 @@ private struct AppearanceSettings: View {
     @Bindable private var appearance = AppearanceStore.shared
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
+    @AppStorage(Mascot.storageKey) private var mascot = Mascot.defaultChoice
+    @AppStorage(MascotPalette.storageKey) private var mascotPalette = MascotPalette.defaultChoice
 
     var body: some View {
         Form {
@@ -292,7 +294,60 @@ private struct AppearanceSettings: View {
                     Text(visibility.title).tag(visibility)
                 }
             }
+
+            Section {
+                Picker("Mascot colors", selection: $mascotPalette) {
+                    ForEach(MascotPalette.allCases) { palette in
+                        Text(palette.title).tag(palette)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach(Mascot.allCases) { choice in
+                        Button {
+                            mascot = choice
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(choice.iconName(for: mascotPalette))
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 64, height: 64)
+                                HStack(spacing: 5) {
+                                    Image(systemName: mascot == choice ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(mascot == choice ? Color.accentColor : Color.secondary)
+                                    Text(choice.title)
+                                }
+                                .font(.callout)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .contentShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .background(mascot == choice ? Color.accentColor.opacity(0.08) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(mascot == choice ? Color.accentColor : Color.primary.opacity(0.12),
+                                              lineWidth: 1)
+                        }
+                        .accessibilityLabel("\(choice.title), \(mascotPalette.title)")
+                        .accessibilityValue(mascot == choice ? "Selected" : "Not selected")
+                        .accessibilityAddTraits(mascot == choice ? [.isSelected] : [])
+                        .help("Use \(choice.title) on the start page and in the Dock")
+                    }
+                }
+            } header: {
+                Text("Mascot & Dock Icon")
+            } footer: {
+                Text("Your choice appears on the start page and in the Dock while Lisière is running. "
+                     + "Finder keeps the Lutin icon.")
+            }
         }
+        .onChange(of: mascot) { _, choice in choice.applyDockIcon(palette: mascotPalette) }
+        .onChange(of: mascotPalette) { _, palette in mascot.applyDockIcon(palette: palette) }
     }
 }
 

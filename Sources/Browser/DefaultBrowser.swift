@@ -111,6 +111,7 @@ final class BrowserAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Mascot.current().applyDockIcon()
         Passkeys.shared.requestAuthorizationIfNeeded()
     }
 
