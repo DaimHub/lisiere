@@ -32,6 +32,21 @@ make build
 
 Launch the Release app and verify changed behavior before committing. Generated projects and build output are ignored.
 
+## Password save prompts
+
+Register a pending password decision on `BrowserTab` before scheduling its native sheet. Main-frame navigation
+actions and responses wait for that decision, and a page-requested popup close is deferred until the user answers.
+Resume WebKit's original decision instead of cancelling and resubmitting a login request. JavaScript and requests
+already running in the page are not suspended. Closing a tab or window explicitly cancels its sheet and pending
+navigation; suspended tabs regain the ability to navigate when their web view is recreated.
+
+The regression tests use real WebKit pages and native sheets with an in-memory password store. They cover Save,
+Not Now, Never, password updates, immediate popup closure, background tabs and explicit user closure. On
+2026-10-16, all 160 tests passed. The locally signed Release passed strict signature verification and startup smoke.
+A separate validation bundle, retaining the Release sandbox and hardened runtime, also verified redirect and
+popup-close flows using fictional credentials in a controlled HTTPS form. Real account sign-ins and distribution
+signing were not exercised. The installed app and its profiles were not replaced.
+
 ## Synchronizing upstream
 
 For a fresh clone, configure the read-only upstream remote once:

@@ -16,6 +16,8 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        if navigationAction.targetFrame?.isMainFrame == true, let tab,
+           !(await tab.waitForPasswordDecision()) { return .cancel }
         if navigationAction.shouldPerformDownload { return .download }
         if navigationAction.navigationType == .linkActivated,
            navigationAction.modifierFlags.contains(.command) || navigationAction.buttonNumber == Self.middleButtonMask,
@@ -28,6 +30,8 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        if navigationResponse.isForMainFrame, let tab,
+           !(await tab.waitForPasswordDecision()) { return .cancel }
         let disposition = (navigationResponse.response as? HTTPURLResponse)?
             .value(forHTTPHeaderField: "Content-Disposition")?.lowercased()
         if !navigationResponse.canShowMIMEType || disposition?.hasPrefix("attachment") == true {
@@ -147,8 +151,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webViewDidClose(_ webView: WKWebView) {
-        guard let tab else { return }
-        tab.browser?.closeTab(tab.id)
+        tab?.requestCloseFromPage()
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,

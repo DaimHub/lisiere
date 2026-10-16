@@ -194,7 +194,7 @@ final class BrowserModel {
 
     /// Remembers a closing tab so it can reopen, and dismisses the panels its page is waiting to show.
     private func rememberClosedTab(_ tab: BrowserTab) {
-        tab.stopWaitingForSelection()
+        tab.cancelPendingPageWork()
         let isBlank = tab.isNewTab || tab.url == nil
         closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url, title: tab.pageTitle,
                                     interactionState: isBlank ? nil : tab.interactionState))
@@ -318,7 +318,7 @@ final class BrowserModel {
     /// Replaces the window's tabs with a saved window's. They start suspended, so only the selected tab loads.
     func restoreSession(_ session: WindowSession) {
         guard !session.tabs.isEmpty else { return }
-        tabs.forEach { $0.stopWaitingForSelection() }
+        tabs.forEach { $0.cancelPendingPageWork() }
         tabs = session.tabs.map { tab in
             tab.url == nil ? makeTab()
                 : adopt(BrowserTab(url: tab.url, title: tab.title, interactionState: tab.interactionState))

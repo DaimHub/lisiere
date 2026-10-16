@@ -146,9 +146,13 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
                                             origin: PasswordOrigin(message.frameInfo.securityOrigin)),
               let offer = passwords.offer(for: capture), !offering.contains(capture.account) else { return }
         offering.insert(capture.account)
+        let prompt = tab.beginPasswordPrompt()
         Task {
+            defer {
+                offering.remove(capture.account)
+                tab.finishPasswordPrompt(prompt)
+            }
             await ask(offer, capture, in: tab, passwords: passwords)
-            offering.remove(capture.account)
         }
     }
 

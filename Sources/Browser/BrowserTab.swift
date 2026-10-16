@@ -58,6 +58,12 @@ final class BrowserTab: Identifiable {
     private var faviconHost: String?
     /// Panels the page is waiting to show until the tab is selected.
     @ObservationIgnored private var selectionWaiters: [CheckedContinuation<Bool, Never>] = []
+    /// Register before presenting the sheet, so an immediate redirect or window.close() waits too.
+    @ObservationIgnored private var passwordPrompts: Set<UUID> = []
+    @ObservationIgnored private var passwordDecisionWaiters: [CheckedContinuation<Bool, Never>] = []
+    @ObservationIgnored private var closesAfterPasswordDecision = false
+    @ObservationIgnored private var presentedSheets: Set<NSWindow> = []
+    @ObservationIgnored private var acceptsPageRequests = true
 
     /// Pass the configuration WebKit provides when a page opens a window, so the new page keeps its opener.
     init(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration(),
@@ -92,6 +98,7 @@ final class BrowserTab: Identifiable {
     /// Restoring keeps the suspended page's state until the new web view reports its own, which it only does
     /// once the page starts loading, so the tab's title and address don't flash blank.
     private func install(_ webView: WKWebView, isRestoring: Bool = false) {
+        acceptsPageRequests = true
         appearance.attach(webView)
         webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
@@ -134,7 +141,7 @@ final class BrowserTab: Identifiable {
 
     /// Final window closure also releases a blank page and cancels pending page work.
     func close() {
-        stopWaitingForSelection()
+        cancelPendingPageWork()
         thumbnailTask?.cancel()
         faviconTask?.cancel()
         findTask?.cancel()
@@ -150,7 +157,7 @@ final class BrowserTab: Identifiable {
     /// Releases the web view, and with it the page's memory, keeping what the tab strip shows and the state to restore.
     func suspend() {
         guard let webView, !isNewTab else { return }
-        stopWaitingForSelection()
+        cancelPendingPageWork()
         suspendedState = webView.interactionState
         observations.forEach { $0.invalidate() }
         observations = []
@@ -182,7 +189,8 @@ final class BrowserTab: Identifiable {
     /// using the camera or microphone, or being inspected. Pages with unsaved form input aren't detected, since WebKit
     /// has no cheap way to ask; their history still restores.
     var canSuspend: Bool {
-        guard let webView, !isNewTab, !isLoading, loadError == nil, selectionWaiters.isEmpty else { return false }
+        guard let webView, !isNewTab, !isLoading, loadError == nil, selectionWaiters.isEmpty,
+              passwordPrompts.isEmpty, presentedSheets.isEmpty else { return false }
         #if DEBUG
         if WebInspector.isOpen(for: webView) { return false }
         #endif
@@ -192,7 +200,7 @@ final class BrowserTab: Identifiable {
     /// Waits until the tab is selected, so a background page's panel can't take over the window.
     /// Returns `false` if the tab is closed or suspended first.
     func waitUntilSelected() async -> Bool {
-        guard let browser else { return false }
+        guard acceptsPageRequests, let browser, browser.tab(withID: id) === self else { return false }
         if browser.activeTabID == id { return true }
         return await withCheckedContinuation { selectionWaiters.append($0) }
     }
@@ -205,16 +213,67 @@ final class BrowserTab: Identifiable {
         for _ in 0..<20 where webView.window == nil {
             try? await Task.sleep(for: .milliseconds(25))
         }
-        guard let window = webView.window else { return nil }
-        return await alert.beginSheetModal(for: window)
+        guard acceptsPageRequests, browser?.tab(withID: id) === self, self.webView === webView,
+              let window = webView.window else { return nil }
+        let sheet = alert.window
+        presentedSheets.insert(sheet)
+        defer { presentedSheets.remove(sheet) }
+        let response = await alert.beginSheetModal(for: window)
+        return browser?.tab(withID: id) === self ? response : nil
     }
 
     func didBecomeSelected() {
         resumeSelectionWaiters(true)
     }
 
-    func stopWaitingForSelection() {
+    /// Also rejects WebKit callbacks already queued when the user closes or suspends the page.
+    func cancelPendingPageWork() {
+        acceptsPageRequests = false
         resumeSelectionWaiters(false)
+        passwordPrompts.removeAll()
+        closesAfterPasswordDecision = false
+        resumePasswordDecisionWaiters(false)
+        for sheet in presentedSheets {
+            sheet.sheetParent?.endSheet(sheet, returnCode: .abort)
+        }
+    }
+
+    func beginPasswordPrompt() -> UUID {
+        let token = UUID()
+        passwordPrompts.insert(token)
+        return token
+    }
+
+    func finishPasswordPrompt(_ token: UUID) {
+        guard passwordPrompts.remove(token) != nil, passwordPrompts.isEmpty else { return }
+        let shouldClose = closesAfterPasswordDecision
+        closesAfterPasswordDecision = false
+        resumePasswordDecisionWaiters(!shouldClose)
+        if shouldClose { browser?.closeTab(id) }
+    }
+
+    /// Holds WebKit's original navigation decision; resuming never replays a form submission.
+    func waitForPasswordDecision() async -> Bool {
+        guard acceptsPageRequests else { return false }
+        guard !passwordPrompts.isEmpty else { return true }
+        let canContinue = await withCheckedContinuation { passwordDecisionWaiters.append($0) }
+        return canContinue && acceptsPageRequests && browser?.tab(withID: id) === self
+    }
+
+    /// Automatic popup closure must leave time to answer Save, Not Now, or Never.
+    /// An explicit user close still goes straight through BrowserModel.closeTab.
+    func requestCloseFromPage() {
+        guard passwordPrompts.isEmpty else {
+            closesAfterPasswordDecision = true
+            return
+        }
+        browser?.closeTab(id)
+    }
+
+    private func resumePasswordDecisionWaiters(_ canContinue: Bool) {
+        let waiters = passwordDecisionWaiters
+        passwordDecisionWaiters = []
+        waiters.forEach { $0.resume(returning: canContinue) }
     }
 
     private func resumeSelectionWaiters(_ isSelected: Bool) {
