@@ -51,6 +51,8 @@ struct AddressField: NSViewRepresentable {
     func updateNSView(_ field: FocusableTextField, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
+        // A private window's toolbar is dark whatever the system appearance.
+        field.appearance = context.environment.colorScheme == .dark ? NSAppearance(named: .darkAqua) : nil
 
         // Set through the field editor while editing, which doesn't count as the user editing.
         if let editor = field.currentEditor() as? NSTextView {

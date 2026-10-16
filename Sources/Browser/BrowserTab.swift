@@ -95,6 +95,7 @@ final class BrowserTab: Identifiable {
         contentView.addSubview(webView)
         webView.navigationDelegate = pageDelegate
         webView.uiDelegate = pageDelegate
+        ContentBlocker.shared.attach(webView.configuration.userContentController)
         self.webView = webView
 
         let options: NSKeyValueObservingOptions = isRestoring ? [] : .initial
@@ -145,7 +146,7 @@ final class BrowserTab: Identifiable {
     /// A pop-up gets a fresh configuration too, since its tie to the opener can't be restored.
     func restore() {
         guard isSuspended else { return }
-        let webView = WKWebView(frame: .zero, configuration: Self.makeConfiguration())
+        let webView = WKWebView(frame: .zero, configuration: browser?.makeConfiguration() ?? Self.makeConfiguration())
         install(webView, isRestoring: true)
         if let suspendedState {
             webView.interactionState = suspendedState
@@ -427,7 +428,8 @@ final class BrowserTab: Identifiable {
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !Task.isCancelled, let webView, !webView.isLoading, webView.url == url else { return }
             let candidates = await FaviconStore.candidates(in: webView)
-            guard let icon = await FaviconStore.icon(forPage: url, candidates: candidates),
+            guard let icon = await FaviconStore.icon(forPage: url, candidates: candidates,
+                                                     remember: !(browser?.isPrivate ?? false)),
                   !Task.isCancelled, self.url == url else { return }
             favicon = icon
         }

@@ -118,6 +118,15 @@ struct FaviconCache: Sendable {
         try? data.write(to: fileURL(forHost: host), options: .atomic)
     }
 
+    func removeEntries(since date: Date) {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for file in files {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if (modified ?? .distantFuture) >= date { try? FileManager.default.removeItem(at: file) }
+        }
+    }
+
     private func fileURL(forHost host: String) -> URL {
         directory.appending(path: host.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? host)
     }
@@ -147,6 +156,19 @@ enum FaviconStore {
         return URLSession(configuration: configuration)
     }()
 
+    /// Forgets the icons kept in memory, and removes the ones saved to disk since `date`.
+    static func clear(since date: Date) async {
+        icons = [:]
+        missingHosts = [:]
+        failedSources = []
+        await removeFiles(in: cache, since: date)
+    }
+
+    @concurrent
+    nonisolated private static func removeFiles(in cache: FaviconCache, since date: Date) async {
+        cache.removeEntries(since: date)
+    }
+
     static func cachedIcon(for url: URL?) -> Image? {
         url?.host().flatMap { icons[$0]?.image }
     }
@@ -174,11 +196,18 @@ enum FaviconStore {
     }
 
     /// The best of the icons an open page declares, downloaded only when it isn't the one already cached.
-    static func icon(forPage url: URL, candidates: [FaviconCandidate]) async -> Image? {
+    /// A private window's icons aren't kept, in memory or on disk.
+    static func icon(forPage url: URL, candidates: [FaviconCandidate], remember: Bool = true) async -> Image? {
         guard let host = url.host() else { return nil }
         let sources = FaviconCandidate.ranked(candidates, pageURL: url).filter { !failedSources.contains($0) }.prefix(4)
         guard let best = sources.first else { return nil }
         if let icon = icons[host], icon.source == best { return icon.image }
+        guard remember else {
+            for source in sources {
+                if let icon = await download(source, forHost: host, into: nil) { return icon.image }
+            }
+            return nil
+        }
 
         let icon = await deduplicated(best.absoluteString, host: host) {
             if let icon = await diskIcon(forHost: host, in: cache), icon.source == best { return icon }
@@ -228,11 +257,11 @@ enum FaviconStore {
 
     @concurrent
     nonisolated private static func download(_ source: URL, forHost host: String,
-                                             into cache: FaviconCache) async -> Icon? {
+                                             into cache: FaviconCache?) async -> Icon? {
         guard let (data, _) = await fetch(source, limit: FaviconData.maxIconBytes,
                                           accepting: FaviconData.isIconMIMEType),
               !data.isTruncated, let image = image(from: data.bytes) else { return nil }
-        cache.save(FaviconCache.Entry(source: source, data: data.bytes), forHost: host)
+        cache?.save(FaviconCache.Entry(source: source, data: data.bytes), forHost: host)
         return Icon(source: source, image: image)
     }
 

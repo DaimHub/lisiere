@@ -29,11 +29,20 @@ enum BrowserChrome {
     }
 }
 
-enum TabLayout: String, CaseIterable {
+enum TabLayout: String, CaseIterable, Identifiable {
     case horizontal
     case vertical
 
     static let storageKey = "tabLayout"
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .horizontal: "Horizontal"
+        case .vertical: "Vertical"
+        }
+    }
 
     var toggled: TabLayout { self == .vertical ? .horizontal : .vertical }
 }
@@ -129,6 +138,23 @@ final class WindowChromeView: NSView {
             if button.frame.origin != origin {
                 button.setFrameOrigin(origin)
             }
+        }
+    }
+}
+
+extension BrowserChrome {
+    /// Laid over the window's glass in a private window, so it reads as different at a glance.
+    static let privateTint = Color(red: 0.11, green: 0.08, blue: 0.20).opacity(0.72)
+}
+
+extension View {
+    /// A private window's tabs, toolbar, and new tab page are always dark. Its pages keep the system appearance.
+    @ViewBuilder
+    func privateChrome(_ isPrivate: Bool) -> some View {
+        if isPrivate {
+            environment(\.colorScheme, .dark)
+        } else {
+            self
         }
     }
 }

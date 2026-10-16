@@ -136,6 +136,7 @@ struct HistoryView: View {
         switch range {
         case .lastHour: "Clear history from the last hour?"
         case .today: "Clear today’s history?"
+        case .todayAndYesterday: "Clear history from today and yesterday?"
         case .all: "Clear all history?"
         }
     }

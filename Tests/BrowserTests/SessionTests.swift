@@ -88,6 +88,33 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(session.reopenableWindows.isEmpty)
     }
 
+    func testWindowsWaitInTheHistoryMenuWhenNotRestoredOnLaunch() {
+        let file = makeFile()
+        file.writeNow(try? PropertyListEncoder.binary.encode(SessionSnapshot(windows: [window(["A"]), window(["B"])],
+                                                                             closedWindows: [window(["Old"])])))
+        let session = SessionStore(file: file, restoresWindows: false)
+        let browser = BrowserModel()
+
+        XCTAssertEqual(session.attach(browser), 0)
+        XCTAssertTrue(browser.isBlank)
+        XCTAssertEqual(session.reopenableWindows.map { $0.tabs.map(\.title) }, [["A"], ["B"]])
+
+        session.forgetClosedWindows()
+        XCTAssertTrue(session.reopenableWindows.isEmpty)
+    }
+
+    func testPrivateWindowsArentSaved() {
+        let session = SessionStore(file: nil)
+        let normal = BrowserModel()
+        normal.restoreSession(window(["Normal"]))
+        _ = session.attach(normal)
+        // BrowserWindow never attaches a private window.
+        let privateWindow = BrowserModel.makePrivate(downloads: DownloadManager())
+        privateWindow.restoreSession(window(["Private"]))
+
+        XCTAssertEqual(session.snapshot.windows.map { $0.tabs.map(\.title) }, [["Normal"]])
+    }
+
     func testSessionSavedOnQuitIsRestoredByTheNextLaunch() {
         let file = makeFile()
         let session = SessionStore(file: file)

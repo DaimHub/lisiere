@@ -56,7 +56,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
                 await self?.askToAllowDownloads(on: site, in: webView)
             }
         }
-        browser.downloads.track(download, confirmation: isUserStarted ? nil : confirmation)
+        browser.downloads.track(download, in: webView.window, confirmation: isUserStarted ? nil : confirmation)
         // A download typed into a new tab leaves no page behind, so show the new tab page again.
         if webView.backForwardList.currentItem == nil { tab.isNewTab = true }
     }
@@ -93,8 +93,8 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         tab.showLoadError(loadError, coversPreviousPage: isProvisional && webView.backForwardList.currentItem != nil)
     }
 
-    /// Asks before a page uses the camera or microphone, naming the site that wants them. The answer lasts
-    /// until the app quits.
+    /// Asks before a page uses the camera or microphone, naming the site that wants them. The answer is kept for
+    /// the site, and can be changed in Settings ▸ Site Settings.
     func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
                  initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
         let permissions: Set<SitePermissions.Permission> = switch type {

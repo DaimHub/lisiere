@@ -101,6 +101,19 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(history.visits.isEmpty)
     }
 
+    func testTodayAndYesterdayStartsAtTheStartOfYesterday() {
+        let now = date(15, 12)
+        XCTAssertEqual(HistoryClearRange.todayAndYesterday.start(now: now, calendar: calendar), date(14, 0))
+        XCTAssertEqual(HistoryClearRange.lastHour.start(now: now, calendar: calendar), date(15, 11))
+        XCTAssertEqual(HistoryClearRange.all.start(now: now, calendar: calendar), .distantPast)
+
+        let history = HistoryStore(file: nil)
+        history.recordVisit(to: swift, title: "", at: date(13, 23))
+        history.recordVisit(to: swift, title: "", at: date(14, 1))
+        history.clear(.todayAndYesterday, now: now, calendar: calendar)
+        XCTAssertEqual(history.visits.map(\.date), [date(13, 23)])
+    }
+
     func testPruneDropsExpiredVisitsAndTheOldestBeyondTheLimit() {
         let now = Date.now
         var visits = [HistoryVisit(url: swift, title: "", date: now - HistoryStore.maxAge - 60)]

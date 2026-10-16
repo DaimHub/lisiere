@@ -24,16 +24,24 @@ struct BrowserWindow: View {
     @State private var isFullScreen = false
     @State private var addressIsFocused = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(BrowsingData.self) private var browsingData
     @AppStorage(BookmarksBarVisibility.storageKey) private var bookmarksBarVisibility = BookmarksBarVisibility.always
     @AppStorage(TabLayout.storageKey) private var tabLayout = TabLayout.horizontal
 
-    private let accent = Color(red: 0.38, green: 0.49, blue: 0.54)
+    private let contentBlocker = ContentBlocker.shared
 
-    /// Pass `nil` for the history and session of a window whose pages aren't remembered.
-    init(bookmarks: BookmarkStore, downloads: DownloadManager, history: HistoryStore?, session: SessionStore?) {
+    private var accent: Color {
+        browser.isPrivate ? Color(red: 0.58, green: 0.50, blue: 0.86) : Color(red: 0.38, green: 0.49, blue: 0.54)
+    }
+
+    /// Pass `nil` for the history and session of a window whose pages aren't remembered. A private window keeps
+    /// its cookies and site data apart from other windows, and only until it closes.
+    init(bookmarks: BookmarkStore, downloads: DownloadManager, history: HistoryStore?, session: SessionStore?,
+         isPrivate: Bool = false) {
         self.bookmarks = bookmarks
-        self.session = session
-        _browser = State(initialValue: BrowserModel(downloads: downloads, history: history))
+        self.session = isPrivate ? nil : session
+        _browser = State(initialValue: isPrivate ? .makePrivate(downloads: downloads)
+                                                 : BrowserModel(downloads: downloads, history: history))
     }
 
     var body: some View {
@@ -42,6 +50,7 @@ struct BrowserWindow: View {
             if tabLayout == .vertical {
                 TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
                          hoverCardTabID: $hoverCardTabID)
+                    .privateChrome(browser.isPrivate)
                     .frame(width: BrowserChrome.sidebarWidth)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
@@ -49,6 +58,7 @@ struct BrowserWindow: View {
                 if tabLayout == .horizontal {
                     TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
                              hoverCardTabID: $hoverCardTabID)
+                        .privateChrome(browser.isPrivate)
                         .transition(.opacity)
                 }
                 mainColumn
@@ -56,15 +66,22 @@ struct BrowserWindow: View {
         }
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
+                .privateChrome(browser.isPrivate)
         }
         .overlayPreferenceValue(AddressBarFrameKey.self) { anchor in
             suggestionList(below: anchor)
+                .privateChrome(browser.isPrivate)
         }
         .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
         .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
         .animation(.snappy(duration: 0.25), value: tabLayout)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
-        .background(WindowGlassBackground())
+        .background {
+            WindowGlassBackground(isDark: browser.isPrivate)
+            if browser.isPrivate {
+                BrowserChrome.privateTint.ignoresSafeArea()
+            }
+        }
         .background(WindowChromeConfigurator(titlebarHeight: BrowserChrome.titlebarHeight(for: tabLayout),
                                              isFullScreen: $isFullScreen) { session?.detach(browser) })
         .ignoresSafeArea(.container, edges: .top)
@@ -81,6 +98,9 @@ struct BrowserWindow: View {
                 try? await Task.sleep(for: .milliseconds(150))
                 if !addressIsFocused { closeSuggestions() }
             }
+        }
+        .sheet(isPresented: $browser.isShowingClearData) {
+            ClearDataView(data: browsingData)
         }
         .sheet(isPresented: $browser.isShowingHistory) {
             if let history = browser.history {
@@ -197,11 +217,13 @@ struct BrowserWindow: View {
         return VStack(spacing: 0) {
             navigationBar
                 .padding(.leading, leadingInset)
+                .privateChrome(browser.isPrivate)
 
             if bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
                 BookmarksBar(bookmarks: bookmarks, browser: browser)
                     .padding(.leading, leadingInset - BrowserChrome.edgeInset)
                     .padding(.bottom, 4)
+                    .privateChrome(browser.isPrivate)
                     .transition(.opacity)
             }
 
@@ -209,6 +231,7 @@ struct BrowserWindow: View {
                 Group {
                     if tab.isNewTab {
                         NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
+                            .privateChrome(browser.isPrivate)
                     } else {
                         webView(for: tab)
                     }
@@ -320,6 +343,10 @@ struct BrowserWindow: View {
             .background(Color.primary.opacity(0.035),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
+            if browser.isPrivate {
+                privateLabel
+            }
+
             HStack(spacing: 7) {
                 Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
@@ -329,6 +356,7 @@ struct BrowserWindow: View {
                              focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
                              edit: editAddress, perform: performAddressCommand)
                 zoomButton
+                trackerBlockingButton
                 bookmarkButton
             }
             .padding(.leading, 11)
@@ -367,6 +395,47 @@ struct BrowserWindow: View {
             .foregroundStyle(.secondary)
             .help("Reset Zoom (⌘0)")
             .accessibilityLabel("Zoom \(Int((tab.pageZoom * 100).rounded())) percent, reset")
+        }
+    }
+
+    private var privateLabel: some View {
+        Label("Private", systemImage: "eyeglasses")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(accent)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .help("Private Window: history, cookies, and website data aren’t kept after it closes")
+            .accessibilityLabel("Private Window")
+    }
+
+    /// Shows whether trackers are blocked on the page's site, and turns blocking off for the site. A private window
+    /// shows the state without changing it, since the change would be kept after it closes.
+    @ViewBuilder
+    private var trackerBlockingButton: some View {
+        if contentBlocker.isEnabled, let tab = browser.activeTab, !tab.isNewTab, let host = tab.host,
+           ["http", "https"].contains(tab.url?.scheme?.lowercased() ?? "") {
+            let isBlocking = contentBlocker.isBlocking(on: host)
+            let site = ContentBlocker.site(host)
+            Menu {
+                Text(isBlocking ? "Trackers are blocked on \(site)" : "Tracker blocking is off for \(site)")
+                Button(isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site") {
+                    Task {
+                        await contentBlocker.setBlocking(!isBlocking, on: host)
+                        tab.reload()
+                    }
+                }
+                .disabled(browser.isPrivate)
+            } label: {
+                Image(systemName: isBlocking ? "shield.lefthalf.filled" : "shield.slash")
+                    .foregroundStyle(isBlocking ? Color.secondary : Color.orange)
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(ChromeIconButtonStyle(size: 26))
+            .fixedSize()
+            .help(isBlocking ? "Trackers Blocked" : "Tracker Blocking Off for This Site")
+            .accessibilityLabel(isBlocking ? "Trackers blocked" : "Tracker blocking off")
         }
     }
 

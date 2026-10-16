@@ -4,11 +4,22 @@ import SwiftUI
 @main
 struct BrowserApp: App {
     static let windowID = "browser"
+    static let privateWindowID = "private"
 
     @State private var bookmarks = BookmarkStore()
     @State private var downloads = DownloadManager()
-    @State private var history = HistoryStore(file: BrowserApp.storeFile(named: "History.plist"))
-    @State private var session = SessionStore(file: BrowserApp.storeFile(named: "Session.plist"))
+    @State private var history: HistoryStore
+    @State private var session: SessionStore
+    @State private var browsingData: BrowsingData
+
+    init() {
+        let history = HistoryStore(file: Self.storeFile(named: "History.plist"))
+        let session = SessionStore(file: Self.storeFile(named: "Session.plist"),
+                                   restoresWindows: SessionPreferences.restoresWindows)
+        _history = State(initialValue: history)
+        _session = State(initialValue: session)
+        _browsingData = State(initialValue: BrowsingData(history: history, session: session))
+    }
 
     /// Unit tests run inside the app, which then shouldn't reopen or overwrite the user's windows and history.
     private static func storeFile(named name: String) -> StoreFile? {
@@ -20,12 +31,27 @@ struct BrowserApp: App {
         WindowGroup(id: Self.windowID) {
             BrowserWindow(bookmarks: bookmarks, downloads: downloads, history: history, session: session)
                 .frame(minWidth: 680, minHeight: 440)
+                .environment(browsingData)
         }
         .windowStyle(.hiddenTitleBar)
         // The session store reopens the windows with their tabs, so the system doesn't reopen them too.
         .restorationBehavior(.disabled)
         .commands {
             BrowserCommands(bookmarks: bookmarks, history: history, session: session)
+        }
+
+        // A private window joins neither history nor the session, and isn't reopened.
+        WindowGroup("Private Window", id: Self.privateWindowID) {
+            BrowserWindow(bookmarks: bookmarks, downloads: downloads, history: nil, session: nil, isPrivate: true)
+                .frame(minWidth: 680, minHeight: 440)
+                .environment(browsingData)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .restorationBehavior(.disabled)
+
+        Settings {
+            SettingsView(browsingData: browsingData, contentBlocker: .shared, sitePermissions: .shared,
+                         zoomLevels: .shared)
         }
     }
 }
@@ -62,6 +88,10 @@ private struct BrowserCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("New Window") { openWindow(id: BrowserApp.windowID) }
+                .keyboardShortcut("n", modifiers: .command)
+            Button("New Private Window") { openWindow(id: BrowserApp.privateWindowID) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Tab") { browser?.addTab() }
                 .keyboardShortcut("t", modifiers: .command)
             Button("Reopen Closed Tab") { browser?.reopenClosedTab() }
@@ -157,7 +187,8 @@ private struct BrowserCommands: Commands {
                 .keyboardShortcut("]", modifiers: .command)
             Divider()
             Button("Reopen All Windows from Last Session") {
-                for _ in 0..<session.reopenLastSession(reusing: browser) {
+                // A private window can't take the restored tabs.
+                for _ in 0..<session.reopenLastSession(reusing: browser?.isPrivate == true ? nil : browser) {
                     openWindow(id: BrowserApp.windowID)
                 }
             }
@@ -174,6 +205,8 @@ private struct BrowserCommands: Commands {
             Divider()
             Button("Show All History") { browser?.isShowingHistory.toggle() }
                 .keyboardShortcut("y", modifiers: .command)
+                .disabled(browser?.history == nil)
+            Button("Clear History and Website Data…") { browser?.isShowingClearData = true }
                 .disabled(browser == nil)
         }
         CommandMenu("Bookmarks") {

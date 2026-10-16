@@ -25,6 +25,8 @@ final class DownloadItem: Identifiable {
     @ObservationIgnored fileprivate var progressObservation: NSKeyValueObservation?
     /// Asks whether a download the page started on its own may go ahead, or `nil` when the user started it.
     @ObservationIgnored fileprivate var confirmation: (@MainActor () async -> Bool)?
+    /// The window the save panel opens on, when Settings ▸ Downloads asks where to save each file.
+    @ObservationIgnored fileprivate weak var window: NSWindow?
 
     fileprivate init(download: WKDownload) {
         self.download = download
@@ -32,7 +34,7 @@ final class DownloadItem: Identifiable {
     }
 }
 
-/// Downloads from every window, saved to the Downloads folder.
+/// Downloads from every window, saved to the Downloads folder or where the user chooses.
 @MainActor
 @Observable
 final class DownloadManager: NSObject, WKDownloadDelegate {
@@ -56,9 +58,11 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
 
     /// Pass a confirmation for a download the user didn't start. It's asked before anything is saved,
     /// and the download disappears if it's refused.
-    func track(_ download: WKDownload, confirmation: (@MainActor () async -> Bool)? = nil) {
+    func track(_ download: WKDownload, in window: NSWindow? = nil,
+               confirmation: (@MainActor () async -> Bool)? = nil) {
         let item = DownloadItem(download: download)
         item.confirmation = confirmation
+        item.window = window
         download.delegate = self
         item.progressObservation = download.progress.observe(\.fractionCompleted) { [weak item] progress, _ in
             let (fraction, completed, total) = (progress.fractionCompleted, progress.completedUnitCount,
@@ -130,12 +134,37 @@ final class DownloadManager: NSObject, WKDownloadDelegate {
             // It might have been cancelled while the user was asked.
             guard item.state == .downloading else { return nil }
         }
+        if DownloadPreferences.asksWhereToSave {
+            return await chooseDestination(for: item, suggestedFilename: suggestedFilename)
+        }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Downloads that are still running haven't necessarily created their files yet.
         let reserved = Set(items.filter { $0.state == .downloading }.compactMap(\.destinationURL))
         let url = Self.uniqueURL(for: suggestedFilename, in: directory) {
             reserved.contains($0) || FileManager.default.fileExists(atPath: $0.path)
         }
+        item.name = url.lastPathComponent
+        item.destinationURL = url
+        return url
+    }
+
+    /// Asks where to save the file. Cancelling the panel cancels the download.
+    private func chooseDestination(for item: DownloadItem, suggestedFilename: String) async -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = (suggestedFilename as NSString).lastPathComponent
+        panel.directoryURL = directory
+        panel.canCreateDirectories = true
+        let response = if let window = item.window {
+            await panel.beginSheetModal(for: window)
+        } else {
+            await panel.begin()
+        }
+        guard response == .OK, let url = panel.url, item.state == .downloading else {
+            items.removeAll { $0 === item }
+            return nil
+        }
+        // The panel already asked about replacing an existing file.
+        try? FileManager.default.removeItem(at: url)
         item.name = url.lastPathComponent
         item.destinationURL = url
         return url

@@ -11,6 +11,9 @@ final class BrowserModel {
     /// `nil` for a window whose pages aren't remembered.
     let history: HistoryStore?
     let zoomLevels: ZoomStore
+    /// Shared by the window's tabs. A private window's keeps its cookies and site data in memory, apart from
+    /// other windows, until the window closes.
+    let websiteDataStore: WKWebsiteDataStore
 
     private(set) var tabs: [BrowserTab] = []
     private var closedTabs: [ClosedTab] = []
@@ -29,6 +32,7 @@ final class BrowserModel {
     var addressFocusRequest = 0
     var findFocusRequest = 0
     var isShowingHistory = false
+    var isShowingClearData = false
     @ObservationIgnored private var suspender: TabSuspender?
 
     private struct ClosedTab {
@@ -39,13 +43,34 @@ final class BrowserModel {
     }
 
     init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared,
-         history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared) {
+         history: HistoryStore? = nil, zoomLevels: ZoomStore = .shared,
+         websiteDataStore: WKWebsiteDataStore = .default()) {
         self.downloads = downloads
         self.sitePermissions = sitePermissions
         self.history = history
         self.zoomLevels = zoomLevels
+        self.websiteDataStore = websiteDataStore
         addTab()
         suspender = TabSuspender(browser: self)
+    }
+
+    /// A window that keeps nothing once it closes: no history, zoom levels, or site permissions, and cookies and
+    /// site data its tabs share only with each other. Downloads still save.
+    static func makePrivate(downloads: DownloadManager) -> BrowserModel {
+        BrowserModel(downloads: downloads, sitePermissions: SitePermissions(), history: nil,
+                     zoomLevels: ZoomStore(defaults: nil), websiteDataStore: .nonPersistent())
+    }
+
+    var isPrivate: Bool {
+        !websiteDataStore.isPersistent
+    }
+
+    /// A configuration for one of the window's pages. Pop-ups get theirs from WebKit, copied from the opener's,
+    /// so they keep its data store.
+    func makeConfiguration() -> WKWebViewConfiguration {
+        let configuration = BrowserTab.makeConfiguration()
+        configuration.websiteDataStore = websiteDataStore
+        return configuration
     }
 
     var activeTab: BrowserTab? {
@@ -61,8 +86,8 @@ final class BrowserModel {
         return tabs.first { $0.id == id }
     }
 
-    private func makeTab(configuration: WKWebViewConfiguration = BrowserTab.makeConfiguration()) -> BrowserTab {
-        adopt(BrowserTab(configuration: configuration))
+    private func makeTab(configuration: WKWebViewConfiguration? = nil) -> BrowserTab {
+        adopt(BrowserTab(configuration: configuration ?? makeConfiguration()))
     }
 
     private func adopt(_ tab: BrowserTab) -> BrowserTab {
@@ -158,7 +183,7 @@ final class BrowserModel {
     @discardableResult
     func openChildTab(of opener: BrowserTab, configuration: WKWebViewConfiguration? = nil,
                       loading request: URLRequest? = nil, select: Bool) -> BrowserTab {
-        let tab = configuration.map(makeTab) ?? makeTab()
+        let tab = makeTab(configuration: configuration)
         tab.isNewTab = false
         tab.openerID = opener.id
         tab.isPopUp = configuration != nil
@@ -364,7 +389,7 @@ final class BrowserModel {
 }
 
 enum BrowserAddress {
-    static func url(for input: String) -> URL? {
+    static func url(for input: String, searchEngine: SearchEngine = .current) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
@@ -381,8 +406,6 @@ enum BrowserAddress {
             return url
         }
 
-        var components = URLComponents(string: "https://www.google.com/search")
-        components?.queryItems = [URLQueryItem(name: "q", value: text)]
-        return components?.url
+        return searchEngine.searchURL(for: text)
     }
 }

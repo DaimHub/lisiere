@@ -33,6 +33,17 @@ final class ZoomStoreTests: XCTestCase {
         XCTAssertEqual(defaults.dictionary(forKey: "pageZoomLevels") as? [String: Double], ["swift.org": 1.25])
     }
 
+    func testResettingAllLevels() {
+        let defaults = makeDefaults()
+        let zoom = ZoomStore(defaults: defaults)
+        zoom.setLevel(1.25, for: "swift.org")
+
+        zoom.removeAll()
+
+        XCTAssertTrue(zoom.levelsByHost.isEmpty)
+        XCTAssertTrue(ZoomStore(defaults: defaults).levelsByHost.isEmpty)
+    }
+
     func testWindowsThatArentRememberedKeepLevelsInMemory() {
         let zoom = ZoomStore(defaults: nil)
         zoom.setLevel(1.5, for: "swift.org")

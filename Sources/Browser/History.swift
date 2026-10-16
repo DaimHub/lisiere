@@ -47,6 +47,7 @@ struct HistoryDay: Identifiable, Equatable {
 enum HistoryClearRange: CaseIterable, Identifiable {
     case lastHour
     case today
+    case todayAndYesterday
     case all
 
     var id: Self { self }
@@ -55,6 +56,7 @@ enum HistoryClearRange: CaseIterable, Identifiable {
         switch self {
         case .lastHour: "Last Hour"
         case .today: "Today"
+        case .todayAndYesterday: "Today and Yesterday"
         case .all: "All History"
         }
     }
@@ -64,6 +66,8 @@ enum HistoryClearRange: CaseIterable, Identifiable {
         switch self {
         case .lastHour: now.addingTimeInterval(-60 * 60)
         case .today: calendar.startOfDay(for: now)
+        case .todayAndYesterday:
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) ?? calendar.startOfDay(for: now)
         case .all: .distantPast
         }
     }

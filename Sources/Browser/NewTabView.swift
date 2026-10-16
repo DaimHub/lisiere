@@ -6,6 +6,7 @@ struct NewTabView: View {
     let browser: BrowserModel
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
+    @AppStorage(NewTabPage.storageKey) private var page = NewTabPage.startPage
 
     private let horizontalPadding: CGFloat = 32
     private let tileSpacing: CGFloat = 8
@@ -20,28 +21,53 @@ struct NewTabView: View {
         ZStack {
             NewTabBackground()
 
-            ScrollView {
-                VStack(spacing: 28) {
+            if page == .startPage {
+                startPage
+            }
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { contentWidth = $0 }
+    }
+
+    private var startPage: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                if browser.isPrivate {
+                    privateHeading
+                } else {
                     TimelineView(.everyMinute) { context in
                         Text(Self.greeting(for: context.date))
                             .font(.system(size: 28, weight: .medium))
                             .tracking(-0.7)
                             .foregroundStyle(.primary.opacity(0.85))
                     }
-
-                    searchField
-
-                    favorites
                 }
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, 48)
-                .frame(maxWidth: .infinity)
-                .containerRelativeFrame(.vertical, alignment: .center) { height, _ in height }
+
+                searchField
+
+                favorites
             }
-            .scrollIndicators(.never)
-            .scrollBounceBehavior(.basedOnSize)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical, alignment: .center) { height, _ in height }
         }
-        .onGeometryChange(for: CGFloat.self, of: \.size.width) { contentWidth = $0 }
+        .scrollIndicators(.never)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var privateHeading: some View {
+        VStack(spacing: 10) {
+            Text("Private Browsing")
+                .font(.system(size: 28, weight: .medium))
+                .tracking(-0.7)
+                .foregroundStyle(.primary.opacity(0.85))
+            Text("Pages you visit in this window aren’t added to history, and their cookies and website data are "
+                 + "removed when you close it. Downloads and bookmarks are kept.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+        }
     }
 
     private var searchField: some View {

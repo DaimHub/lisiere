@@ -45,14 +45,16 @@ final class SessionStore {
         weak var browser: BrowserModel?
     }
 
-    /// Pass `nil` to keep nothing between launches.
-    init(file: StoreFile? = .applicationSupport(named: "Session.plist")) {
+    /// Pass `nil` to keep nothing between launches. Without `restoresWindows`, the windows open when the app quit
+    /// wait to be reopened from the History menu instead of reopening on launch.
+    init(file: StoreFile? = .applicationSupport(named: "Session.plist"), restoresWindows: Bool = true) {
         self.file = file
         // Read right away, since the first window restores the session as soon as it appears.
         let saved = file?.readNow().flatMap { try? PropertyListDecoder().decode(SessionSnapshot.self, from: $0) }
             ?? SessionSnapshot()
-        pendingWindows = saved.windows
-        reopenableWindows = saved.windows.isEmpty ? saved.closedWindows : []
+        pendingWindows = restoresWindows ? saved.windows : []
+        reopenableWindows = !restoresWindows && !saved.windows.isEmpty ? saved.windows
+            : saved.windows.isEmpty ? saved.closedWindows : []
         _ = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                    queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveBeforeQuitting() }
@@ -110,6 +112,12 @@ final class SessionStore {
         windowsBeingOpened += windows.count
         scheduleSave()
         return windows.count
+    }
+
+    /// Forgets the windows waiting to be reopened, for when all history is cleared.
+    func forgetClosedWindows() {
+        reopenableWindows = []
+        scheduleSave()
     }
 
     /// Saves again whenever a window's tabs, their addresses or titles, or its selected tab change.

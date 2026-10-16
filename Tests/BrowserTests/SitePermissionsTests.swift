@@ -59,6 +59,30 @@ final class SitePermissionsTests: XCTestCase {
         XCTAssertNil(permissions.decision(for: [.downloads], on: "example.com"))
     }
 
+    func testCameraAndMicrophoneAnswersAreSavedButDownloadsArent() async {
+        let suiteName = "dev.athas.browser.tests.permissions"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let permissions = SitePermissions(defaults: defaults)
+        _ = await permissions.decide([.camera, .microphone], on: "https://meet.example") { true }
+        _ = await permissions.decide([.downloads], on: "example.com") { true }
+        permissions.setDecision(false, for: .microphone, on: "https://meet.example")
+        _ = await permissions.decide([.camera], on: "https://video.example") { false }
+
+        let relaunched = SitePermissions(defaults: defaults)
+
+        XCTAssertEqual(relaunched.mediaDecisions, [
+            SitePermissions.SiteDecisions(site: "https://meet.example", camera: true, microphone: false),
+            SitePermissions.SiteDecisions(site: "https://video.example", camera: false, microphone: nil),
+        ])
+        XCTAssertNil(relaunched.decision(for: [.downloads], on: "example.com"))
+
+        relaunched.removeDecisions(on: "https://meet.example")
+        XCTAssertEqual(SitePermissions(defaults: defaults).mediaDecisions.map(\.site), ["https://video.example"])
+        relaunched.removeAllMediaDecisions()
+        XCTAssertTrue(SitePermissions(defaults: defaults).mediaDecisions.isEmpty)
+    }
+
     func testDialogsCanBeBlockedAfterTheFirst() {
         var dialogs = DialogLimiter()
         XCTAssertFalse(dialogs.offersBlocking)
