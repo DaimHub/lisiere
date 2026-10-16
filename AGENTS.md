@@ -11,6 +11,7 @@
 ## Architecture and interface
 
 - Preserve native SwiftUI/AppKit/WebKit patterns and BrowserChrome layout values unless a redesign is requested.
+- Always use the transparent `Mascot-*` artwork on the new-tab page, in both palettes and appearances. Do not add a background behind it or use the `Dock-*` icon variants there.
 - Keep navigation and tab state in BrowserModel/BrowserTab, page callbacks in PageDelegate, and persistence in existing stores.
 - Use Product Design for UI work and inspect the built native app. Do not substitute web prototypes for native screens.
 - Do not touch another installed browser's profile, credentials, bookmarks, or active windows.

@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 struct NewTabView: View {
-    @Environment(\.colorScheme) private var colorScheme
     let bookmarks: BookmarkStore
     let browser: BrowserModel
     let focusAddress: () -> Void
@@ -42,7 +41,6 @@ struct NewTabView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 120, height: 120)
-                            .background(mascotBackground, in: RoundedRectangle(cornerRadius: 28))
                             .accessibilityHidden(true)
                         TimelineView(.everyMinute) { context in
                             Text(Self.greeting(for: context.date))
@@ -64,12 +62,6 @@ struct NewTabView: View {
         }
         .scrollIndicators(.never)
         .scrollBounceBehavior(.basedOnSize)
-    }
-
-    private var mascotBackground: Color {
-        if mascotPalette == .white { return .black }
-        // Keep the selected black artwork readable on the dark start page.
-        return colorScheme == .dark ? .white : .clear
     }
 
     private var privateHeading: some View {
