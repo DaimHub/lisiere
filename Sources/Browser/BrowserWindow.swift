@@ -370,10 +370,6 @@ struct BrowserWindow: View {
             .help("Profile: \(profiles.name(profileID))")
             .accessibilityLabel("Profile: \(profiles.name(profileID))")
 
-            if browser.isPrivate {
-                privateLabel
-            }
-
             HStack(spacing: 7) {
                 Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
@@ -397,6 +393,10 @@ struct BrowserWindow: View {
                     .strokeBorder(addressIsFocused ? accent.opacity(0.7) : Color.clear, lineWidth: 1)
             }
             .anchorPreference(key: AddressBarFrameKey.self, value: .bounds) { $0 }
+
+            if browser.isPrivate {
+                privateLabel
+            }
 
             if !browser.downloads.items.isEmpty {
                 DownloadsButton(downloads: browser.downloads)
