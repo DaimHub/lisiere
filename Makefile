@@ -11,7 +11,7 @@ build: generate
 	xcodebuild -packageAuthorizationProvider netrc -project Lisiere.xcodeproj -scheme Lisiere -configuration Release \
 		-derivedDataPath "$(DERIVED_DATA)" -destination "platform=macOS,arch=$(ARCH)" \
 		CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-		CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO CODE_SIGN_ENTITLEMENTS=Config/Browser-Local.entitlements build
+		CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO BROWSER_ENTITLEMENTS=Config/Browser-Local.entitlements build
 
 test: generate
 	xcodebuild -packageAuthorizationProvider netrc -project Lisiere.xcodeproj -scheme Lisiere -configuration Debug \

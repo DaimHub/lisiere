@@ -112,8 +112,7 @@ struct ProfileAccentPicker: View {
                     .frame(width: 14, height: 14)
                 Text(option.title).lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
+                Image(browserIcon: .checkmark, size: 10)
                     .opacity(selection == option ? 1 : 0)
             }
             .font(.system(size: 12, weight: .medium))

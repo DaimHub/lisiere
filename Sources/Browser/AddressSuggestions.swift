@@ -160,8 +160,7 @@ struct AddressSuggestionList: View {
                                             : AnyShapeStyle(.secondary))
             Spacer(minLength: 0)
             if suggestion.isBookmarked {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 10))
+                Image(browserIcon: .bookmarkSelected, size: 10)
                     .foregroundStyle(isSelected ? AnyShapeStyle(Color(nsColor: .alternateSelectedControlTextColor))
                                                 : AnyShapeStyle(.secondary))
             }

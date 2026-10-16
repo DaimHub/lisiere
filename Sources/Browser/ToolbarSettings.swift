@@ -16,9 +16,9 @@ struct ToolbarSettings: View {
                             HStack(spacing: 0) {
                                 ForEach(entry.items) { item in
                                     if item == .address {
-                                        Label("Address", systemImage: item.symbol).frame(width: 110)
+                                        Label("Address", browserIcon: item.icon).frame(width: 110)
                                     } else {
-                                        Image(systemName: item.symbol).frame(width: 30)
+                                        Image(browserIcon: item.icon).frame(width: 30)
                                     }
                                 }
                             }
@@ -41,8 +41,8 @@ struct ToolbarSettings: View {
             HStack {
                 Text("Shown in Toolbar").font(.headline)
                 Spacer()
-                Label("Group", systemImage: "link")
-                Label("Separate", systemImage: "rectangle.split.3x1")
+                Label("Group", browserIcon: .link)
+                Label("Separate", browserIcon: .ungroup)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -59,9 +59,9 @@ struct ToolbarSettings: View {
                                 preferences.toolbarLayout.add(item)
                             } label: {
                                 HStack {
-                                    Label(item.title, systemImage: item.symbol)
+                                    Label(item.title, browserIcon: item.icon)
                                     Spacer()
-                                    Image(systemName: "plus")
+                                    Image(browserIcon: .add)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }

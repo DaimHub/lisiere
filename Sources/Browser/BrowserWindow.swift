@@ -367,8 +367,8 @@ struct BrowserWindow: View {
 
     private func actionButton(_ item: BrowserToolbarItem) -> some View {
         Button { performToolbarAction(item) } label: {
-            Image(systemName: actionSymbol(item))
-                .contentTransition(.symbolEffect(.replace))
+            Image(browserIcon: actionIcon(item))
+                .contentTransition(.opacity)
         }
         .buttonStyle(ChromeIconButtonStyle(size: 30))
         .disabled(toolbarActionDisabled(item))
@@ -388,8 +388,8 @@ struct BrowserWindow: View {
         default: item.title
         }
     }
-    private func actionSymbol(_ item: BrowserToolbarItem) -> String {
-        item == .reload && browser.activeTab?.isLoading == true ? "xmark" : item.symbol
+    private func actionIcon(_ item: BrowserToolbarItem) -> BrowserIcon {
+        item == .reload && browser.activeTab?.isLoading == true ? .close : item.icon
     }
     private func toolbarActionDisabled(_ item: BrowserToolbarItem) -> Bool {
         switch item {
@@ -426,10 +426,10 @@ struct BrowserWindow: View {
                 Menu {
                     profileMenuContents
                 } label: {
-                    Label("Profiles", systemImage: BrowserToolbarItem.profile.symbol)
+                    Label("Profiles", browserIcon: BrowserToolbarItem.profile.icon)
                 }
             } else {
-                Label("Private Window", systemImage: "eyeglasses")
+                Label("Private Window", browserIcon: .privateWindow)
             }
             ForEach([BrowserToolbarItem.back, .forward, .reload, .address]) { menuAction($0) }
             Divider()
@@ -438,10 +438,10 @@ struct BrowserWindow: View {
             ForEach([BrowserToolbarItem.history, .downloads, .bookmarks, .settings]) { menuAction($0) }
             Divider()
             Button { isCustomizingToolbar = true } label: {
-                Label("Customize Toolbar…", systemImage: "slider.horizontal.3")
+                Label("Customize Toolbar…", browserIcon: .sliders)
             }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(browserIcon: .more)
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
@@ -452,7 +452,7 @@ struct BrowserWindow: View {
 
     private func menuAction(_ item: BrowserToolbarItem) -> some View {
         Button { performToolbarAction(item) } label: {
-            Label(actionTitle(item), systemImage: actionSymbol(item))
+            Label(actionTitle(item), browserIcon: actionIcon(item))
         }
         .disabled(toolbarActionDisabled(item))
     }
@@ -462,7 +462,7 @@ struct BrowserWindow: View {
         Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
         ForEach(profiles.availableProfiles) { profile in
             Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
-                Label(profile.name, systemImage: profile.icon.rawValue)
+                Label(profile.name, browserIcon: profile.icon.browserIcon)
             }
         }
         Divider()
@@ -474,7 +474,7 @@ struct BrowserWindow: View {
 
     private func profileMenu(compact: Bool) -> some View {
         ToolbarProfileMenu(name: profileID.map(profiles.name) ?? "Private",
-                           symbol: profileID.flatMap(profiles.profile)?.icon.rawValue ?? "person.crop.circle",
+                           icon: profileID.flatMap(profiles.profile)?.icon.browserIcon ?? .profile,
                            compact: compact, accent: accent) {
             profileMenuContents
         }
@@ -482,8 +482,7 @@ struct BrowserWindow: View {
 
     private func addressControl(grouped: Bool) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: browser.activeTab?.isSecure == true ? "lock.fill" : "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+            Image(browserIcon: browser.activeTab?.isSecure == true ? .secure : .search, size: 11)
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
             AddressField(text: $address, isFocused: $addressIsFocused, completionStart: completionStart,
@@ -525,7 +524,7 @@ struct BrowserWindow: View {
     }
 
     private func privateLabel(grouped: Bool) -> some View {
-        Label("Private", systemImage: "eyeglasses")
+        Label("Private", browserIcon: .privateWindow)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(accent)
             .padding(.horizontal, 10)
@@ -553,7 +552,7 @@ struct BrowserWindow: View {
                 }
                 .disabled(browser.isPrivate)
             } label: {
-                Image(systemName: isBlocking ? "shield.lefthalf.filled" : "shield.slash")
+                Image(browserIcon: isBlocking ? .shield : .shieldOff)
                     .foregroundStyle(isBlocking ? Color.secondary : Color.orange)
             }
             .menuStyle(.button)
@@ -580,7 +579,7 @@ struct BrowserWindow: View {
                     Divider()
                     Button("Show Passwords…") { openSettings() }
                 } label: {
-                    Image(systemName: "key.fill")
+                    Image(browserIcon: .key)
                         .foregroundStyle(.secondary)
                 }
                 .menuStyle(.button)
@@ -598,9 +597,9 @@ struct BrowserWindow: View {
         if !browser.isPrivate, let tab = browser.activeTab, !tab.isNewTab, let url = tab.url {
             let isBookmarked = bookmarks.isBookmarked(url)
             Button { bookmarks.toggle(title: tab.pageTitle, url: url) } label: {
-                Image(systemName: isBookmarked ? "star.fill" : "star")
+                Image(browserIcon: isBookmarked ? .bookmarkSelected : .bookmark)
                     .foregroundStyle(isBookmarked ? Color.yellow : Color.secondary)
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(.opacity)
             }
             .buttonStyle(ChromeIconButtonStyle(size: 26))
             .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark This Page (⌘D)")

@@ -228,8 +228,7 @@ struct ToolbarOutlineView: NSViewRepresentable {
                 let item = ToolbarMenuItem(title: "Group with \(target.entry.title)") { [weak self] in
                     self?.change { $0.group(node.id, with: target.id) }
                 }
-                item.image = NSImage(systemSymbolName: target.isGroup ? "rectangle.3.group" : target.entry.items[0].symbol,
-                                     accessibilityDescription: nil)
+                item.image = (target.isGroup ? BrowserIcon.group : target.entry.items[0].icon).nsImage()
                 menu.addItem(item)
             }
             if node.isGroup {
@@ -259,7 +258,7 @@ private final class ToolbarRowCell: NSTableCellView {
     init() {
         super.init(frame: .zero)
         identifier = Self.reuseID
-        handle.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Drag to reorder")
+        handle.image = BrowserIcon.drag.nsImage(accessibilityDescription: "Drag to reorder")
         handle.contentTintColor = .tertiaryLabelColor
         handle.toolTip = "Drag to reorder; drag left to move out of a group"
         symbol.contentTintColor = .controlAccentColor
@@ -269,9 +268,9 @@ private final class ToolbarRowCell: NSTableCellView {
         // AppKit derives the native drag image from these outlets.
         textField = label
         imageView = symbol
-        for (button, name) in [(up, "chevron.up"), (down, "chevron.down"), (group, "link"),
-                               (separate, "rectangle.split.3x1"), (remove, "minus.circle")] {
-            button.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        for (button, icon) in [(up, BrowserIcon.chevronUp), (down, .chevronDown), (group, .link),
+                               (separate, .ungroup), (remove, .remove)] {
+            button.image = icon.nsImage()
             button.isBordered = false
             button.bezelStyle = .regularSquare
             button.imagePosition = .imageOnly
@@ -297,8 +296,7 @@ private final class ToolbarRowCell: NSTableCellView {
 
     /// Only update values and handlers: keep controls, images and Auto Layout constraints reusable during dragging.
     func configure(_ node: ToolbarOutlineView.Node, coordinator: ToolbarOutlineView.Coordinator) {
-        symbol.image = NSImage(systemSymbolName: node.isGroup ? "rectangle.3.group" : node.entry.items[0].symbol,
-                               accessibilityDescription: nil)
+        symbol.image = (node.isGroup ? BrowserIcon.group : node.entry.items[0].icon).nsImage()
         label.stringValue = node.entry.title
         label.font = .systemFont(ofSize: 13, weight: node.isGroup ? .semibold : .regular)
         label.toolTip = node.entry.title

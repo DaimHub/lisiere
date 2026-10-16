@@ -6,6 +6,7 @@ struct DownloadsButton: View {
     let downloads: DownloadManager
     var controlSize: CGFloat = 34
     @State private var isShowingList = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button { isShowingList.toggle() } label: {
@@ -19,9 +20,13 @@ struct DownloadsButton: View {
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 0.2), value: downloads.progress)
                 }
-                Image(systemName: downloads.isDownloading ? "arrow.down" : "arrow.down.circle")
-                    .font(.system(size: downloads.isDownloading ? 8.5 : 14, weight: .semibold))
-                    .symbolEffect(.bounce, value: downloads.items.count)
+                Image(browserIcon: downloads.isDownloading ? .download : .downloads,
+                      size: downloads.isDownloading ? 8.5 : 14)
+                    .phaseAnimator([CGFloat(0), -2, 0], trigger: downloads.items.count) { icon, offset in
+                        icon.offset(y: reduceMotion ? 0 : offset)
+                    } animation: { _ in
+                        .easeOut(duration: 0.12)
+                    }
             }
             .frame(width: 17, height: 17)
         }
@@ -108,14 +113,14 @@ private struct DownloadRow: View {
 
             if item.state == .downloading {
                 Button { downloads.cancel(item) } label: {
-                    Image(systemName: "xmark")
+                    Image(browserIcon: .close)
                 }
                 .buttonStyle(ChromeIconButtonStyle(size: 24))
                 .help("Cancel Download")
                 .accessibilityLabel("Cancel \(item.name)")
             } else if item.state == .finished {
                 Button { downloads.reveal(item) } label: {
-                    Image(systemName: "magnifyingglass")
+                    Image(browserIcon: .search)
                 }
                 .buttonStyle(ChromeIconButtonStyle(size: 24))
                 .help("Show in Finder")
@@ -149,8 +154,7 @@ private struct DownloadRow: View {
                 .resizable()
                 .scaledToFit()
         } else {
-            Image(systemName: "doc")
-                .font(.system(size: 18, weight: .light))
+            Image(browserIcon: .file, size: 18)
                 .foregroundStyle(.secondary)
         }
     }

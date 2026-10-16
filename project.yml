@@ -11,6 +11,9 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
+  Hugeicons:
+    url: https://github.com/iSapozhnik/hugeicons-swift
+    exactVersion: 4.1.7
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     # The release workflow downloads Sparkle's signing tools for this same version.
@@ -19,6 +22,8 @@ targetTemplates:
   BrowserApp:
     type: application
     platform: macOS
+    dependencies:
+      - package: Hugeicons
     sources:
       - path: Sources/Browser
       - path: LICENSE
@@ -32,6 +37,8 @@ targetTemplates:
         type: file
         buildPhase: resources
       - path: Resources/Brand/LICENSE-bloub.txt
+        buildPhase: resources
+      - path: Resources/Brand/LICENSE-hugeicons.txt
         buildPhase: resources
     settings:
       base:
@@ -111,7 +118,9 @@ targets:
         SUEnableInstallerLauncherService: true
     settings:
       base:
-        CODE_SIGN_ENTITLEMENTS: Config/Browser$(PASSKEYS_ENTITLEMENTS_SUFFIX_$(BROWSER_PASSKEYS)).entitlements
+        # Scope local signing overrides to the app, never Swift package resource bundles.
+        BROWSER_ENTITLEMENTS: Config/Browser$(PASSKEYS_ENTITLEMENTS_SUFFIX_$(BROWSER_PASSKEYS)).entitlements
+        CODE_SIGN_ENTITLEMENTS: $(BROWSER_ENTITLEMENTS)
         SPARKLE_FEED_URL: https://github.com/DaimHub/lisiere/releases/latest/download/appcast.xml
         # PLACEHOLDER, not a real key: replace it with the public key Sparkle's generate_keys prints (see
         # RELEASING.md). Updates stay off until it's set; the release workflow can also pass it in.

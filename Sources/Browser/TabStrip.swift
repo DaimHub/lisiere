@@ -312,8 +312,7 @@ private struct TabItem: View {
 
     private var closeButton: some View {
         Button(action: close) {
-            Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold))
+            Image(browserIcon: .close, size: 9)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
@@ -338,7 +337,7 @@ private struct TabIcon: View {
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             } else {
-                Image(systemName: "globe")
+                Image(browserIcon: .globe)
                     .resizable()
                     .scaledToFit()
                     .fontWeight(.light)
@@ -376,8 +375,7 @@ struct TabHoverCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 5) {
                     if tab.isSecure {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 8.5, weight: .semibold))
+                        Image(browserIcon: .secure, size: 8.5)
                     }
                     Text(subtitle)
                         .lineLimit(1)

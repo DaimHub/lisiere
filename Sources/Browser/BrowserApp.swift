@@ -196,8 +196,8 @@ private struct BrowserCommands: Commands {
                 Button {
                     profiles.activate(profile.id, in: browser, openWindow: openWindow)
                 } label: {
-                    if profile.id == profileID { Label(profile.name, systemImage: "checkmark") }
-                    else { Label(profile.name, systemImage: profile.icon.rawValue) }
+                    if profile.id == profileID { Label(profile.name, browserIcon: .checkmark) }
+                    else { Label(profile.name, browserIcon: profile.icon.browserIcon) }
                 }
             }
             Divider()

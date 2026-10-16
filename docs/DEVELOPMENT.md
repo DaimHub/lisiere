@@ -14,7 +14,7 @@
 
 Build commands use the netrc package authorization provider for public dependencies, avoiding an unnecessary Xcode keychain prompt. No credentials are required to fetch Sparkle.
 
-Ad hoc signatures have no Apple Team ID. As described in [Sparkle's integration guide](https://sparkle-project.org/documentation/), library validation otherwise rejects its framework at launch. `make build` selects `Config/Browser-Local.entitlements` only for the local build, retaining the app sandbox and other hardened-runtime protections. Developer ID archives keep `Config/Browser.entitlements`, with library validation enabled. Do not copy the local override into the release workflow.
+Ad hoc signatures have no Apple Team ID. As described in [Sparkle's integration guide](https://sparkle-project.org/documentation/), library validation otherwise rejects its framework at launch. `make build` sets the app-specific `BROWSER_ENTITLEMENTS` setting to `Config/Browser-Local.entitlements` only for the local build, retaining the app sandbox and other hardened-runtime protections. Developer ID archives keep `Config/Browser.entitlements`, with library validation enabled. Do not copy the local override into the release workflow.
 
 `make smoke` starts the local app for five seconds and fails if it exits, then terminates only the process it started. This catches dyld failures; it does not replace visual or browsing checks.
 
@@ -75,3 +75,9 @@ Preserve Lisière's identity, feed, attribution, and contribution policy during 
 `make build` needs no Apple account. Public notarized releases, Sparkle signing, and passkeys need separate credentials or entitlements described in RELEASING.md. No credentials are included here.
 
 The initial fork does not import Athas Browser data. Its distinct bundle identifier separates preferences, sandbox container, and WebKit data. Keep that separation when changing persistence.
+
+## Interface icons
+
+Hugeicons Free Stroke Rounded is provided by the MIT-licensed `iSapozhnik/hugeicons-swift` Swift package, pinned to 4.1.7 in `project.yml`. This is an unofficial Swift wrapper around the free Hugeicons catalog. Both app targets link it. `BrowserIcon.swift` owns semantic icon names and native template rendering; views use `Image(browserIcon:size:)` or `Label(_:browserIcon:)`, and AppKit uses `BrowserIcon.nsImage`. Copy package images before resizing so cached assets retain their original dimensions.
+
+Profile icon identifiers keep their historical raw values for on-disk compatibility. Only their `browserIcon` presentation changes. Favicons, mascots, Dock artwork and macOS-owned window controls keep their own artwork. Both builds include `Resources/Brand/LICENSE-hugeicons.txt`; no Pro assets are bundled.
