@@ -96,14 +96,15 @@ final class InterfaceColorTests: XCTestCase {
         let personal = try XCTUnwrap(profiles.context(for: BrowserProfile.initialID)).preferences
         let work = try profiles.create(name: "Work")
         let preferences = try XCTUnwrap(profiles.context(for: work.id)).preferences
-        let toolbarBefore = preferences.toolbarLayout.storedValue
+        let toolbarBefore = preferences.toolbarLayout
         let accentBefore = preferences.resolvedAccent
         preferences.appearance.interfaceColor = .custom
         preferences.appearance.customInterfaceColor = .red
         preferences.showsMascot = false
         personal.appearance.interfaceColor = .ocean
         XCTAssertTrue(personal.showsMascot)
-        XCTAssertEqual(preferences.toolbarLayout.storedValue, toolbarBefore)
+        // JSON object key order is unspecified; compare the layout, including stable group IDs.
+        XCTAssertEqual(preferences.toolbarLayout, toolbarBefore)
         XCTAssertEqual(preferences.resolvedAccent, accentBefore)
 
         let reopened = ProfileStore(root: root, defaults: defaults)
