@@ -134,29 +134,22 @@ private struct DownloadRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture(count: 2) { downloads.open(item) }
-        .contextMenu {
-            Button("Open") { downloads.open(item) }
-                .disabled(item.state != .finished)
-            Button("Show in Finder") { downloads.reveal(item) }
-                .disabled(item.state != .finished)
+        .browserContextMenu {
+            var actions: [BrowserContextAction] = [
+                .init(title: "Open", icon: .open, isEnabled: item.state == .finished) { downloads.open(item) },
+                .init(title: "Show in Finder", icon: .folder, isEnabled: item.state == .finished) { downloads.reveal(item) }
+            ]
             if item.state == .downloading {
-                Divider()
-                Button("Cancel Download") { downloads.cancel(item) }
+                actions += [.separator, .init(title: "Cancel Download", icon: .close) { downloads.cancel(item) }]
             }
+            return actions
         }
         .help(item.state == .finished ? "Double-click to open" : "")
     }
 
-    @ViewBuilder
     private var icon: some View {
-        if item.state == .finished, let url = item.destinationURL {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable()
-                .scaledToFit()
-        } else {
-            Image(browserIcon: .file, size: 18)
-                .foregroundStyle(.secondary)
-        }
+        Image(browserIcon: .file, size: 18)
+            .foregroundStyle(.secondary)
     }
 
     private var status: String {

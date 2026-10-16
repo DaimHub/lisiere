@@ -64,12 +64,17 @@ struct HistoryView: View {
             .frame(height: 28)
             .background(Color.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Menu("Clear History") {
+            Menu("Clear History", browserIcon: .trash) {
                 ForEach(HistoryClearRange.allCases) { range in
-                    Button(range.title) { clearRange = range }
+                    Button(range.title, browserIcon: .history) { clearRange = range }
                 }
             }
             .fixedSize()
+            .browserMenu {
+                HistoryClearRange.allCases.map { range in
+                    .init(title: range.title, icon: .history) { clearRange = range }
+                }
+            }
             .disabled(history.visits.isEmpty)
 
             Button("Done") { dismiss() }
@@ -107,16 +112,16 @@ struct HistoryView: View {
         .onTapGesture {
             open(entry.url, NSEvent.modifierFlags.contains(.command))
         }
-        .contextMenu {
-            Button("Open") { open(entry.url, false) }
-            Button("Open in New Tab") { open(entry.url, true) }
-            Divider()
-            Button("Copy Address") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(entry.url.absoluteString, forType: .string)
-            }
-            Divider()
-            Button("Delete") { delete(entry) }
+        .browserContextMenu {
+            [.init(title: "Open", icon: .open) { open(entry.url, false) },
+             .init(title: "Open in New Tab", icon: .add) { open(entry.url, true) },
+             .separator,
+             .init(title: "Copy Address", icon: .copy) {
+                 NSPasteboard.general.clearContents()
+                 NSPasteboard.general.setString(entry.url.absoluteString, forType: .string)
+             },
+             .separator,
+             .init(title: "Delete", icon: .trash) { delete(entry) }]
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)

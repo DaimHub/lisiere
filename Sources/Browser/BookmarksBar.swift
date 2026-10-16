@@ -30,7 +30,7 @@ struct BookmarksBar: View {
 
                 Menu {
                     ForEach(bookmarks.bookmarks) { bookmark in
-                        Button(bookmark.displayTitle) { open(bookmark) }
+                        Button(bookmark.displayTitle, browserIcon: .bookmark) { open(bookmark) }
                     }
                 } label: {
                     Image(browserIcon: .chevronDown, size: 10)
@@ -40,7 +40,12 @@ struct BookmarksBar: View {
                 .buttonStyle(ChromeIconButtonStyle(size: 24))
                 .fixedSize()
                 .help("All Bookmarks")
-            .accessibilityLabel("All bookmarks")
+                .accessibilityLabel("All bookmarks")
+                .browserMenu {
+                    bookmarks.bookmarks.map { bookmark in
+                        .init(title: bookmark.displayTitle, icon: .bookmark) { open(bookmark) }
+                    }
+                }
             }
         }
         .padding(.horizontal, BrowserChrome.edgeInset)
@@ -61,8 +66,8 @@ struct BookmarksBar: View {
         }
         .buttonStyle(BookmarkButtonStyle())
         .help(bookmark.url.absoluteString)
-        .contextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser,
-                                    rename: { renamingBookmarkID = bookmark.id }) }
+        .browserContextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser,
+                                    rename: { renamingBookmarkID = bookmark.id }).actions }
         .popover(isPresented: Binding(get: { renamingBookmarkID == bookmark.id },
                                       set: { if !$0 { renamingBookmarkID = nil } }),
                  arrowEdge: .bottom) {
@@ -86,25 +91,26 @@ struct BookmarksBar: View {
 }
 
 /// Actions shared by bookmarks in the bar and favorites on the new tab page.
-struct BookmarkMenu: View {
+@MainActor
+struct BookmarkMenu {
     let bookmark: Bookmark
     let bookmarks: BookmarkStore
     let browser: BrowserModel
-    var rename: (() -> Void)?
+    var rename: (@MainActor () -> Void)?
 
-    var body: some View {
-        Button("Open") { browser.open(bookmark.url) }
-        Button("Open in New Tab") { browser.open(bookmark.url, inNewTab: true) }
-        Divider()
-        Button("Copy Link") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(bookmark.url.absoluteString, forType: .string)
-        }
-        if let rename {
-            Button("Rename…", action: rename)
-        }
-        Divider()
-        Button("Delete Bookmark", role: .destructive) { bookmarks.remove(bookmark.id) }
+    var actions: [BrowserContextAction] {
+        var items: [BrowserContextAction] = [
+            .init(title: "Open", icon: .open) { browser.open(bookmark.url) },
+            .init(title: "Open in New Tab", icon: .add) { browser.open(bookmark.url, inNewTab: true) },
+            .separator,
+            .init(title: "Copy Link", icon: .copy) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(bookmark.url.absoluteString, forType: .string)
+            }
+        ]
+        if let rename { items.append(.init(title: "Rename…", icon: .rename, action: rename)) }
+        items += [.separator, .init(title: "Delete Bookmark", icon: .trash, role: .destructive) { bookmarks.remove(bookmark.id) }]
+        return items
     }
 }
 

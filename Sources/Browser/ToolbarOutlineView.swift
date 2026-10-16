@@ -233,10 +233,10 @@ struct ToolbarOutlineView: NSViewRepresentable {
             }
             if node.isGroup {
                 menu.addItem(.separator())
-                menu.addItem(ToolbarMenuItem(title: "Separate All Buttons") { [weak self] in self?.change { $0.ungroup(node.id) } })
+                menu.addItem(ToolbarMenuItem(title: "Separate All Buttons", icon: .ungroup) { [weak self] in self?.change { $0.ungroup(node.id) } })
             } else if let item = node.entry.items.first, node.parentID != nil {
                 menu.addItem(.separator())
-                menu.addItem(ToolbarMenuItem(title: "Move Out of Group") { [weak self] in self?.change { $0.separate(item) } })
+                menu.addItem(ToolbarMenuItem(title: "Move Out of Group", icon: .ungroup) { [weak self] in self?.change { $0.separate(item) } })
             }
             return menu
         }
@@ -342,10 +342,12 @@ private final class ToolbarActionButton: NSButton {
 @MainActor
 private final class ToolbarMenuItem: NSMenuItem {
     let actionHandler: @MainActor () -> Void
-    init(title: String, action: @escaping @MainActor () -> Void) {
+    init(title: String, icon: BrowserIcon? = nil, action: @escaping @MainActor () -> Void) {
         actionHandler = action
         super.init(title: title, action: #selector(invoke), keyEquivalent: "")
         target = self
+        image = icon?.nsImage()
+        if icon != nil { BrowserMenuImages.keepImageVisible(self) }
     }
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func invoke() { actionHandler() }

@@ -208,6 +208,7 @@ final class BrowserAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Each regular profile and private window owns its native appearance.
         NSApp.appearance = nil
+        BrowserMenuImages.shared.start()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

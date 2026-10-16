@@ -57,12 +57,28 @@ enum BrowserIcon: CaseIterable {
     case flask
     case bookmark
     case bookmarkSelected
+    case window
+    case reopen
+    case printPage
+    case zoomIn
+    case zoomOut
+    case actualSize
+    case horizontalTabs
+    case verticalTabs
+    case open
+    case rename
+    case trash
+    case folder
+    case spelling
+    case selection
+    case speak
+    case stop
 
     var asset: HugeiconsAsset {
         switch self {
         case .back: Hugeicons.arrowLeft01
         case .forward: Hugeicons.arrowRight01
-        case .reload: Hugeicons.reload
+        case .reload: Hugeicons.refresh
         case .search: Hugeicons.search01
         case .add: Hugeicons.add01
         case .home: Hugeicons.home01
@@ -94,8 +110,8 @@ enum BrowserIcon: CaseIterable {
         case .warning: Hugeicons.alert02
         case .wifiOff: Hugeicons.wifiOff02
         case .secureError: Hugeicons.securityWarning
-        case .appearance: Hugeicons.browser
-        case .privacy: Hugeicons.hand
+        case .appearance: Hugeicons.paintBoard
+        case .privacy: Hugeicons.securityLock
         case .sliders: Hugeicons.slidersHorizontal
         case .group: Hugeicons.layoutThreeColumn
         case .link: Hugeicons.link01
@@ -112,7 +128,46 @@ enum BrowserIcon: CaseIterable {
         case .flask: Hugeicons.testTube01
         case .bookmark: Hugeicons.bookmark02
         case .bookmarkSelected: Hugeicons.bookmarkCheck02
+        case .window: Hugeicons.browser
+        case .reopen: Hugeicons.arrowTurnBackward
+        case .printPage: Hugeicons.printer
+        case .zoomIn: Hugeicons.zoomInArea
+        case .zoomOut: Hugeicons.zoomOutArea
+        case .actualSize: Hugeicons.arrowExpand
+        case .horizontalTabs: Hugeicons.layoutTop
+        case .verticalTabs: Hugeicons.layoutLeft
+        case .open: Hugeicons.arrowUpRight01
+        case .rename: Hugeicons.edit02
+        case .trash: Hugeicons.delete02
+        case .folder: Hugeicons.folderSearch
+        case .spelling: Hugeicons.textCheck
+        case .selection: Hugeicons.textSelection
+        case .speak: Hugeicons.volumeHigh
+        case .stop: Hugeicons.stop
         }
+    }
+
+    /// macOS expands Settings tab images to a 32-point slot, ignoring their requested size.
+    /// Keep 24-point artwork centered inside that slot instead of stretching it to fill.
+    @MainActor
+    func settingsTabImage() -> NSImage {
+        let artwork = nsImage(size: 24)
+        let image = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { bounds in
+            artwork.draw(in: bounds.insetBy(dx: 4, dy: 4))
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// Give menu artwork a stable native identity without changing package assets.
+    @MainActor
+    func menuImage() -> NSImage {
+        let name = NSImage.Name("Lisiere.Hugeicons.\(self)")
+        if let image = NSImage(named: name) { return image }
+        let image = nsImage()
+        image.setName(name)
+        return image
     }
 
     /// Copy before resizing: the package caches its original 24-point template image.
@@ -139,5 +194,87 @@ extension Label where Title == Text, Icon == Image {
     @MainActor
     init(_ title: String, browserIcon: BrowserIcon, size: CGFloat = 14) {
         self.init { Text(title) } icon: { Image(browserIcon: browserIcon, size: size) }
+    }
+
+    @MainActor
+    init(_ title: String, settingsIcon: BrowserIcon) {
+        self.init { Text(title) } icon: {
+            Image(nsImage: settingsIcon.settingsTabImage()).renderingMode(.template)
+        }
+    }
+}
+
+typealias BrowserMenuLabel = Label<Text, Image>
+
+extension Label where Title == Text, Icon == Image {
+    @MainActor
+    init(title: String, icon: BrowserIcon) {
+        self.init { Text(title) } icon: {
+            Image(nsImage: icon.menuImage())
+        }
+    }
+}
+
+extension Button where Label == BrowserMenuLabel {
+    @MainActor
+    init(_ title: String, browserIcon: BrowserIcon, role: ButtonRole? = nil,
+         action: @escaping () -> Void) {
+        self.init(role: role, action: action) {
+            BrowserMenuLabel(title: title, icon: browserIcon)
+        }
+    }
+}
+
+extension Menu where Label == BrowserMenuLabel {
+    @MainActor
+    init(_ title: String, browserIcon: BrowserIcon, @ViewBuilder content: () -> Content) {
+        self.init(content: content) { BrowserMenuLabel(title: title, icon: browserIcon) }
+    }
+}
+
+/// macOS 27 hides menu images by default. Keep native image slots visible instead of
+/// forcing a SwiftUI title-and-icon layout, which rasterizes the label before selection.
+@MainActor
+final class BrowserMenuImages: NSObject {
+    static let shared = BrowserMenuImages()
+    private var isUpdating = false
+    private var isStarted = false
+    func start() {
+        guard !isStarted else { return }
+        isStarted = true
+        if #available(macOS 27.0, *) {
+            for name in [NSMenu.didAddItemNotification, NSMenu.didChangeItemNotification, NSMenu.didBeginTrackingNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(update(_:)), name: name, object: nil)
+            }
+        }
+    }
+    @objc private func update(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu else { return }
+        guard !isUpdating else { return }
+        isUpdating = true
+        showImages(in: menu)
+        isUpdating = false
+    }
+    static func keepImageVisible(_ item: NSMenuItem) {
+        if #available(macOS 27.0, *) {
+            // Public macOS 27 property, accessed through KVC so Xcode 26 CI can still compile.
+            let key = "preferredImageVisibility"
+            let visible = 1 // NSMenuItem.ImageVisibility.visible
+            if item.value(forKey: key) as? Int != visible { item.setValue(visible, forKey: key) }
+        }
+    }
+    func showImages(in menu: NSMenu) {
+        if #available(macOS 27.0, *) {
+            for item in menu.items {
+                if let image = item.image, image.name()?.hasPrefix("Lisiere.Hugeicons.") == true {
+                    Self.keepImageVisible(item)
+                    if !image.isTemplate, let copy = image.copy() as? NSImage {
+                        copy.isTemplate = true
+                        item.image = copy
+                    }
+                }
+                if let submenu = item.submenu { showImages(in: submenu) }
+            }
+        }
     }
 }

@@ -358,9 +358,10 @@ struct BrowserWindow: View {
         case .allActions: allActionsMenu
         default:
             actionButton(item)
-                .contextMenu {
-                    if item == .back { historyMenu(for: Array((browser.activeTab?.backList ?? []).reversed())) }
-                    if item == .forward { historyMenu(for: browser.activeTab?.forwardList ?? []) }
+                .browserContextMenu {
+                    if item == .back { return historyMenu(for: Array((browser.activeTab?.backList ?? []).reversed())) }
+                    if item == .forward { return historyMenu(for: browser.activeTab?.forwardList ?? []) }
+                    return []
                 }
         }
     }
@@ -421,26 +422,7 @@ struct BrowserWindow: View {
     }
 
     private var allActionsMenu: some View {
-        Menu {
-            if !browser.isPrivate {
-                Menu {
-                    profileMenuContents
-                } label: {
-                    Label("Profiles", browserIcon: BrowserToolbarItem.profile.icon)
-                }
-            } else {
-                Label("Private Window", browserIcon: .privateWindow)
-            }
-            ForEach([BrowserToolbarItem.back, .forward, .reload, .address]) { menuAction($0) }
-            Divider()
-            ForEach([BrowserToolbarItem.newTab, .home, .privateWindow]) { menuAction($0) }
-            Divider()
-            ForEach([BrowserToolbarItem.history, .downloads, .bookmarks, .settings]) { menuAction($0) }
-            Divider()
-            Button { isCustomizingToolbar = true } label: {
-                Label("Customize Toolbar…", browserIcon: .sliders)
-            }
-        } label: {
+        Menu { BrowserMenuContent(actions: allActions) } label: {
             Image(browserIcon: .more)
         }
         .menuStyle(.button)
@@ -448,36 +430,44 @@ struct BrowserWindow: View {
         .buttonStyle(ChromeIconButtonStyle(size: 30))
         .help("All Actions")
         .accessibilityLabel("All Actions")
+        .browserMenu { allActions }
     }
 
-    private func menuAction(_ item: BrowserToolbarItem) -> some View {
-        Button { performToolbarAction(item) } label: {
-            Label(actionTitle(item), browserIcon: actionIcon(item))
-        }
-        .disabled(toolbarActionDisabled(item))
-    }
-
-    @ViewBuilder
-    private var profileMenuContents: some View {
-        Text("Profile: \(profileID.map(profiles.name) ?? "Private")")
-        ForEach(profiles.availableProfiles) { profile in
-            Button { profiles.activate(profile.id, in: browser, openWindow: openWindow) } label: {
-                Label(profile.name, browserIcon: profile.icon.browserIcon)
+    private var allActions: [BrowserContextAction] {
+        var actions: [BrowserContextAction] = [browser.isPrivate
+            ? .init(title: "Private Window", icon: .privateWindow, isEnabled: false)
+            : .init(title: "Profiles", icon: .profile, children: profileActions)]
+        for group: [BrowserToolbarItem] in [[.back, .forward, .reload, .address], [.newTab, .home, .privateWindow], [.history, .downloads, .bookmarks, .settings]] {
+            actions += group.map { item in
+                .init(title: actionTitle(item), icon: actionIcon(item), isEnabled: !toolbarActionDisabled(item)) {
+                    performToolbarAction(item)
+                }
             }
+            actions.append(.separator)
         }
-        Divider()
-        Button("Manage Profiles…") {
+        actions.append(.init(title: "Customize Toolbar…", icon: .sliders) { isCustomizingToolbar = true })
+        return actions
+    }
+
+    private var profileActions: [BrowserContextAction] {
+        var actions: [BrowserContextAction] = [.init(title: "Profile: \(profileID.map(profiles.name) ?? "Private")", icon: nil, isEnabled: false)]
+        actions += profiles.availableProfiles.map { profile in
+            .init(title: profile.name, icon: profile.icon.browserIcon) { profiles.activate(profile.id, in: browser, openWindow: openWindow) }
+        }
+        actions += [.separator, .init(title: "Manage Profiles…", icon: .profiles) {
             profiles.settingsTab = .profiles
             openSettings()
-        }
+        }]
+        return actions
     }
 
     private func profileMenu(compact: Bool) -> some View {
         ToolbarProfileMenu(name: profileID.map(profiles.name) ?? "Private",
                            icon: profileID.flatMap(profiles.profile)?.icon.browserIcon ?? .profile,
                            compact: compact, accent: accent) {
-            profileMenuContents
+            BrowserMenuContent(actions: profileActions)
         }
+        .browserMenu { profileActions }
     }
 
     private func addressControl(grouped: Bool) -> some View {
@@ -544,7 +534,8 @@ struct BrowserWindow: View {
             let site = ContentBlocker.site(host)
             Menu {
                 Text(isBlocking ? "Trackers are blocked on \(site)" : "Tracker blocking is off for \(site)")
-                Button(isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site") {
+                Button(isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
+                       browserIcon: isBlocking ? .shieldOff : .shield) {
                     Task {
                         await contentBlocker.setBlocking(!isBlocking, on: host)
                         tab.reload()
@@ -561,6 +552,16 @@ struct BrowserWindow: View {
             .fixedSize()
             .help(isBlocking ? "Trackers Blocked" : "Tracker Blocking Off for This Site")
             .accessibilityLabel(isBlocking ? "Trackers blocked" : "Tracker blocking off")
+            .browserMenu {
+                [.init(title: isBlocking ? "Trackers are blocked on \(site)" : "Tracker blocking is off for \(site)", icon: nil, isEnabled: false),
+                 .init(title: isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
+                       icon: isBlocking ? .shieldOff : .shield, isEnabled: !browser.isPrivate) {
+                     Task {
+                         await contentBlocker.setBlocking(!isBlocking, on: host)
+                         tab.reload()
+                     }
+                 }]
+            }
         }
     }
 
@@ -572,12 +573,12 @@ struct BrowserWindow: View {
             if !accounts.isEmpty {
                 Menu {
                     ForEach(accounts) { account in
-                        Button(account.username.isEmpty ? "Fill Password" : "Fill “\(account.username)”") {
+                        Button(account.username.isEmpty ? "Fill Password" : "Fill “\(account.username)”", browserIcon: .key) {
                             Task { await PasswordAutofill.fill(account, in: tab, from: passwords) }
                         }
                     }
                     Divider()
-                    Button("Show Passwords…") { openSettings() }
+                    Button("Show Passwords…", browserIcon: .key) { openSettings() }
                 } label: {
                     Image(browserIcon: .key)
                         .foregroundStyle(.secondary)
@@ -588,6 +589,15 @@ struct BrowserWindow: View {
                 .fixedSize()
                 .help("Fill Saved Password")
                 .accessibilityLabel("Fill saved password")
+                .browserMenu {
+                    var actions: [BrowserContextAction] = accounts.map { account in
+                        .init(title: account.username.isEmpty ? "Fill Password" : "Fill “\(account.username)”", icon: .key) {
+                            Task { await PasswordAutofill.fill(account, in: tab, from: passwords) }
+                        }
+                    }
+                    actions += [.separator, .init(title: "Show Passwords…", icon: .key) { openSettings() }]
+                    return actions
+                }
             }
         }
     }
@@ -607,10 +617,9 @@ struct BrowserWindow: View {
         }
     }
 
-    @ViewBuilder
-    private func historyMenu(for items: [WKBackForwardListItem]) -> some View {
-        ForEach(items.prefix(15), id: \.self) { item in
-            Button(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString) {
+    private func historyMenu(for items: [WKBackForwardListItem]) -> [BrowserContextAction] {
+        items.prefix(15).map { item in
+            .init(title: item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString, icon: .history) {
                 browser.go(to: item)
             }
         }

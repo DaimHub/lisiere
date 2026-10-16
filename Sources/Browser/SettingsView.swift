@@ -29,25 +29,25 @@ struct SettingsView: View {
             // creates empty toolbar items for tabs whose content has an explicit .id.
             TabView(selection: $profiles.settingsTab) {
                 Tab(value: SettingsTab.general) { profileContent(.general) } label: {
-                    Label("General", browserIcon: .settings)
+                    Label("General", settingsIcon: .settings)
                 }
                 Tab(value: SettingsTab.appearance) { profileContent(.appearance) } label: {
-                    Label("Appearance", browserIcon: .appearance)
+                    Label("Appearance", settingsIcon: .appearance)
                 }
                 Tab(value: SettingsTab.privacy) { profileContent(.privacy) } label: {
-                    Label("Privacy", browserIcon: .privacy)
+                    Label("Privacy", settingsIcon: .privacy)
                 }
                 Tab(value: SettingsTab.passwords) { profileContent(.passwords) } label: {
-                    Label("Passwords", browserIcon: .key)
+                    Label("Passwords", settingsIcon: .key)
                 }
                 Tab(value: SettingsTab.sites) { profileContent(.sites) } label: {
-                    Label("Site Settings", browserIcon: .globe)
+                    Label("Site Settings", settingsIcon: .globe)
                 }
                 Tab(value: SettingsTab.downloads) { profileContent(.downloads) } label: {
-                    Label("Downloads", browserIcon: .downloads)
+                    Label("Downloads", settingsIcon: .downloads)
                 }
                 Tab(value: SettingsTab.profiles) { ProfilesView(profiles: profiles) } label: {
-                    Label("Profiles", browserIcon: .profiles)
+                    Label("Profiles", settingsIcon: .profiles)
                 }
             }
         }

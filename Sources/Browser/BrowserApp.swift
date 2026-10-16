@@ -94,88 +94,89 @@ private struct BrowserCommands: Commands {
     var body: some Commands {
         if updater.isAvailable {
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") { updater.checkForUpdates() }
+                Button("Check for Updates…", browserIcon: .reload) { updater.checkForUpdates() }
                     .disabled(!updater.canCheckForUpdates)
             }
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Window") { openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID)) }
+            Button("New Window", browserIcon: .window) { openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID)) }
                 .keyboardShortcut("n", modifiers: .command)
-            Button("New Private Window") { openWindow(id: BrowserApp.privateWindowID) }
+            Button("New Private Window", browserIcon: .privateWindow) { openWindow(id: BrowserApp.privateWindowID) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("New Tab") { browser?.addTab() }
+            Button("New Tab", browserIcon: .add) { browser?.addTab() }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("Reopen Closed Tab") { browser?.reopenClosedTab() }
+            Button("Reopen Closed Tab", browserIcon: .reopen) { browser?.reopenClosedTab() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-            Button("Close Tab") { browser?.closeActiveTab() }
+            Button("Close Tab", browserIcon: .close) { browser?.closeActiveTab() }
                 .keyboardShortcut("w", modifiers: .command)
         }
         CommandGroup(replacing: .printItem) {
-            Button("Print…") { browser?.printActivePage() }
+            Button("Print…", browserIcon: .printPage) { browser?.printActivePage() }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(pageTab?.webView == nil)
         }
         CommandGroup(replacing: .textEditing) {
-            Menu("Find") {
-                Button("Find…") { browser?.showFindBar() }
+            Menu("Find", browserIcon: .search) {
+                Button("Find…", browserIcon: .search) { browser?.showFindBar() }
                     .keyboardShortcut("f", modifiers: .command)
-                Button("Find Next") { browser?.findNext() }
+                Button("Find Next", browserIcon: .chevronDown) { browser?.findNext() }
                     .keyboardShortcut("g", modifiers: .command)
-                Button("Find Previous") { browser?.findNext(backwards: true) }
+                Button("Find Previous", browserIcon: .chevronUp) { browser?.findNext(backwards: true) }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
-                Button("Use Selection for Find") { browser?.useSelectionForFind() }
+                Button("Use Selection for Find", browserIcon: .selection) { browser?.useSelectionForFind() }
                     .keyboardShortcut("e", modifiers: .command)
             }
             .disabled(pageTab == nil)
             // Replacing the group removes these too, so they're sent to the page or text field as AppKit would.
-            Menu("Spelling and Grammar") {
-                Button("Show Spelling and Grammar") { send(#selector(NSText.showGuessPanel(_:))) }
+            Menu("Spelling and Grammar", browserIcon: .spelling) {
+                Button("Show Spelling and Grammar", browserIcon: .spelling) { send(#selector(NSText.showGuessPanel(_:))) }
                     .keyboardShortcut(":", modifiers: .command)
-                Button("Check Document Now") { send(#selector(NSText.checkSpelling(_:))) }
+                Button("Check Document Now", browserIcon: .spelling) { send(#selector(NSText.checkSpelling(_:))) }
                     .keyboardShortcut(";", modifiers: .command)
             }
-            Menu("Speech") {
-                Button("Start Speaking") { send(#selector(NSTextView.startSpeaking(_:))) }
-                Button("Stop Speaking") { send(#selector(NSTextView.stopSpeaking(_:))) }
+            Menu("Speech", browserIcon: .speak) {
+                Button("Start Speaking", browserIcon: .speak) { send(#selector(NSTextView.startSpeaking(_:))) }
+                Button("Stop Speaking", browserIcon: .stop) { send(#selector(NSTextView.stopSpeaking(_:))) }
             }
         }
         CommandMenu("Tabs") {
-            Button("Next Tab") { browser?.switchTab(by: 1) }
+            Button("Next Tab", browserIcon: .forward) { browser?.switchTab(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-            Button("Previous Tab") { browser?.switchTab(by: -1) }
+            Button("Previous Tab", browserIcon: .back) { browser?.switchTab(by: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
-            Button("Cycle to Next Tab") { browser?.switchTab(by: 1) }
+            Button("Cycle to Next Tab", browserIcon: .forward) { browser?.switchTab(by: 1) }
                 .keyboardShortcut(.tab, modifiers: .control)
-            Button("Cycle to Previous Tab") { browser?.switchTab(by: -1) }
+            Button("Cycle to Previous Tab", browserIcon: .back) { browser?.switchTab(by: -1) }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
 
             Divider()
 
             ForEach(1...8, id: \.self) { number in
-                Button("Select Tab \(number)") { browser?.selectTab(at: number - 1) }
+                Button("Select Tab \(number)", browserIcon: .window) { browser?.selectTab(at: number - 1) }
                     .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
             }
-            Button("Select Last Tab") { browser?.selectLastTab() }
+            Button("Select Last Tab", browserIcon: .forward) { browser?.selectLastTab() }
                 .keyboardShortcut("9", modifiers: .command)
         }
         CommandGroup(after: .toolbar) {
-            Button("Open Location") { browser?.requestAddressFocus() }
+            Button("Open Location", browserIcon: .search) { browser?.requestAddressFocus() }
                 .keyboardShortcut("l", modifiers: .command)
-            Button("Reload Page") { browser?.reload() }
+            Button("Reload Page", browserIcon: .reload) { browser?.reload() }
                 .keyboardShortcut("r", modifiers: .command)
             Divider()
-            Button("Actual Size") { browser?.resetZoom() }
+            Button("Actual Size", browserIcon: .actualSize) { browser?.resetZoom() }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(pageTab.map { $0.pageZoom == 1 } ?? true)
-            Button("Zoom In") { browser?.zoomIn() }
+            Button("Zoom In", browserIcon: .zoomIn) { browser?.zoomIn() }
                 .keyboardShortcut("+", modifiers: .command)
                 .disabled(!(browser?.canZoom ?? false))
-            Button("Zoom Out") { browser?.zoomOut() }
+            Button("Zoom Out", browserIcon: .zoomOut) { browser?.zoomOut() }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(!(browser?.canZoom ?? false))
         }
         CommandGroup(after: .sidebar) {
-            Button(tabLayout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs") {
+            Button(tabLayout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs",
+                   browserIcon: tabLayout == .vertical ? .horizontalTabs : .verticalTabs) {
                 tabLayout = tabLayout.toggled
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
@@ -185,7 +186,8 @@ private struct BrowserCommands: Commands {
                     Text(visibility.title).tag(visibility)
                 }
             }
-            Button(bookmarksBarVisibility == .never ? "Show Bookmarks Bar" : "Hide Bookmarks Bar") {
+            Button(bookmarksBarVisibility == .never ? "Show Bookmarks Bar" : "Hide Bookmarks Bar",
+                   browserIcon: .book) {
                 bookmarksBarVisibility = bookmarksBarVisibility == .never ? .always : .never
             }
             .keyboardShortcut("b", modifiers: [.command, .shift])
@@ -196,30 +198,30 @@ private struct BrowserCommands: Commands {
                 Button {
                     profiles.activate(profile.id, in: browser, openWindow: openWindow)
                 } label: {
-                    if profile.id == profileID { Label(profile.name, browserIcon: .checkmark) }
-                    else { Label(profile.name, browserIcon: profile.icon.browserIcon) }
+                    BrowserMenuLabel(title: profile.name,
+                                     icon: profile.id == profileID ? .checkmark : profile.icon.browserIcon)
                 }
             }
             Divider()
-            Button("Next Profile") { profiles.switchProfile(from: profileID, direction: 1, in: browser, openWindow: openWindow) }
+            Button("Next Profile", browserIcon: .forward) { profiles.switchProfile(from: profileID, direction: 1, in: browser, openWindow: openWindow) }
                 .keyboardShortcut("]", modifiers: [.command, .option])
                 .disabled(profiles.availableProfiles.count < 2)
-            Button("Previous Profile") { profiles.switchProfile(from: profileID, direction: -1, in: browser, openWindow: openWindow) }
+            Button("Previous Profile", browserIcon: .back) { profiles.switchProfile(from: profileID, direction: -1, in: browser, openWindow: openWindow) }
                 .keyboardShortcut("[", modifiers: [.command, .option])
                 .disabled(profiles.availableProfiles.count < 2)
             Divider()
-            Button("Manage Profiles…") {
+            Button("Manage Profiles…", browserIcon: .profiles) {
                 profiles.settingsTab = .profiles
                 openSettings()
             }
         }
         CommandMenu("History") {
-            Button("Back") { browser?.goBack() }
+            Button("Back", browserIcon: .back) { browser?.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
-            Button("Forward") { browser?.goForward() }
+            Button("Forward", browserIcon: .forward) { browser?.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
             Divider()
-            Button("Reopen All Windows from Last Session") {
+            Button("Reopen All Windows from Last Session", browserIcon: .reopen) {
                 guard let session = context?.session else { return }
                 // A private window can't take the restored tabs.
                 for _ in 0..<session.reopenLastSession(reusing: browser?.isPrivate == true ? nil : browser) {
@@ -232,19 +234,20 @@ private struct BrowserCommands: Commands {
             if !recentVisits.isEmpty {
                 Divider()
                 ForEach(recentVisits) { visit in
-                    Button(Self.menuTitle(visit.displayTitle)) { browser?.open(visit.url) }
+                    Button(Self.menuTitle(visit.displayTitle), browserIcon: .history) { browser?.open(visit.url) }
                 }
             }
 
             Divider()
-            Button("Show All History") { browser?.isShowingHistory.toggle() }
+            Button("Show All History", browserIcon: .history) { browser?.isShowingHistory.toggle() }
                 .keyboardShortcut("y", modifiers: .command)
                 .disabled(browser?.history == nil)
-            Button("Clear History and Website Data…") { browser?.isShowingClearData = true }
+            Button("Clear History and Website Data…", browserIcon: .trash) { browser?.isShowingClearData = true }
                 .disabled(browser == nil || browser?.isPrivate == true)
         }
         CommandMenu("Bookmarks") {
-            Button(bookmarks?.isBookmarked(bookmarkableTab?.url) == true ? "Remove Bookmark" : "Bookmark This Page") {
+            Button(bookmarks?.isBookmarked(bookmarkableTab?.url) == true ? "Remove Bookmark" : "Bookmark This Page",
+                   browserIcon: bookmarks?.isBookmarked(bookmarkableTab?.url) == true ? .bookmarkSelected : .bookmark) {
                 guard let tab = bookmarkableTab, let url = tab.url else { return }
                 bookmarks?.toggle(title: tab.pageTitle, url: url)
             }
@@ -254,7 +257,7 @@ private struct BrowserCommands: Commands {
             if let bookmarks, !bookmarks.bookmarks.isEmpty {
                 Divider()
                 ForEach(bookmarks.bookmarks) { bookmark in
-                    Button(bookmark.displayTitle) { browser?.open(bookmark.url) }
+                    Button(bookmark.displayTitle, browserIcon: .bookmark) { browser?.open(bookmark.url) }
                 }
             }
         }
@@ -277,7 +280,7 @@ private struct BrowserDevelopmentCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Develop") {
-            Button("Show Web Inspector") { browser?.showWebInspector() }
+            Button("Show Web Inspector", browserIcon: .code) { browser?.showWebInspector() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(browser?.activeTab?.isNewTab != false)
         }

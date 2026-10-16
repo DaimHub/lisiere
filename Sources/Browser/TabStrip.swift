@@ -75,7 +75,7 @@ struct TabStrip: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
-                    .contextMenu { stripMenu }
+                    .browserContextMenu { stripMenuActions }
             }
             .padding(.leading, leading)
             .padding(.trailing, BrowserChrome.edgeInset)
@@ -92,7 +92,7 @@ struct TabStrip: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
-                    .contextMenu { stripMenu }
+                    .browserContextMenu { stripMenuActions }
             }
             .padding(.leading, isFullScreen ? BrowserChrome.edgeInset
                      : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.navigationBarHeight) + 8)
@@ -119,7 +119,7 @@ struct TabStrip: View {
                     }
                 }
             }
-            .contextMenu { stripMenu }
+            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2) + BrowserChrome.edgeInset) { stripMenuActions }
             .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
     }
@@ -170,7 +170,7 @@ struct TabStrip: View {
             .onDrop(of: [.text], delegate: TabDropDelegate(targetTabID: tab.id,
                                                            browser: browser,
                                                            draggedTabID: $draggedTabID))
-            .contextMenu { tabMenu(for: tab, at: index) }
+            .browserContextMenu { tabMenuActions(for: tab, at: index) }
     }
 
     /// Shows the card after a short delay, then follows the pointer between tabs without waiting again.
@@ -192,46 +192,31 @@ struct TabStrip: View {
         hoverCardTabID = hoveredTabID
     }
 
-    @ViewBuilder
-    private func tabMenu(for tab: BrowserTab, at index: Int) -> some View {
-        Button("New Tab") { browser.addTab() }
-        Divider()
-        Button("Reload") { browser.reloadTab(tab.id) }
-            .disabled(tab.isNewTab)
-        Button("Duplicate") { browser.duplicateTab(tab.id) }
-        Button("Copy Link") {
-            guard let url = tab.url else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(url.absoluteString, forType: .string)
-        }
-        .disabled(tab.url == nil)
-        Divider()
-        Button("Close Tab") { browser.closeTab(tab.id) }
-        Button("Close Other Tabs") { browser.closeOtherTabs(than: tab.id) }
-            .disabled(browser.tabs.count < 2)
-        Button("Close Tabs to the Right") { browser.closeTabs(after: tab.id) }
-            .disabled(index == browser.tabs.count - 1)
-        Divider()
-        Button("Reopen Closed Tab") { browser.reopenClosedTab() }
-            .disabled(!browser.canReopenClosedTab)
-        layoutToggle
+    private var layoutAction: BrowserContextAction {
+        .init(title: layout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs",
+              icon: layout == .vertical ? .horizontalTabs : .verticalTabs) { tabLayout = layout.toggled }
+    }
+    private var stripMenuActions: [BrowserContextAction] {
+        [.init(title: "New Tab", icon: .add) { browser.addTab() },
+         .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
+         .separator, layoutAction]
+    }
+    private func tabMenuActions(for tab: BrowserTab, at index: Int) -> [BrowserContextAction] {
+        [.init(title: "New Tab", icon: .add) { browser.addTab() }, .separator,
+         .init(title: "Reload", icon: .reload, isEnabled: !tab.isNewTab) { browser.reloadTab(tab.id) },
+         .init(title: "Duplicate", icon: .copy) { browser.duplicateTab(tab.id) },
+         .init(title: "Copy Link", icon: .copy, isEnabled: tab.url != nil) {
+             guard let url = tab.url else { return }
+             NSPasteboard.general.clearContents()
+             NSPasteboard.general.setString(url.absoluteString, forType: .string)
+         }, .separator,
+         .init(title: "Close Tab", icon: .close) { browser.closeTab(tab.id) },
+         .init(title: "Close Other Tabs", icon: .close, isEnabled: browser.tabs.count >= 2) { browser.closeOtherTabs(than: tab.id) },
+         .init(title: "Close Tabs to the Right", icon: .close, isEnabled: index != browser.tabs.count - 1) { browser.closeTabs(after: tab.id) }, .separator,
+         .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
+         .separator, layoutAction]
     }
 
-    @ViewBuilder
-    private var stripMenu: some View {
-        Button("New Tab") { browser.addTab() }
-        Button("Reopen Closed Tab") { browser.reopenClosedTab() }
-            .disabled(!browser.canReopenClosedTab)
-        layoutToggle
-    }
-
-    @ViewBuilder
-    private var layoutToggle: some View {
-        Divider()
-        Button(layout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs") {
-            tabLayout = layout.toggled
-        }
-    }
 }
 
 private struct TabItem: View {
@@ -337,7 +322,7 @@ private struct TabIcon: View {
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             } else {
-                Image(browserIcon: .globe)
+                Image(browserIcon: tab.isNewTab ? .home : .globe)
                     .resizable()
                     .scaledToFit()
                     .fontWeight(.light)

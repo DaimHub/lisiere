@@ -118,7 +118,7 @@ struct NewTabView: View {
                             browser.open(bookmark.url,
                                          inNewTab: NSApp.currentEvent?.modifierFlags.contains(.command) == true)
                         }
-                        .contextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser) }
+                        .browserContextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser).actions }
                     }
                 }
             }
