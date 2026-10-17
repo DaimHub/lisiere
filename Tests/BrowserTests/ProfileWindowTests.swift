@@ -179,6 +179,38 @@ final class ProfileWindowTests: XCTestCase {
         XCTAssertEqual(window.appearance?.name, .darkAqua)
     }
 
+    func testSystemProfileReturnsToSystemThemeAfterDarkProfileAndTracksAppearanceChanges() async throws {
+        let original = NSApp.appearance
+        defer { NSApp.appearance = original }
+        NSApp.appearance = NSAppearance(named: .aqua)
+        let pro = try profiles.create(name: "Pro")
+        let perso = try profiles.create(name: "Perso")
+        let first = try owner(pro.id)
+        let proAppearance = first.browser.appearance
+        proAppearance.selection = .system
+        proAppearance.pageSelection = .light
+        let persoAppearance = try XCTUnwrap(profiles.context(for: perso.id)).preferences.appearance
+        persoAppearance.selection = .dark
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        first.connect(window)
+
+        for _ in 0..<3 {
+            first.switchTo(perso.id)
+            XCTAssertEqual(first.browser.appearance.colorScheme, .dark)
+            first.switchTo(pro.id)
+            XCTAssertEqual(first.browser.appearance.colorScheme, .light)
+            XCTAssertNil(window.appearance)
+            XCTAssertEqual(proAppearance.pageSelection, .light)
+        }
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        try await waitUntil { proAppearance.colorScheme == .dark }
+        XCTAssertEqual(proAppearance.selection, .system)
+        XCTAssertEqual(proAppearance.pageSelection, .light)
+        NSApp.appearance = NSAppearance(named: .aqua)
+        try await waitUntil { proAppearance.colorScheme == .light }
+        XCTAssertEqual(persoAppearance.colorScheme, .dark)
+    }
+
     func testPrivateWindowIsIndependentAndCannotSwitchProfiles() throws {
         let a = try profiles.create(name: "A")
         let b = try profiles.create(name: "B")

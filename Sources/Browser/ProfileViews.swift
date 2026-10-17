@@ -8,7 +8,6 @@ struct ProfileBrowserWindow: View {
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -28,8 +27,7 @@ struct ProfileBrowserWindow: View {
                     .environment(context.preferences)
                     .environment(context.favicons)
                     // The departing profile keeps its own palette until the fade finishes.
-                    .environment(\.colorScheme, context.preferences.appearance.selection.colorScheme
-                                 ?? colorScheme)
+                    .environment(\.colorScheme, context.preferences.appearance.colorScheme)
                     // Only crossfade the workspace; don't interpolate its toolbar or WebKit layout.
                     .transaction { $0.animation = nil }
                     .id(id)
@@ -46,7 +44,7 @@ struct ProfileBrowserWindow: View {
             }
         }
         // Keep SwiftUI's hosting layers in sync with the native appearance applied by the controller.
-        .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.selection.colorScheme)
+        .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.colorScheme)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner?.browser.profileID)
         // One material stays at full opacity beneath both layers, avoiding a flash of the desktop.
         .background { WindowGlassBackground().ignoresSafeArea() }
