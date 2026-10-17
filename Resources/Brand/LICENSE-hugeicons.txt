@@ -1,6 +1,10 @@
 Hugeicons Free Stroke Rounded
 https://github.com/hugeicons/hugeicons
 
+BrowserHome01 is the official Home01Icon from @hugeicons/core-free-icons 4.3.5.
+Source: https://unpkg.com/@hugeicons/core-free-icons@4.3.5/dist/esm/Home01Icon.js
+Its original path data is preserved; the template stroke is rendered in black.
+
 MIT License
 
 Copyright (c) 2025 Hugeicons

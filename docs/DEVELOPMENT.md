@@ -84,6 +84,8 @@ Application-owned menu actions use `Button(_:browserIcon:role:action:)` or the m
 
 Settings dropdowns containing icons use `BrowserIconPicker`, backed by `NSPopUpButton`. Its menu items and selection mark use Hugeicons template images directly, so mouse, keyboard and accessibility activation share the same native tinting. Do not put custom image labels inside SwiftUI `Picker`: their menu pixels can remain black in dark appearance. Text-only settings pickers retain their standard SwiftUI controls.
 
+Home uses the bundled `BrowserHome01` template, imported from the official `Home01Icon` in `@hugeicons/core-free-icons` 4.3.5. The pinned Swift package's `home01` PDF still includes an old inner curve absent from the current icon. `BrowserIcon.nsImage` selects the updated artwork for Home actions, profile icons and new tabs in both tab layouts. Keep this override until the package artwork matches the current official icon.
+
 Profile icon identifiers keep their historical raw values for on-disk compatibility. Only their `browserIcon` presentation changes. Favicons, mascots, Dock artwork and macOS-owned window controls keep their own artwork. Both builds include `Resources/Brand/LICENSE-hugeicons.txt`; no Pro assets are bundled.
 
 ## Toolbar reordering
