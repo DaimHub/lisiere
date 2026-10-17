@@ -178,13 +178,33 @@ between groups uses a header drop or the menu. Split pages keep their existing c
 only pages in the same pin/group section can share a joined card. Sidebar pins always use single
 icons so the grid remains compact.
 
+Pins use softly filled favicon tiles with a stronger active state. The sidebar has up to three
+tiles per row; the final row stretches to fill its width. A custom layout preserves each tab's
+view identity across row changes. The horizontal strip uses the same treatment with compact,
+fixed-width tiles. Each pin area scrolls independently and leaves room for ordinary tabs.
+
 TabSession stores pin state and group identity; WindowSession stores names, colors, group order
 and collapse state. Missing fields in older sessions default to unpinned/ungrouped. Restoration
 normalizes orphaned memberships and preserves the selected tab while leaving background pages
 suspended. SessionStore observes metadata-only edits as well as page changes. These values follow
 the existing per-profile, per-window session lifecycle and private-window non-persistence.
+Suspended pins restore available favicons asynchronously from the existing disk cache without
+loading a WebKit page or making a network request. Private pins never read persistent icons.
 
 Bookmark names may be null, missing, empty or whitespace. The bar and start page display unnamed
 bookmarks as icons, while menus, search, tooltips and accessibility retain a host/address label.
 Renaming never replaces an empty name with that fallback. Existing bookmark IDs and URLs remain
 unchanged. Both the bar and start-page favorites expose Rename.
+
+Validation on 2026-10-17: 257 XCTest tests passed. Coverage includes protected closure paths,
+pin suspension/history restoration, deferred popup closure, stable group ordering, split pairs
+across organization boundaries, collapsed groups, legacy sessions, metadata-only autosave,
+nullable bookmark names, tile layout at narrow widths, and cached pin icons without page loading.
+The Release build, strict signature verification and isolated startup smoke passed, retaining
+the sandbox and hardened runtime. Native checks covered five pins in both layouts, light/dark
+sidebar tiles, active states without close controls, group creation/editing/collapse/ungrouping,
+menu-based membership changes, unnamed bookmarks, split view across a pin boundary, and session
+restoration including cached icons. The installed application was not replaced.
+
+Automated native drag attempts did not confirm header drops; moving between groups by menu was
+verified. Physical drag-and-drop and full VoiceOver traversal remain manual validation paths.

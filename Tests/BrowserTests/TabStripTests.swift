@@ -2,6 +2,31 @@ import XCTest
 @testable import Browser
 
 final class TabStripTests: XCTestCase {
+    func testPinnedTilesFillTheFinalRowWithoutExceedingThreeColumns() {
+        let metrics = PinnedTabGridMetrics(count: 5, width: 220)
+        XCTAssertEqual(metrics.columns, 3)
+        XCTAssertEqual(metrics.rows, 2)
+        XCTAssertEqual(metrics.frame(at: 2).maxX, 220, accuracy: 0.001)
+        XCTAssertEqual(metrics.frame(at: 4).maxX, 220, accuracy: 0.001)
+        XCTAssertGreaterThan(metrics.frame(at: 3).width, metrics.frame(at: 0).width)
+        XCTAssertEqual(metrics.frame(at: 4).maxY, metrics.height)
+        XCTAssertEqual(PinnedTabGridMetrics(count: 12, width: 600).columns, 3)
+    }
+
+    func testPinnedGridHandlesEmptyAndNarrowSidebarsWithoutClipping() {
+        for width: CGFloat in [0, 48, 116, 220] {
+            XCTAssertEqual(PinnedTabGridMetrics(count: 0, width: width).height, 0)
+            let metrics = PinnedTabGridMetrics(count: 8, width: width)
+            for index in 0..<metrics.count {
+                let frame = metrics.frame(at: index)
+                XCTAssertGreaterThanOrEqual(frame.minX, 0)
+                XCTAssertLessThanOrEqual(frame.maxX, width + 0.001)
+                XCTAssertGreaterThanOrEqual(frame.width, 0)
+                XCTAssertLessThanOrEqual(frame.maxY, metrics.height)
+            }
+        }
+    }
+
     func testEmptyStripHasFiniteNonnegativeDimensions() {
         for width: CGFloat in [0, 680, 1440] {
             let metrics = HorizontalTabStripMetrics(tabCount: 0, width: width, leading: 85)

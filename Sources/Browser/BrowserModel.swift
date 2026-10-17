@@ -434,6 +434,7 @@ final class BrowserModel {
     func setPinned(_ pinned: Bool, for id: UUID) {
         guard let tab = tab(withID: id), tab.isPinned != pinned else { return }
         tab.isPinned = pinned
+        if pinned { tab.restorePinnedFavicon() }
         normalizeTabOrder()
     }
 
@@ -575,6 +576,7 @@ final class BrowserModel {
             let tab = saved.url == nil ? makeTab()
                 : adopt(BrowserTab(url: saved.url, title: saved.title, interactionState: saved.interactionState, appearance: appearance))
             tab.isPinned = saved.isPinned
+            tab.restorePinnedFavicon()
             tab.groupID = validGroupID(saved.groupID)
             return tab
         }

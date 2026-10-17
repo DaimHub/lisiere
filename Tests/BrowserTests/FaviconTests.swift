@@ -8,6 +8,37 @@ final class FaviconTests: XCTestCase {
     /// A 1×1 PNG.
     private static let pixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
+    func testRestoredPinsReadTheirIconsFromDiskWithoutRestoringTheirPages() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "PinnedFavicons-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FaviconStore(directory: directory)
+        let url = URL(string: "https://pinned-icons.invalid/")!
+        store.cache.save(.init(source: url.appending(path: "favicon.ico"),
+                               data: try XCTUnwrap(Data(base64Encoded: Self.pixelPNG))), forHost: url.host()!)
+        XCTAssertNil(store.cachedIcon(for: url))
+        let browser = BrowserModel(preferences: ProfilePreferences(), favicons: store)
+        defer { browser.releaseClosedWindow() }
+        browser.restoreSession(WindowSession(tabs: [
+            TabSession(url: url, title: "Saved Pin", interactionState: nil, isPinned: true),
+            TabSession(url: nil, title: "", interactionState: nil)
+        ], selectedIndex: 1))
+        let pin = browser.tabs[0]
+        try await waitUntil { pin.favicon != nil }
+        XCTAssertTrue(pin.isSuspended)
+        XCTAssertNil(pin.webView)
+        XCTAssertNotNil(store.cachedIcon(for: url))
+        XCTAssertTrue(browser.activeTab?.isNewTab == true)
+
+        // Private pins never read another profile's disk cache.
+        let privateBrowser = BrowserModel.makePrivate()
+        defer { privateBrowser.releaseClosedWindow() }
+        privateBrowser.restoreSession(browser.windowSession())
+        privateBrowser.tabs[0].restorePinnedFavicon()
+        await Task.yield()
+        XCTAssertNil(privateBrowser.tabs[0].favicon)
+        XCTAssertTrue(privateBrowser.tabs[0].isSuspended)
+    }
+
     func testParsesIconLinksFromTheHead() {
         let html = """
             <html><head>

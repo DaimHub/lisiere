@@ -30,6 +30,50 @@ struct HorizontalTabStripMetrics {
     }
 }
 
+/// Each row fills the sidebar, including a final row with only one or two pins.
+struct PinnedTabGridMetrics {
+    static let spacing: CGFloat = 4
+    static let tileHeight: CGFloat = 36
+    static let horizontalTileWidth: CGFloat = 44
+    let count: Int
+    let width: CGFloat
+    let columns: Int
+    var rows: Int { (count + columns - 1) / columns }
+    var height: CGFloat { CGFloat(rows) * Self.tileHeight + CGFloat(max(0, rows - 1)) * Self.spacing }
+
+    init(count: Int, width: CGFloat) {
+        self.count = max(0, count)
+        self.width = width.isFinite ? max(0, width) : 220
+        columns = min(3, max(1, Int((self.width + Self.spacing) / (56 + Self.spacing))))
+    }
+
+    func frame(at index: Int) -> CGRect {
+        let row = index / columns
+        let rowCount = min(columns, count - row * columns)
+        let tileWidth = max(0, (width - CGFloat(rowCount - 1) * Self.spacing) / CGFloat(max(1, rowCount)))
+        return CGRect(x: CGFloat(index % columns) * (tileWidth + Self.spacing),
+                      y: CGFloat(row) * (Self.tileHeight + Self.spacing),
+                      width: tileWidth, height: Self.tileHeight)
+    }
+}
+
+/// A single layout keeps tab identity stable when pins move between rows.
+private struct PinnedTabGrid: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let metrics = PinnedTabGridMetrics(count: subviews.count, width: proposal.width ?? 220)
+        return CGSize(width: metrics.width, height: metrics.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let metrics = PinnedTabGridMetrics(count: subviews.count, width: bounds.width)
+        for (index, subview) in subviews.enumerated() {
+            let frame = metrics.frame(at: index)
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                          anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+}
+
 struct TabStrip: View {
     let browser: BrowserModel
     let layout: TabLayout
@@ -72,8 +116,10 @@ struct TabStrip: View {
             let pinned = sections.filter(\.isPinned)
             let regular = sections.filter { !$0.isPinned }
             let pinContentWidth = pinned.reduce(CGFloat(0)) { width, section in
-                width + CGFloat(section.visibleCards.reduce(0) { $0 + $1.tabs.count }) * 40
+                width + CGFloat(section.visibleCards.reduce(0) { $0 + $1.tabs.count })
+                    * (PinnedTabGridMetrics.horizontalTileWidth + spacing)
                     + (section.group == nil ? 0 : 124)
+                    + CGFloat(section.visibleCards.filter { $0.tabs.count == 2 }.count) * 4
             }
             let available = max(0, geometry.size.width - leading - 100)
             let pinWidth = min(pinContentWidth, available * (regular.isEmpty ? 1 : 0.4))
@@ -85,7 +131,7 @@ struct TabStrip: View {
 
             HStack(spacing: spacing) {
                 if !pinned.isEmpty {
-                    horizontalSections(pinned, width: 36)
+                    horizontalSections(pinned, width: PinnedTabGridMetrics.horizontalTileWidth)
                         .frame(width: pinWidth)
                     Divider().frame(height: 18).padding(.horizontal, 2)
                 }
@@ -145,11 +191,10 @@ struct TabStrip: View {
             GeometryReader { geometry in
                 let sections = browser.tabSections
                 let pinned = sections.filter(\.isPinned)
-                let columns = max(1, Int((geometry.size.width - BrowserChrome.edgeInset * 2 + 4) / 40))
-                let pinnedHeight = pinned.reduce(CGFloat(8)) { height, section in
+                let pinnedHeight = pinned.reduce(2 + BrowserChrome.edgeInset + CGFloat(max(0, pinned.count - 1)) * 4) { height, section in
                     let count = section.visibleCards.reduce(0) { $0 + $1.tabs.count }
-                    let rows = (count + columns - 1) / columns
-                    return height + CGFloat(rows) * 36 + (section.group == nil ? 0 : 30) + 4
+                    let grid = PinnedTabGridMetrics(count: count, width: geometry.size.width - BrowserChrome.edgeInset * 2)
+                    return height + grid.height + (section.group == nil ? 0 : 28 + (count > 0 ? 2 : 0))
                 }
                 VStack(spacing: 0) {
                     if !pinned.isEmpty {
@@ -171,13 +216,13 @@ struct TabStrip: View {
                     ForEach(sections) { section in
                         VStack(spacing: 2) {
                             if let group = section.group { groupHeader(group, section: section) }
-                            if section.isPinned {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 36, maximum: 44), spacing: 4)], spacing: 4) {
+                            if section.isPinned && !section.visibleCards.isEmpty {
+                                PinnedTabGrid {
                                     ForEach(section.visibleCards.flatMap(\.tabs)) { tab in
-                                        tabItem(for: tab, width: 36).id(tab.id)
+                                        tabItem(for: tab, width: nil).id(tab.id)
                                     }
                                 }
-                            } else {
+                            } else if !section.isPinned {
                                 ForEach(section.visibleCards) { card in tabGroup(card, width: nil) }
                             }
                         }
@@ -308,7 +353,7 @@ struct TabStrip: View {
         let isHovered = hoveredTabID == tab.id
         let index = browser.tabs.firstIndex { $0.id == tab.id } ?? 0
         let nextTab = browser.tabs.indices.contains(index + 1) ? browser.tabs[index + 1] : nil
-        let showsSeparator = !joined && layout == .horizontal && nextTab.map { next in
+        let showsSeparator = !tab.isPinned && !joined && layout == .horizontal && nextTab.map { next in
             !browser.splitTabIDs.contains(next.id) && !isActive && !isHovered
                 && browser.activeTabID != next.id && hoveredTabID != next.id
         } ?? false
@@ -317,7 +362,9 @@ struct TabStrip: View {
                        isActive: isActive,
                        isHovered: isHovered,
                        width: width,
-                       height: layout == .vertical ? BrowserChrome.sidebarTabHeight : BrowserChrome.tabHeight,
+                       height: layout == .vertical
+                           ? (tab.isPinned ? PinnedTabGridMetrics.tileHeight : BrowserChrome.sidebarTabHeight)
+                           : BrowserChrome.tabHeight,
                        splitPosition: joined ? browser.splitTabIDs.firstIndex(of: tab.id) : nil,
                        accent: accent,
                        select: {
@@ -499,8 +546,8 @@ private struct TabItem: View {
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .background {
-            shape.fill(isActive ? (isJoined ? accent.opacity(0.16) : Color.primary.opacity(0.11)) :
-                       isHovered ? Color.primary.opacity(0.055) : Color.clear)
+            shape.fill(isActive ? (isJoined ? accent.opacity(0.16) : Color.primary.opacity(tab.isPinned ? 0.14 : 0.11)) :
+                       Color.primary.opacity(isHovered ? (tab.isPinned ? 0.09 : 0.055) : (tab.isPinned ? 0.045 : 0)))
                 .shadow(color: .black.opacity(isActive && !isJoined ? 0.08 : 0), radius: 1, y: 0.5)
         }
         .overlay {
@@ -576,7 +623,7 @@ private struct TabIcon: View {
                     .foregroundStyle(isActive ? Color.primary : Color.secondary)
             }
         }
-        .frame(width: 14, height: 14)
+        .frame(width: tab.isPinned ? 18 : 14, height: tab.isPinned ? 18 : 14)
     }
 }
 

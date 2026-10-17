@@ -525,6 +525,17 @@ final class BrowserTab: Identifiable {
         }
     }
 
+    func restorePinnedFavicon() {
+        guard isPinned, isSuspended, favicon == nil, let url,
+              let browser, !browser.isPrivate else { return }
+        faviconTask?.cancel()
+        faviconTask = Task { [weak self, weak browser] in
+            let icon = await browser?.favicons.storedIcon(for: url)
+            guard let self, !Task.isCancelled, self.url == url, self.favicon == nil else { return }
+            self.favicon = icon
+        }
+    }
+
     /// Reads the icon from the loaded page, showing the host's last known icon until then.
     private func updateFavicon() {
         faviconTask?.cancel()

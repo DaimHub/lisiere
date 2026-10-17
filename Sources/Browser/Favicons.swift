@@ -184,6 +184,16 @@ final class FaviconStore {
         url?.host().flatMap { icons[$0]?.image }
     }
 
+    /// Restore a suspended pin's identity without loading its page or making a network request.
+    func storedIcon(for url: URL) async -> Image? {
+        guard let host = url.host() else { return nil }
+        if let icon = icons[host] { return icon.image }
+        let icon = await deduplicated("disk:\(host)", host: host) {
+            await Self.diskIcon(forHost: host, in: self.cache)
+        }
+        return icon?.image
+    }
+
     /// An icon for a site that isn't open, such as a bookmark: the cached one, the site's `/favicon.ico`,
     /// or else the best icon its page declares.
     func icon(for url: URL) async -> Image? {
