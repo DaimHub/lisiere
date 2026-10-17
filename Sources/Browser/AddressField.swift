@@ -11,6 +11,12 @@ struct AddressField: NSViewRepresentable {
         case cancel
     }
 
+    struct Edit {
+        let text: String
+        /// A delayed result must not replace marked text or move a caret the user has repositioned.
+        let canComplete: @MainActor () -> Bool
+    }
+
     @Binding var text: String
     @Binding var isFocused: Bool
     /// Where an inline completion starts in `text`, in UTF-16 units. The rest is selected so typing replaces it.
@@ -19,7 +25,7 @@ struct AddressField: NSViewRepresentable {
     var focusRequest: Int
     var blurRequest: Int
     /// Called with the text as the user edits it.
-    var edit: (String) -> Void
+    var edit: (Edit) -> Void
     /// Returns whether the command was handled, otherwise the field handles it as usual.
     var perform: (Command) -> Bool
 
@@ -98,8 +104,13 @@ struct AddressField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
-            parent.text = field.stringValue
-            parent.edit(field.stringValue)
+            let text = field.stringValue
+            parent.text = text
+            parent.edit(Edit(text: text, canComplete: { [weak field] in
+                guard let editor = field?.currentEditor() as? NSTextView else { return false }
+                return editor.string == text && !editor.hasMarkedText()
+                    && editor.selectedRange == NSRange(location: (text as NSString).length, length: 0)
+            }))
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {

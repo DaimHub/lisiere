@@ -103,7 +103,7 @@ final class ProfileWindowController {
         }
         if !isPrivate {
             for profile in profiles.availableProfiles {
-                profiles.context(for: profile.id)?.session.closeParkedWindow(ownerID: id)
+                profiles.session(for: profile.id)?.closeParkedWindow(ownerID: id)
             }
         }
         browsers = [:]

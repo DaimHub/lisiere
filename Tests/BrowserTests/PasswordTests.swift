@@ -6,8 +6,12 @@ import XCTest
 @MainActor
 private final class MemoryPasswordStorage: PasswordStorage {
     var items: [SavedPassword: String] = [:]
+    var readDelay: Duration = .zero
 
-    func savedPasswords() throws -> [SavedPassword] { Array(items.keys) }
+    func savedPasswords() async throws -> [SavedPassword] {
+        try await Task.sleep(for: readDelay)
+        return Array(items.keys)
+    }
     func password(for account: SavedPassword) throws -> String? { items[account] }
     func save(_ password: String, for account: SavedPassword) throws { items[account] = password }
     func remove(_ account: SavedPassword) throws { items[account] = nil }
@@ -17,9 +21,10 @@ private final class MemoryPasswordStorage: PasswordStorage {
 private final class MessageRecorder: NSObject, WKScriptMessageHandler {
     var captures: [PasswordCapture] = []
     var sawPasswordFields = false
+    var fieldAnnouncements = 0
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if (message.body as? [String: Any])?["type"] as? String == "fields" { sawPasswordFields = true }
+        if (message.body as? [String: Any])?["type"] as? String == "fields" { sawPasswordFields = true; fieldAnnouncements += 1 }
         if let capture = PasswordCapture(body: message.body, isMainFrame: message.frameInfo.isMainFrame,
                                          origin: PasswordOrigin(message.frameInfo.securityOrigin)) {
             captures.append(capture)
@@ -197,34 +202,40 @@ final class PasswordTests: XCTestCase {
                                      isMainFrame: true, origin: example))
     }
 
-    func testOffersToSaveNewAndChangedPasswordsOnly() throws {
+    func testOffersToSaveNewAndChangedPasswordsOnly() async throws {
         let storage = MemoryPasswordStorage()
         let passwords = PasswordManager(storage: storage)
         let capture = try XCTUnwrap(PasswordCapture(body: submission(), isMainFrame: true, origin: example))
 
-        XCTAssertEqual(passwords.offer(for: capture), .save)
-        try passwords.save(capture)
-        XCTAssertNil(passwords.offer(for: capture))
+        let offer1 = await passwords.offer(for: capture)
+        XCTAssertEqual(offer1, .save)
+        try await passwords.save(capture)
+        let offer2 = await passwords.offer(for: capture)
+        XCTAssertNil(offer2)
         XCTAssertEqual(passwords.passwords(for: example).map(\.username), ["alice"])
         XCTAssertTrue(passwords.passwords(for: PasswordOrigin(host: "accounts.example.com")).isEmpty)
         XCTAssertTrue(passwords.passwords(for: nil).isEmpty)
 
         let changed = try XCTUnwrap(PasswordCapture(body: submission(password: "new secret"), isMainFrame: true,
                                                     origin: example))
-        XCTAssertEqual(passwords.offer(for: changed), .update)
+        let offer3 = await passwords.offer(for: changed)
+        XCTAssertEqual(offer3, .update)
 
         passwords.offersToSave = false
-        XCTAssertNil(passwords.offer(for: changed))
+        let offer4 = await passwords.offer(for: changed)
+        XCTAssertNil(offer4)
         passwords.offersToSave = true
 
         let other = PasswordOrigin(host: "other.example")!
         let otherCapture = try XCTUnwrap(PasswordCapture(body: submission(), isMainFrame: true, origin: other))
         passwords.neverSave(on: other)
-        XCTAssertNil(passwords.offer(for: otherCapture))
+        let offer5 = await passwords.offer(for: otherCapture)
+        XCTAssertNil(offer5)
         passwords.allowSaving(on: other.description)
-        XCTAssertEqual(passwords.offer(for: otherCapture), .save)
+        let offer6 = await passwords.offer(for: otherCapture)
+        XCTAssertEqual(offer6, .save)
 
-        passwords.remove(capture.account)
+        await passwords.remove(capture.account)
         XCTAssertTrue(storage.items.isEmpty)
     }
 
@@ -324,4 +335,66 @@ final class PasswordTests: XCTestCase {
             "typeof window.webkit?.messageHandlers?.\(PasswordAutofill.handlerName)")
         XCTAssertEqual(reachable as? String, "undefined")
     }
+    func testClosingDuringCredentialLookupNeverShowsALateSheet() async throws {
+        let (browser, storage, window) = promptBrowser()
+        storage.readDelay = .milliseconds(450)
+        let tab = try XCTUnwrap(browser.activeTab)
+        let webView = try await loadPromptForm(in: tab, onSubmit: "location.href = 'about:blank'")
+        _ = try await webView.evaluateJavaScript("document.querySelector('form').requestSubmit(); 0")
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(window.attachedSheet)
+        XCTAssertNotEqual(webView.url?.absoluteString, "about:blank")
+        browser.closeTab(tab.id)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertNil(window.attachedSheet)
+        XCTAssertTrue(storage.items.isEmpty)
+        XCTAssertNil(browser.tab(withID: tab.id))
+    }
+
+    func testPasswordDetectionInspectsChangedSubtreesWithoutDocumentRescans() async throws {
+        for insertion in [
+            "document.body.insertAdjacentHTML('beforeend', '<input type=password>')",
+            "document.body.insertAdjacentHTML('beforeend', '<form><div><input type=password></div></form>')",
+            "document.querySelector('#disabled').disabled = false",
+            "document.querySelector('#plain').type = 'password'"
+        ] {
+            let recorder = MessageRecorder()
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
+            configuration.userContentController.addUserScript(WKUserScript(source: """
+                globalThis.fullPasswordScans = 0;
+                const original = Document.prototype.querySelectorAll;
+                Document.prototype.querySelectorAll = function(selector) {
+                    if (selector === 'input[type=password]') globalThis.fullPasswordScans++;
+                    return original.call(this, selector);
+                };
+                """, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: PasswordAutofill.world))
+            PasswordAutofill.install(in: configuration.userContentController, handler: recorder)
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            webView.loadHTMLString("<title>Dynamic</title><input id=disabled type=password disabled><input id=plain>",
+                                   baseURL: URL(string: "https://example.com/dynamic"))
+            try await waitUntil { !webView.isLoading && webView.title == "Dynamic" }
+            let scans = try await webView.callAsyncJavaScript("""
+                for (let i = 0; i < 40; i++) {
+                    const span = document.createElement('span');
+                    span.textContent = 'unrelated update';
+                    document.body.append(span);
+                    await Promise.resolve();
+                }
+                const detached = document.createElement('input'); detached.type = 'password';
+                document.body.append(detached); detached.remove();
+                await Promise.resolve();
+                return globalThis.fullPasswordScans;
+                """, arguments: [:], in: nil, contentWorld: PasswordAutofill.world)
+            XCTAssertEqual(scans as? Int, 1)
+            XCTAssertFalse(recorder.sawPasswordFields)
+            _ = try await webView.evaluateJavaScript(insertion + "; 0")
+            try await waitUntil { recorder.sawPasswordFields }
+            XCTAssertEqual(recorder.fieldAnnouncements, 1)
+            let finalScans = try await webView.callAsyncJavaScript("return globalThis.fullPasswordScans;",
+                arguments: [:], in: nil, contentWorld: PasswordAutofill.world)
+            XCTAssertEqual(finalScans as? Int, 1)
+        }
+    }
+
 }

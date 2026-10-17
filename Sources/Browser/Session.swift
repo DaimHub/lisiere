@@ -208,6 +208,13 @@ final class SessionStore {
         }
     }
 
+    /// Prevent an unloaded profile's session from recreating files after explicit deletion.
+    func disableWrites() {
+        isTerminating = true
+        saveTask?.cancel()
+        file?.disableWrites()
+    }
+
     /// Saves the windows as they are, and ignores them closing as the app quits.
     func saveBeforeQuitting() {
         isTerminating = true

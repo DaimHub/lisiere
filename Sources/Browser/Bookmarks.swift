@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import SwiftUI
 
-struct Bookmark: Identifiable, Codable, Equatable {
+struct Bookmark: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var title: String
     var url: URL

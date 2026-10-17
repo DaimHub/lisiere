@@ -15,7 +15,7 @@ struct HistoryVisit: Identifiable, Codable, Equatable, Sendable {
 }
 
 /// Every visit to an address, combined, for ranking address bar suggestions.
-struct HistoryPage: Equatable {
+struct HistoryPage: Equatable, Sendable {
     let url: URL
     let title: String
     let visitCount: Int
@@ -83,10 +83,12 @@ final class HistoryStore {
 
     /// Oldest first.
     private(set) var visits: [HistoryVisit] = []
+    private(set) var revision = 0
     @ObservationIgnored private let file: StoreFile?
     @ObservationIgnored private var loading: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var cachedPages: [HistoryPage]?
+    @ObservationIgnored private var cachedDays: (query: String, calendar: Calendar, locale: Locale, days: [HistoryDay])?
     /// Removals made before the saved history finished loading, applied to it once it has.
     @ObservationIgnored private var pendingRemovals: [(HistoryVisit) -> Bool] = []
 
@@ -154,6 +156,12 @@ final class HistoryStore {
     /// Visits grouped by day, newest first, keeping each day's latest visit to an address.
     func days(matching query: String = "", calendar: Calendar = .current) -> [HistoryDay] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Read observable state even on a cache hit so a visible history still follows visits and removals.
+        let visits = visits
+        let locale = Locale.current
+        if let cachedDays, cachedDays.query == query, cachedDays.calendar == calendar, cachedDays.locale == locale {
+            return cachedDays.days
+        }
         var days: [HistoryDay] = []
         var entries: [HistoryEntry] = []
         var day: Date?
@@ -173,6 +181,7 @@ final class HistoryStore {
             }
         }
         if let day, !entries.isEmpty { days.append(HistoryDay(date: day, entries: entries)) }
+        cachedDays = (query, calendar, locale, days)
         return days
     }
 
@@ -194,6 +203,8 @@ final class HistoryStore {
     private func update(_ change: (inout [HistoryVisit]) -> Void) {
         change(&visits)
         cachedPages = nil
+        cachedDays = nil
+        revision += 1
         scheduleSave()
     }
 
@@ -209,6 +220,8 @@ final class HistoryStore {
         visits = (saved + visits).sorted { $0.date < $1.date }
         Self.prune(&visits, now: .now)
         cachedPages = nil
+        cachedDays = nil
+        revision += 1
         // Saves skipped while loading, and expired visits, need writing now.
         if visits.count != savedCount || saved.count != savedCount { scheduleSave() }
     }

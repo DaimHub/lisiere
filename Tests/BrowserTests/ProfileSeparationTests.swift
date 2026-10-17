@@ -77,22 +77,27 @@ final class ProfileSeparationTests: XCTestCase {
         persisted.context(for: empty.id)?.prepareForDeletion()
     }
 
-    func testKeychainSeparatesSameOriginAndUsernameByProfile() throws {
+    func testKeychainSeparatesSameOriginAndUsernameByProfile() async throws {
         let first = KeychainPasswordStorage(profileID: UUID())
         let second = KeychainPasswordStorage(profileID: UUID())
         let account = SavedPassword(origin: PasswordOrigin(host: "profile-fixture.invalid")!, username: "fixture")
-        defer { try? first.remove(account); try? second.remove(account) }
-        try first.save("synthetic-alpha", for: account)
-        XCTAssertNil(try second.password(for: account))
-        try second.save("synthetic-beta", for: account)
-        XCTAssertEqual(try first.password(for: account), "synthetic-alpha")
-        XCTAssertEqual(try second.password(for: account), "synthetic-beta")
-        try first.remove(account)
-        XCTAssertNil(try first.password(for: account))
-        XCTAssertEqual(try second.password(for: account), "synthetic-beta")
+        addTeardownBlock { try? await first.remove(account); try? await second.remove(account) }
+        try await first.save("synthetic-alpha", for: account)
+        let secret1 = try await second.password(for: account)
+        XCTAssertNil(secret1)
+        try await second.save("synthetic-beta", for: account)
+        let secret2 = try await first.password(for: account)
+        XCTAssertEqual(secret2, "synthetic-alpha")
+        let secret3 = try await second.password(for: account)
+        XCTAssertEqual(secret3, "synthetic-beta")
+        try await first.remove(account)
+        let secret4 = try await first.password(for: account)
+        XCTAssertNil(secret4)
+        let secret5 = try await second.password(for: account)
+        XCTAssertEqual(secret5, "synthetic-beta")
     }
 
-    func testLegacyPasswordWithoutSecurityDomainRemainsReadable() throws {
+    func testLegacyPasswordWithoutSecurityDomainRemainsReadable() async throws {
         let account = SavedPassword(origin: PasswordOrigin(host: "legacy-\(UUID()).invalid")!, username: "fixture")
         let query: [String: Any] = [kSecClass as String: kSecClassInternetPassword,
             kSecAttrProtocol as String: kSecAttrProtocolHTTPS,
@@ -103,8 +108,10 @@ final class ProfileSeparationTests: XCTestCase {
         item[kSecValueData as String] = Data("synthetic-legacy".utf8)
         XCTAssertEqual(SecItemAdd(item as CFDictionary, nil), errSecSuccess)
         defer { SecItemDelete(query as CFDictionary) }
-        XCTAssertEqual(try KeychainPasswordStorage().password(for: account), "synthetic-legacy")
-        XCTAssertNil(try KeychainPasswordStorage(profileID: UUID()).password(for: account))
+        let secret6 = try await KeychainPasswordStorage().password(for: account)
+        XCTAssertEqual(secret6, "synthetic-legacy")
+        let secret7 = try await KeychainPasswordStorage(profileID: UUID()).password(for: account)
+        XCTAssertNil(secret7)
     }
 
     func testSwipeUsesOneHorizontalGestureAndIgnoresVerticalMomentumAndContinuation() {

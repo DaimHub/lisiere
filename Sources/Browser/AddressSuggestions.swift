@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct AddressSuggestion: Identifiable, Equatable {
+struct AddressSuggestion: Identifiable, Equatable, Sendable {
     let url: URL
     let title: String
     let isBookmarked: Bool
@@ -28,7 +28,7 @@ enum AddressSuggestions {
         static func < (lhs: Match, rhs: Match) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
-    private struct Candidate {
+    private struct Candidate: Sendable {
         let url: URL
         var title: String
         var visitCount = 0
@@ -36,55 +36,91 @@ enum AddressSuggestions {
         var isBookmarked = false
     }
 
-    /// Ranks matching pages by how well they match, then by how often and how recently they were visited.
-    /// A bookmark counts like a few visits.
-    static func rank(_ query: String, pages: [HistoryPage], bookmarks: [Bookmark], now: Date = .now,
-                     limit: Int = limit) -> [AddressSuggestion] {
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return [] }
+    /// Immutable, reusable text preparation. Querying never rebuilds dictionaries or tokenizes every title.
+    struct Index: Sendable {
+        private struct Prepared: Sendable {
+            let candidate: Candidate
+            let address: String
+            let absoluteAddress: String
+            let title: String
+            let titleWords: [Substring]
+            let text: String
+            let addressLength: Int
 
-        var candidates: [URL: Candidate] = [:]
-        for page in pages where ["http", "https"].contains(page.url.scheme?.lowercased() ?? "") {
-            candidates[page.url] = Candidate(url: page.url, title: page.title, visitCount: page.visitCount,
-                                             lastVisit: page.lastVisit)
-        }
-        for bookmark in bookmarks {
-            var candidate = candidates[bookmark.url] ?? Candidate(url: bookmark.url, title: bookmark.title)
-            candidate.isBookmarked = true
-            if !bookmark.title.isEmpty { candidate.title = bookmark.title }
-            candidates[bookmark.url] = candidate
-        }
+            init(_ candidate: Candidate) {
+                self.candidate = candidate
+                address = strippedAddress(candidate.url)
+                absoluteAddress = candidate.url.absoluteString.lowercased()
+                title = candidate.title.lowercased()
+                titleWords = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                text = "\(address) \(title)"
+                addressLength = address.count
+            }
 
-        let ranked = candidates.values.compactMap { candidate -> (Candidate, Match, Double, Int)? in
-            let address = strippedAddress(candidate.url)
-            guard let match = match(query, address: address, url: candidate.url, title: candidate.title)
-            else { return nil }
-            let weight = frecency(visitCount: candidate.visitCount, lastVisit: candidate.lastVisit, now: now)
-                + (candidate.isBookmarked ? 2 : 0)
-            return (candidate, match, weight, address.count)
-        }
-        .sorted { a, b in
-            if a.1 != b.1 { return a.1 > b.1 }
-            if a.2 != b.2 { return a.2 > b.2 }
-            if a.3 != b.3 { return a.3 < b.3 }
-            return a.0.url.absoluteString < b.0.url.absoluteString
+            func match(_ query: String, words: [Substring]) -> Match? {
+                if address.hasPrefix(query) || absoluteAddress.hasPrefix(query) { return .addressPrefix }
+                if title.hasPrefix(query) || titleWords.contains(where: { $0.hasPrefix(query) }) { return .titleWord }
+                return words.allSatisfy { text.contains($0) } ? .contains : nil
+            }
         }
 
-        return ranked.prefix(limit).map {
-            AddressSuggestion(url: $0.0.url, title: $0.0.title, isBookmarked: $0.0.isBookmarked)
+        private struct Ranked {
+            let page: Prepared
+            let match: Match
+            let weight: Double
+
+            func precedes(_ other: Ranked) -> Bool {
+                if match != other.match { return match > other.match }
+                if weight != other.weight { return weight > other.weight }
+                if page.addressLength != other.page.addressLength { return page.addressLength < other.page.addressLength }
+                return page.candidate.url.absoluteString < other.page.candidate.url.absoluteString
+            }
+        }
+
+        private let candidates: [Prepared]
+
+        init(pages: [HistoryPage], bookmarks: [Bookmark]) {
+            var candidates: [URL: Candidate] = [:]
+            for page in pages where ["http", "https"].contains(page.url.scheme?.lowercased() ?? "") {
+                candidates[page.url] = Candidate(url: page.url, title: page.title, visitCount: page.visitCount,
+                                               lastVisit: page.lastVisit)
+            }
+            for bookmark in bookmarks {
+                var candidate = candidates[bookmark.url] ?? Candidate(url: bookmark.url, title: bookmark.title)
+                candidate.isBookmarked = true
+                if !bookmark.title.isEmpty { candidate.title = bookmark.title }
+                candidates[bookmark.url] = candidate
+            }
+            self.candidates = candidates.values.map(Prepared.init)
+        }
+
+        func rank(_ query: String, now: Date = .now, limit: Int = AddressSuggestions.limit) -> [AddressSuggestion] {
+            let query = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !query.isEmpty, limit > 0 else { return [] }
+            let words = query.split(whereSeparator: \.isWhitespace)
+            var best: [Ranked] = []
+            for page in candidates {
+                guard let match = page.match(query, words: words) else { continue }
+                let candidate = page.candidate
+                let ranked = Ranked(page: page, match: match,
+                    weight: frecency(visitCount: candidate.visitCount, lastVisit: candidate.lastVisit, now: now)
+                        + (candidate.isBookmarked ? 2 : 0))
+                if best.count == limit, let last = best.last, !ranked.precedes(last) { continue }
+                let index = best.firstIndex { ranked.precedes($0) } ?? best.endIndex
+                best.insert(ranked, at: index)
+                if best.count > limit { best.removeLast() }
+            }
+            return best.map {
+                AddressSuggestion(url: $0.page.candidate.url, title: $0.page.candidate.title,
+                                  isBookmarked: $0.page.candidate.isBookmarked)
+            }
         }
     }
 
-    private static func match(_ query: String, address: String, url: URL, title: String) -> Match? {
-        let title = title.lowercased()
-        if address.hasPrefix(query) || url.absoluteString.lowercased().hasPrefix(query) { return .addressPrefix }
-        if title.hasPrefix(query)
-            || title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains(where: { $0.hasPrefix(query) }) {
-            return .titleWord
-        }
-        let text = "\(address) \(title)"
-        let words = query.split(whereSeparator: \.isWhitespace)
-        return words.allSatisfy { text.contains($0) } ? .contains : nil
+    /// Compatibility entry point for one-shot callers; the address field reuses an Index across keystrokes.
+    static func rank(_ query: String, pages: [HistoryPage], bookmarks: [Bookmark], now: Date = .now,
+                     limit: Int = limit) -> [AddressSuggestion] {
+        Index(pages: pages, bookmarks: bookmarks).rank(query, now: now, limit: limit)
     }
 
     /// Visits count for less as they age.
@@ -123,6 +159,33 @@ enum AddressSuggestions {
         guard let completion = candidates.first(where: { $0.hasPrefix(typed) }),
               completion.count > text.count else { return nil }
         return text + completion.dropFirst(text.count)
+    }
+}
+
+/// One index per address field. Both preparation and matching execute away from the UI actor.
+actor AddressSuggestionSearch {
+    private var revision: Int?
+    private var bookmarks: [Bookmark] = []
+    private var index: AddressSuggestions.Index?
+
+    func prepare(visits: [HistoryVisit], revision: Int, bookmarks: [Bookmark]) {
+        guard self.revision != revision || self.bookmarks != bookmarks || index == nil else { return }
+        var pages: [URL: HistoryPage] = [:]
+        for visit in visits {
+            let page = pages[visit.url]
+            pages[visit.url] = HistoryPage(url: visit.url, title: visit.title.isEmpty ? page?.title ?? "" : visit.title,
+                                          visitCount: (page?.visitCount ?? 0) + 1, lastVisit: visit.date)
+        }
+        index = AddressSuggestions.Index(pages: Array(pages.values), bookmarks: bookmarks)
+        self.revision = revision
+        self.bookmarks = bookmarks
+    }
+
+    func rank(_ query: String, visits: [HistoryVisit], revision: Int, bookmarks: [Bookmark]) -> [AddressSuggestion] {
+        guard !Task.isCancelled else { return [] }
+        prepare(visits: visits, revision: revision, bookmarks: bookmarks)
+        guard !Task.isCancelled else { return [] }
+        return index?.rank(query) ?? []
     }
 }
 

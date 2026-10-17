@@ -156,4 +156,23 @@ final class HistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(history.visits.map(\.url), [apple])
     }
+    func testDayCacheInvalidatesWithoutChangingGroupingOrSearch() {
+        let history = HistoryStore(file: nil)
+        let url = URL(string: "https://cache.example")!
+        let now = Date()
+        let id = history.recordVisit(to: url, title: "Before", at: now)
+        let first = history.days()
+        XCTAssertEqual(history.days(), first)
+        history.updateTitle(of: id, to: "After")
+        XCTAssertEqual(history.days().first?.entries.first?.title, "After")
+        XCTAssertTrue(history.days(matching: "Before").isEmpty)
+        XCTAssertEqual(history.days(matching: "After").first?.entries.count, 1)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 12 * 3600)!
+        XCTAssertEqual(history.days(calendar: calendar).first?.date, calendar.startOfDay(for: now))
+        history.removeVisits(to: url, onDayOf: now)
+        XCTAssertTrue(history.days().isEmpty)
+        XCTAssertTrue(history.days(matching: "After").isEmpty)
+    }
+
 }
