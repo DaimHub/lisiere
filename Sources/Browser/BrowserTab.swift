@@ -13,6 +13,9 @@ final class BrowserTab: Identifiable {
     let contentView = NSView()
     var isNewTab = true
     var showsHomePage = false
+    /// Pinning protects the tab from closure, not from background memory reclamation.
+    var isPinned = false
+    var groupID: UUID?
     /// The tab whose page opened this one, so its links and pop-ups open next to each other.
     @ObservationIgnored var openerID: UUID?
     /// Whether another page's script opened this one, and can still reach it through `window.opener`.
@@ -253,7 +256,7 @@ final class BrowserTab: Identifiable {
 
     func finishPasswordPrompt(_ token: UUID) {
         guard passwordPrompts.remove(token) != nil, passwordPrompts.isEmpty else { return }
-        let shouldClose = closesAfterPasswordDecision
+        let shouldClose = closesAfterPasswordDecision && !isPinned
         closesAfterPasswordDecision = false
         resumePasswordDecisionWaiters(!shouldClose)
         if shouldClose { browser?.closeTab(id) }
@@ -270,6 +273,7 @@ final class BrowserTab: Identifiable {
     /// Automatic popup closure must leave time to answer Save, Not Now, or Never.
     /// An explicit user close still goes straight through BrowserModel.closeTab.
     func requestCloseFromPage() {
+        guard !isPinned else { return }
         guard passwordPrompts.isEmpty else {
             closesAfterPasswordDecision = true
             return

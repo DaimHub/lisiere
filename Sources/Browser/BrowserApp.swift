@@ -140,6 +140,13 @@ private struct BrowserCommands: Commands {
             }
         }
         CommandMenu("Tabs") {
+            Button(browser?.activeTab?.isPinned == true ? "Unpin Tab" : "Pin Tab", browserIcon: .pin) {
+                guard let browser, let tab = browser.activeTab else { return }
+                browser.setPinned(!tab.isPinned, for: tab.id)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(browser?.activeTab == nil)
+            Divider()
             Button("Next Tab", browserIcon: .forward) { browser?.switchTab(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Tab", browserIcon: .back) { browser?.switchTab(by: -1) }

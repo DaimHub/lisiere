@@ -44,6 +44,41 @@ final class BookmarkStoreTests: XCTestCase {
         XCTAssertEqual(store.bookmarks.map(\.title), ["b.com", "c.com", "a.com"])
     }
 
+    func testEmptyAndNullNamesPersistAsIconOnlyWithoutLosingBookmarks() throws {
+        let defaults = makeDefaults()
+        let store = BookmarkStore(defaults: defaults)
+        let url = URL(string: "https://www.example.com")!
+        store.add(title: "Example", url: url)
+        let id = try XCTUnwrap(store.bookmarks.first?.id)
+        store.rename(id, to: " \n ")
+        let restored = BookmarkStore(defaults: defaults)
+        XCTAssertEqual(restored.bookmarks.count, 1)
+        XCTAssertEqual(restored.bookmarks[0].id, id)
+        XCTAssertNil(restored.bookmarks[0].title)
+        XCTAssertNil(restored.bookmarks[0].visibleTitle)
+        XCTAssertEqual(restored.bookmarks[0].displayTitle, "example.com")
+        XCTAssertEqual(restored.bookmarks[0].url, url)
+        restored.rename(id, to: "Restored name")
+        XCTAssertEqual(restored.bookmarks[0].visibleTitle, "Restored name")
+    }
+
+    func testLegacyEmptyMissingAndNullTitlesDecodeTogether() throws {
+        let rows: [[String: Any]] = [
+            ["id": UUID().uuidString, "url": "https://named.example", "title": "Named"],
+            ["id": UUID().uuidString, "url": "https://empty.example", "title": ""],
+            ["id": UUID().uuidString, "url": "https://null.example", "title": NSNull()],
+            ["id": UUID().uuidString, "url": "https://missing.example"]
+        ]
+        let defaults = makeDefaults()
+        defaults.set(try JSONSerialization.data(withJSONObject: rows), forKey: "bookmarks")
+        let store = BookmarkStore(defaults: defaults)
+        XCTAssertEqual(store.bookmarks.count, 4)
+        XCTAssertEqual(store.bookmarks.map(\.visibleTitle), ["Named", nil, nil, nil])
+        XCTAssertEqual(store.bookmarks.map(\.displayTitle), ["Named", "empty.example", "null.example", "missing.example"])
+        store.add(title: nil, url: URL(string: "https://new.example")!)
+        XCTAssertEqual(BookmarkStore(defaults: defaults).bookmarks.count, 5)
+    }
+
     func testBookmarksBarVisibility() {
         XCTAssertTrue(BookmarksBarVisibility.always.isVisible(onNewTab: false))
         XCTAssertTrue(BookmarksBarVisibility.newTabOnly.isVisible(onNewTab: true))

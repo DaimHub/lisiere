@@ -57,15 +57,18 @@ struct BookmarksBar: View {
         Button { open(bookmark) } label: {
             HStack(spacing: 6) {
                 SiteIcon(url: bookmark.url, size: 14)
-                Text(bookmark.displayTitle)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .frame(maxWidth: 150, alignment: .leading)
-                    .fixedSize()
+                if let title = bookmark.visibleTitle {
+                    Text(title)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .frame(maxWidth: 150, alignment: .leading)
+                        .fixedSize()
+                }
             }
         }
         .buttonStyle(BookmarkButtonStyle())
         .help(bookmark.url.absoluteString)
+        .accessibilityLabel(bookmark.displayTitle)
         .browserContextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser,
                                     rename: { renamingBookmarkID = bookmark.id }).actions }
         .popover(isPresented: Binding(get: { renamingBookmarkID == bookmark.id },
@@ -114,7 +117,7 @@ struct BookmarkMenu {
     }
 }
 
-private struct RenameBookmarkForm: View {
+struct RenameBookmarkForm: View {
     let bookmark: Bookmark
     let save: (String) -> Void
     @State private var title = ""
@@ -124,7 +127,7 @@ private struct RenameBookmarkForm: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Rename Bookmark")
                 .font(.headline)
-            TextField("Name", text: $title)
+            TextField("Name (optional)", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .focused($isFocused)
                 .onSubmit { save(title) }
@@ -137,7 +140,7 @@ private struct RenameBookmarkForm: View {
         .padding(14)
         .frame(width: 260)
         .onAppear {
-            title = bookmark.displayTitle
+            title = bookmark.title ?? ""
             isFocused = true
         }
     }

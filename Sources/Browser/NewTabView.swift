@@ -7,6 +7,7 @@ struct NewTabView: View {
     var tab: BrowserTab? = nil
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
+    @State private var renamingBookmarkID: UUID?
     private var page: NewTabPage { (tab ?? browser.activeTab)?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
     private var mascot: Mascot { browser.preferences.mascot }
     private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
@@ -120,7 +121,17 @@ struct NewTabView: View {
                             browser.open(bookmark.url,
                                          inNewTab: NSApp.currentEvent?.modifierFlags.contains(.command) == true)
                         }
-                        .browserContextMenu { BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser).actions }
+                        .browserContextMenu {
+                            BookmarkMenu(bookmark: bookmark, bookmarks: bookmarks, browser: browser,
+                                         rename: { renamingBookmarkID = bookmark.id }).actions
+                        }
+                        .popover(isPresented: Binding(get: { renamingBookmarkID == bookmark.id },
+                                                      set: { if !$0 { renamingBookmarkID = nil } })) {
+                            RenameBookmarkForm(bookmark: bookmark) { title in
+                                bookmarks.rename(bookmark.id, to: title)
+                                renamingBookmarkID = nil
+                            }
+                        }
                     }
                 }
             }
@@ -159,11 +170,13 @@ private struct FavoriteTile: View {
                     }
                     .shadow(color: .black.opacity(isHovered ? 0.12 : 0), radius: 10, y: 4)
                     .scaleEffect(isHovered ? 1.04 : 1)
-                Text(bookmark.displayTitle)
+                Text(bookmark.visibleTitle ?? "")
                     .font(.system(size: 11.5))
                     .foregroundStyle(isHovered ? Color.primary : Color.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: Self.width - 4)
+                    .frame(height: 14)
+                    .accessibilityHidden(true)
             }
             .frame(width: Self.width)
             .contentShape(Rectangle())
@@ -172,6 +185,7 @@ private struct FavoriteTile: View {
         .onHover { isHovered = $0 }
         .animation(.spring(duration: 0.25, bounce: 0.3), value: isHovered)
         .help(bookmark.url.absoluteString)
+        .accessibilityLabel(bookmark.displayTitle)
     }
 }
 

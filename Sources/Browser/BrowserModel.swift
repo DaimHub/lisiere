@@ -29,6 +29,8 @@ final class BrowserModel {
     private(set) var tabs: [BrowserTab] = [] {
         didSet { reconcileSplitView() }
     }
+    private(set) var groups: [TabGroup] = []
+
     /// Window-local presentation only. Both pages remain ordinary tabs with their own WebKit state.
     private(set) var splitTabIDs: [UUID] = []
     var isSplitView: Bool { splitTabIDs.count == 2 }
@@ -41,9 +43,12 @@ final class BrowserModel {
 
     /// Join the visible pair without changing stored tab order. The card mirrors left/right pane order.
     var tabStripGroups: [TabStripGroup] {
+        // A split across pin/group boundaries keeps separate cards in their proper sections.
+        let pair = splitTabs
+        let joinsPair = pair.count == 2 && pair[0].isPinned == pair[1].isPinned && pair[0].groupID == pair[1].groupID
         let anchor = tabs.first { splitTabIDs.contains($0.id) }?.id
         return tabs.compactMap { tab in
-            if isSplitView, splitTabIDs.contains(tab.id) {
+            if joinsPair, splitTabIDs.contains(tab.id) {
                 return tab.id == anchor ? TabStripGroup(id: tab.id, tabs: splitTabs) : nil
             }
             return TabStripGroup(id: tab.id, tabs: [tab])
@@ -63,7 +68,9 @@ final class BrowserModel {
             second = existing
         } else {
             second = makeTab()
+            second.groupID = first.groupID
             tabs.append(second)
+            normalizeTabOrder()
         }
         splitTabIDs = [first.id, second.id]
         first.restore()
@@ -93,6 +100,7 @@ final class BrowserModel {
         if activeTab == nil, let survivor { activeTabID = survivor }
     }
     private var closedTabs: [ClosedTab] = []
+    @ObservationIgnored private var isRestoringSession = false
     var activeTabID: UUID? {
         didSet {
             guard oldValue != activeTabID else { return }
@@ -103,6 +111,7 @@ final class BrowserModel {
                 previousTab.captureThumbnail(afterScreenUpdates: false)
                 previousTab.lastActive = .now
             }
+            if !isRestoringSession { expandGroup(activeTab?.groupID) }
             activeTab?.restore()
             activeTab?.didBecomeSelected()
             if isSplitView { activeTab?.focusPage() }
@@ -119,6 +128,7 @@ final class BrowserModel {
         let title: String
         /// The tab's back-forward history, restored when it reopens.
         let interactionState: Any?
+        let groupID: UUID?
     }
 
     init(downloads: DownloadManager = DownloadManager(), sitePermissions: SitePermissions = .shared,
@@ -208,14 +218,18 @@ final class BrowserModel {
         activeTabID = nil
         tabs = []
         closedTabs = []
+        groups = []
         // SwiftUI may retain a closed window model. Release its persistent store too.
         websiteDataStore = .nonPersistent()
         window = nil
     }
 
-    func addTab() {
+    func addTab(in groupID: UUID? = nil) {
         let tab = makeTab()
+        tab.groupID = validGroupID(groupID)
+        expandGroup(tab.groupID)
         tabs.append(tab)
+        normalizeTabOrder()
         activeTabID = tab.id
         requestAddressFocus()
     }
@@ -237,14 +251,18 @@ final class BrowserModel {
         // The copy starts suspended, so selecting it restores the original's history and scroll position.
         let tab = original.url == nil ? makeTab()
             : adopt(BrowserTab(url: original.url, title: original.pageTitle, interactionState: original.interactionState, appearance: appearance))
+        tab.groupID = original.groupID
         tabs.insert(tab, at: index + 1)
+        normalizeTabOrder()
         activeTabID = tab.id
     }
 
     func moveTab(_ id: UUID, to destinationIndex: Int) {
         guard let sourceIndex = tabs.firstIndex(where: { $0.id == id }),
               tabs.indices.contains(destinationIndex),
-              sourceIndex != destinationIndex else { return }
+              sourceIndex != destinationIndex,
+              tabs[sourceIndex].isPinned == tabs[destinationIndex].isPinned,
+              tabs[sourceIndex].groupID == tabs[destinationIndex].groupID else { return }
         tabs.move(fromOffsets: IndexSet(integer: sourceIndex),
                   toOffset: destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex)
     }
@@ -254,7 +272,9 @@ final class BrowserModel {
         let groups = tabStripGroups
         guard let source = groups.first(where: { $0.tabs.contains { $0.id == id } }),
               let target = groups.first(where: { $0.tabs.contains { $0.id == targetID } }),
-              source.id != target.id else { return }
+              source.id != target.id,
+              source.tabs.first?.isPinned == target.tabs.first?.isPinned,
+              source.tabs.first?.groupID == target.tabs.first?.groupID else { return }
         let sourceIDs = Set(source.tabs.map(\.id))
         let targetIDs = Set(target.tabs.map(\.id))
         let offsets = IndexSet(tabs.indices.filter { sourceIDs.contains(tabs[$0].id) })
@@ -266,16 +286,16 @@ final class BrowserModel {
 
     func closeOtherTabs(than id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
-        for tab in tabs where tab.id != id {
+        for tab in tabs where tab.id != id && !tab.isPinned {
             rememberClosedTab(tab)
         }
-        tabs.removeAll { $0.id != id }
+        tabs.removeAll { $0.id != id && !$0.isPinned }
         activeTabID = id
     }
 
     func closeTabs(after id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let closingTabs = tabs[(index + 1)...]
+        let closingTabs = tabs[(index + 1)...].filter { !$0.isPinned }
         closingTabs.forEach(rememberClosedTab)
         let closingIDs = Set(closingTabs.map(\.id))
         tabs.removeAll { closingIDs.contains($0.id) }
@@ -288,7 +308,7 @@ final class BrowserModel {
     func closeTabs(afterGroupContaining id: UUID) {
         let groups = tabStripGroups
         guard let index = groups.firstIndex(where: { $0.tabs.contains { $0.id == id } }) else { return }
-        let closingIDs = Set(groups.dropFirst(index + 1).flatMap { $0.tabs.map(\.id) })
+        let closingIDs = Set(groups.dropFirst(index + 1).flatMap { $0.tabs.filter { !$0.isPinned }.map(\.id) })
         for tab in tabs where closingIDs.contains(tab.id) { rememberClosedTab(tab) }
         tabs.removeAll { closingIDs.contains($0.id) }
         if let activeTabID, closingIDs.contains(activeTabID) { self.activeTabID = id }
@@ -300,7 +320,7 @@ final class BrowserModel {
     }
 
     func closeTab(_ id: UUID) {
-        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = tabs.firstIndex(where: { $0.id == id }), !tabs[index].isPinned else { return }
         rememberClosedTab(tabs[index])
         tabs.remove(at: index)
         if tabs.isEmpty {
@@ -315,20 +335,22 @@ final class BrowserModel {
         tab.cancelPendingPageWork()
         let isBlank = tab.isNewTab || tab.url == nil
         closedTabs.append(ClosedTab(url: isBlank ? nil : tab.url, title: tab.pageTitle,
-                                    interactionState: isBlank ? nil : tab.interactionState))
+                                    interactionState: isBlank ? nil : tab.interactionState, groupID: tab.groupID))
         if closedTabs.count > 10 { closedTabs.removeFirst() }
     }
 
     func reopenClosedTab() {
         guard let closedTab = closedTabs.popLast() else { return }
         guard closedTab.url != nil else {
-            addTab()
+            addTab(in: closedTab.groupID)
             return
         }
         // Selecting the suspended tab restores its history, or loads its address.
         let tab = adopt(BrowserTab(url: closedTab.url, title: closedTab.title,
                                    interactionState: closedTab.interactionState, appearance: appearance))
+        tab.groupID = validGroupID(closedTab.groupID)
         tabs.append(tab)
+        normalizeTabOrder()
         activeTabID = tab.id
     }
 
@@ -339,6 +361,7 @@ final class BrowserModel {
                       loading request: URLRequest? = nil, select: Bool) -> BrowserTab {
         let tab = makeTab(configuration: configuration)
         tab.isNewTab = false
+        tab.groupID = opener.groupID
         tab.openerID = opener.id
         tab.isPopUp = configuration != nil
         // Background tabs lay out at the size they'll be shown at.
@@ -348,6 +371,7 @@ final class BrowserModel {
             index += 1
         }
         tabs.insert(tab, at: index)
+        normalizeTabOrder()
         if let request { tab.webView?.load(request) }
         if select { activeTabID = tab.id }
         return tab
@@ -355,6 +379,7 @@ final class BrowserModel {
 
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
+        expandGroup(tabs[index].groupID)
         activeTabID = tabs[index].id
     }
 
@@ -400,6 +425,106 @@ final class BrowserModel {
         tab.reload()
     }
 
+    // MARK: Pins and named groups
+
+    func setPinned(_ pinned: Bool, for id: UUID) {
+        guard let tab = tab(withID: id), tab.isPinned != pinned else { return }
+        tab.isPinned = pinned
+        normalizeTabOrder()
+    }
+
+    @discardableResult
+    func createGroup(name: String, color: TabGroupColor, tabID: UUID? = nil) -> UUID {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let group = TabGroup(name: name.isEmpty ? "New Group" : name, color: color)
+        groups.append(group)
+        if let tabID { assignTab(tabID, to: group.id) }
+        return group.id
+    }
+
+    func updateGroup(_ id: UUID, name: String, color: TabGroupColor) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].name = name
+        groups[index].color = color
+    }
+
+    func assignTab(_ id: UUID, to groupID: UUID?) {
+        guard let tab = tab(withID: id), groupID == nil || validGroupID(groupID) != nil else { return }
+        tab.groupID = groupID
+        expandGroup(groupID)
+        normalizeTabOrder()
+    }
+
+    /// Removing a folder keeps its pages, pins, WebKit state, and selection intact.
+    func ungroup(_ id: UUID) {
+        for tab in tabs where tab.groupID == id { tab.groupID = nil }
+        groups.removeAll { $0.id == id }
+        normalizeTabOrder()
+    }
+
+    func toggleGroupCollapsed(_ id: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].isCollapsed.toggle()
+    }
+
+    func moveGroup(_ id: UUID, by offset: Int) {
+        guard let index = groups.firstIndex(where: { $0.id == id }),
+              groups.indices.contains(index + offset) else { return }
+        groups.swapAt(index, index + offset)
+        normalizeTabOrder()
+    }
+
+    private func validGroupID(_ id: UUID?) -> UUID? {
+        id.flatMap { id in groups.contains { $0.id == id } ? id : nil }
+    }
+
+    private func expandGroup(_ id: UUID?) {
+        guard let id, let index = groups.firstIndex(where: { $0.id == id }), groups[index].isCollapsed else { return }
+        groups[index].isCollapsed = false
+    }
+
+    /// Stable linear partition: pins lead; each named group stays contiguous within each pin section.
+    private func normalizeTabOrder() {
+        let pinned = Dictionary(grouping: tabs.filter(\.isPinned), by: \.groupID)
+        let regular = Dictionary(grouping: tabs.filter { !$0.isPinned }, by: \.groupID)
+        var ordered: [BrowserTab] = pinned[nil] ?? []
+        for group in groups { ordered += pinned[group.id] ?? [] }
+        for group in groups { ordered += regular[group.id] ?? [] }
+        ordered += regular[nil] ?? []
+        if ordered.map(\.id) != tabs.map(\.id) { tabs = ordered }
+    }
+
+    struct TabSection: Identifiable {
+        let group: TabGroup?
+        let isPinned: Bool
+        let cards: [TabStripGroup]
+        var id: String { "\(isPinned)-\(group?.id.uuidString ?? "ungrouped")" }
+        var tabCount: Int { cards.reduce(0) { $0 + $1.tabs.count } }
+        var visibleCards: [TabStripGroup] { group?.isCollapsed == true ? [] : cards }
+    }
+
+    /// Build the section lookup once, independent of page loading and favicon updates.
+    var tabSections: [TabSection] {
+        let cards = tabStripGroups
+        let pinned = Dictionary(grouping: cards.filter { $0.tabs.first?.isPinned == true }, by: { $0.tabs.first?.groupID })
+        let regular = Dictionary(grouping: cards.filter { $0.tabs.first?.isPinned != true }, by: { $0.tabs.first?.groupID })
+        var sections: [TabSection] = []
+        if let loose = pinned[nil] { sections.append(TabSection(group: nil, isPinned: true, cards: loose)) }
+        for group in groups {
+            if let items = pinned[group.id] { sections.append(TabSection(group: group, isPinned: true, cards: items)) }
+        }
+        for group in groups {
+            if let items = regular[group.id] {
+                sections.append(TabSection(group: group, isPinned: false, cards: items))
+            } else if pinned[group.id] == nil {
+                sections.append(TabSection(group: group, isPinned: false, cards: []))
+            }
+        }
+        if let loose = regular[nil] { sections.append(TabSection(group: nil, isPinned: false, cards: loose)) }
+        return sections
+    }
+
     func stopLoading() {
         activeTab?.webView?.stopLoading()
     }
@@ -422,26 +547,36 @@ final class BrowserModel {
 
     /// Whether the window only has a new tab, so a restored session can take its place.
     var isBlank: Bool {
-        tabs.count == 1 && tabs[0].isNewTab
+        tabs.count == 1 && tabs[0].isNewTab && !tabs[0].isPinned && groups.isEmpty
     }
 
     func windowSession() -> WindowSession {
         WindowSession(tabs: tabs.map { tab in
             let isBlank = tab.isNewTab || tab.url == nil
             return TabSession(url: isBlank ? nil : tab.url, title: tab.pageTitle,
-                              interactionState: isBlank ? nil : tab.interactionState as? Data)
-        }, selectedIndex: tabs.firstIndex { $0.id == activeTabID } ?? 0)
+                              interactionState: isBlank ? nil : tab.interactionState as? Data,
+                              isPinned: tab.isPinned, groupID: tab.groupID)
+        }, selectedIndex: tabs.firstIndex { $0.id == activeTabID } ?? 0, groups: groups)
     }
 
     /// Replaces the window's tabs with a saved window's. They start suspended, so only the selected tab loads.
     func restoreSession(_ session: WindowSession) {
         guard !session.tabs.isEmpty else { return }
+        isRestoringSession = true
+        defer { isRestoringSession = false }
         tabs.forEach { $0.cancelPendingPageWork() }
-        tabs = session.tabs.map { tab in
-            tab.url == nil ? makeTab()
-                : adopt(BrowserTab(url: tab.url, title: tab.title, interactionState: tab.interactionState, appearance: appearance))
+        var seen = Set<UUID>()
+        groups = session.groups.filter { seen.insert($0.id).inserted }
+        tabs = session.tabs.map { saved in
+            let tab = saved.url == nil ? makeTab()
+                : adopt(BrowserTab(url: saved.url, title: saved.title, interactionState: saved.interactionState, appearance: appearance))
+            tab.isPinned = saved.isPinned
+            tab.groupID = validGroupID(saved.groupID)
+            return tab
         }
-        activeTabID = tabs[min(max(session.selectedIndex, 0), tabs.count - 1)].id
+        let selectedID = tabs[min(max(session.selectedIndex, 0), tabs.count - 1)].id
+        normalizeTabOrder()
+        activeTabID = selectedID
     }
 
     // MARK: Find

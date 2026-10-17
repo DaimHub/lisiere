@@ -51,6 +51,14 @@ final class AddressSuggestionsTests: XCTestCase {
         XCTAssertTrue(AddressSuggestions.rank("  ", pages: pages, bookmarks: [], now: now).isEmpty)
     }
 
+    func testUnnamedBookmarkStillAppearsInAddressSearch() {
+        let bookmark = Bookmark(title: nil, url: URL(string: "https://www.example.com")!)
+        let ranked = AddressSuggestions.rank("example", pages: [], bookmarks: [bookmark], now: now)
+        XCTAssertEqual(ranked.first?.url, bookmark.url)
+        XCTAssertEqual(ranked.first?.title, "example.com")
+        XCTAssertEqual(ranked.first?.isBookmarked, true)
+    }
+
     func testOlderVisitsCountForLess() {
         XCTAssertGreaterThan(AddressSuggestions.frecency(visitCount: 2, lastVisit: now, now: now),
                              AddressSuggestions.frecency(visitCount: 2, lastVisit: now - 10 * 24 * 60 * 60, now: now))

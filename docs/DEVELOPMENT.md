@@ -143,3 +143,37 @@ value. Continuous physical divider dragging and tab-card dragging remain unverif
 semantics are covered by XCTest. Full VoiceOver traversal and distribution/notarization were not tested.
 Private tab layout was changed through its context menu: the existing View-menu layout shortcut does
 not update private-window preferences.
+
+## Pinned tabs and named groups
+
+Pin a tab from its context menu or Tabs > Pin Tab (Shift-Command-P). Pins occupy the leading
+icon section in the horizontal strip and the top icon grid in the sidebar. They have no close
+control; ordinary, bulk, keyboard and page-requested tab closure all go through BrowserModel and
+leave them open. Unpin before closing. Window closure and app quit retain their existing session
+behavior. Pinning does not exempt an inactive page from the existing idle/memory-pressure policy;
+media, visible split panes, popups and their openers keep their existing suspension safeguards.
+
+Create a group from the tab area's context menu or a tab's Move to Group > New Group action.
+Group headers toggle collapse and expose name/color editing, adding a tab, ordering and ungrouping.
+Dropping a local tab on a group header assigns it to that group; the menu provides the same action
+without dragging. Ungrouping never closes a page. Empty groups remain available for later use.
+Names and counts identify groups independently of their seven native semantic colors.
+
+Pins stay first even when grouped. A group with both pinned and ordinary pages has a header in
+each section; both headers edit the same group and share its collapsed state. Selecting a hidden
+tab through keyboard navigation expands its group. Duplicate tabs and child tabs inherit the
+group but start unpinned. Ordinary card dragging stays within the same pin/group section; moving
+between groups uses a header drop or the menu. Split pages keep their existing content and focus:
+only pages in the same pin/group section can share a joined card. Sidebar pins always use single
+icons so the grid remains compact.
+
+TabSession stores pin state and group identity; WindowSession stores names, colors, group order
+and collapse state. Missing fields in older sessions default to unpinned/ungrouped. Restoration
+normalizes orphaned memberships and preserves the selected tab while leaving background pages
+suspended. SessionStore observes metadata-only edits as well as page changes. These values follow
+the existing per-profile, per-window session lifecycle and private-window non-persistence.
+
+Bookmark names may be null, missing, empty or whitespace. The bar and start page display unnamed
+bookmarks as icons, while menus, search, tooltips and accessibility retain a host/address label.
+Renaming never replaces an empty name with that fallback. Existing bookmark IDs and URLs remain
+unchanged. Both the bar and start-page favorites expose Rename.

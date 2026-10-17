@@ -5,11 +5,17 @@ import SwiftUI
 
 struct Bookmark: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
-    var title: String
+    var title: String?
     var url: URL
 
+    /// Blank names intentionally render as an icon, while menus and accessibility keep a useful label.
+    var visibleTitle: String? {
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        return title
+    }
+
     var displayTitle: String {
-        if !title.isEmpty { return title }
+        if let title = visibleTitle { return title }
         return url.host().map(Bookmark.trimmedHost) ?? url.absoluteString
     }
 
@@ -68,14 +74,15 @@ final class BookmarkStore {
         bookmark(for: url) != nil
     }
 
-    func add(title: String, url: URL) {
+    func add(title: String?, url: URL) {
         guard !isBookmarked(url) else { return }
-        bookmarks.append(Bookmark(title: title, url: url))
+        let bookmark = Bookmark(title: title, url: url)
+        bookmarks.append(Bookmark(title: bookmark.visibleTitle, url: url))
         save()
     }
 
     /// Adds the page when it isn't bookmarked yet, otherwise removes it.
-    func toggle(title: String, url: URL) {
+    func toggle(title: String?, url: URL) {
         if let bookmark = bookmark(for: url) {
             remove(bookmark.id)
         } else {
@@ -88,9 +95,10 @@ final class BookmarkStore {
         save()
     }
 
-    func rename(_ id: UUID, to title: String) {
+    func rename(_ id: UUID, to title: String?) {
         guard let index = bookmarks.firstIndex(where: { $0.id == id }) else { return }
-        bookmarks[index].title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        bookmarks[index].title = title
+        bookmarks[index].title = bookmarks[index].visibleTitle
         save()
     }
 

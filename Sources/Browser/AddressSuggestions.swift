@@ -86,9 +86,9 @@ enum AddressSuggestions {
                                                lastVisit: page.lastVisit)
             }
             for bookmark in bookmarks {
-                var candidate = candidates[bookmark.url] ?? Candidate(url: bookmark.url, title: bookmark.title)
+                var candidate = candidates[bookmark.url] ?? Candidate(url: bookmark.url, title: bookmark.displayTitle)
                 candidate.isBookmarked = true
-                if !bookmark.title.isEmpty { candidate.title = bookmark.title }
+                if let title = bookmark.visibleTitle { candidate.title = title }
                 candidates[bookmark.url] = candidate
             }
             self.candidates = candidates.values.map(Prepared.init)

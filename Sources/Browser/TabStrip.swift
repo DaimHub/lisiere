@@ -19,13 +19,13 @@ struct HorizontalTabStripMetrics {
     let viewportWidth: CGFloat
     var scrolls: Bool { contentWidth > viewportWidth }
 
-    init(tabCount: Int, width: CGFloat, leading: CGFloat) {
+    init(tabCount: Int, width: CGFloat, leading: CGFloat, supplementaryWidth: CGFloat = 0) {
         let count = CGFloat(max(0, tabCount))
         let gaps = Self.spacing * max(0, count - 1)
         let available = max(0, width - leading - BrowserChrome.edgeInset
                             - Self.addButtonSize - Self.dragAreaWidth - Self.spacing * 2)
-        tabWidth = count == 0 ? 0 : min(220, max(56, ((available - gaps) / count).rounded(.down)))
-        contentWidth = tabWidth * count + gaps
+        tabWidth = count == 0 ? 0 : min(220, max(56, ((available - gaps - supplementaryWidth) / count).rounded(.down)))
+        contentWidth = tabWidth * count + gaps + supplementaryWidth
         viewportWidth = min(contentWidth, available)
     }
 }
@@ -44,6 +44,8 @@ struct TabStrip: View {
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
     @State private var draggedTabID: UUID?
+    @State private var groupEditor: TabGroupEditorRequest?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
 
     private let spacing = HorizontalTabStripMetrics.spacing
@@ -57,44 +59,39 @@ struct TabStrip: View {
             }
         }
         .task(id: hoveredTabID) { await updateHoverCard() }
+        .sheet(item: $groupEditor) { request in
+            TabGroupEditor(browser: browser, request: request)
+        }
     }
 
     private var horizontalStrip: some View {
         GeometryReader { geometry in
             let leading = isFullScreen ? BrowserChrome.edgeInset
                 : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.tabRowHeight) + 12
-            let metrics = HorizontalTabStripMetrics(tabCount: browser.tabs.count,
-                                                    width: geometry.size.width, leading: leading)
+            let sections = browser.tabSections
+            let pinned = sections.filter(\.isPinned)
+            let regular = sections.filter { !$0.isPinned }
+            let pinContentWidth = pinned.reduce(CGFloat(0)) { width, section in
+                width + CGFloat(section.visibleCards.reduce(0) { $0 + $1.tabs.count }) * 40
+                    + (section.group == nil ? 0 : 124)
+            }
+            let available = max(0, geometry.size.width - leading - 100)
+            let pinWidth = min(pinContentWidth, available * (regular.isEmpty ? 1 : 0.4))
+            let metrics = HorizontalTabStripMetrics(
+                tabCount: regular.reduce(0) { $0 + $1.visibleCards.reduce(0) { $0 + $1.tabs.count } },
+                width: geometry.size.width - pinWidth - (pinned.isEmpty ? 0 : 8), leading: leading,
+                supplementaryWidth: CGFloat(regular.filter { $0.group != nil }.count) * 124
+                    + CGFloat(regular.flatMap(\.visibleCards).filter { $0.tabs.count == 2 }.count) * 4)
 
             HStack(spacing: spacing) {
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.horizontal) {
-                        HStack(spacing: spacing) {
-                            ForEach(browser.tabStripGroups) { group in
-                                tabGroup(group, width: metrics.tabWidth)
-                            }
-                        }
-                        .frame(height: BrowserChrome.tabRowHeight)
-                    }
-                    .scrollIndicators(.never)
-                    .scrollDisabled(!metrics.scrolls)
-                    .onAppear {
-                        if let activeTabID = browser.activeTabID { scrollProxy.scrollTo(activeTabID) }
-                    }
-                    .onChange(of: metrics.viewportWidth) { _, _ in
-                        if let activeTabID = browser.activeTabID { scrollProxy.scrollTo(activeTabID) }
-                    }
-                    .onChange(of: browser.activeTabID) { _, activeTabID in
-                        guard let activeTabID else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            scrollProxy.scrollTo(activeTabID)
-                        }
-                    }
+                if !pinned.isEmpty {
+                    horizontalSections(pinned, width: 36)
+                        .frame(width: pinWidth)
+                    Divider().frame(height: 18).padding(.horizontal, 2)
                 }
-                .frame(width: metrics.viewportWidth)
-
+                horizontalSections(regular, width: metrics.tabWidth)
+                    .frame(width: metrics.viewportWidth)
                 newTabButton
-
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
@@ -103,60 +100,142 @@ struct TabStrip: View {
             .padding(.leading, leading)
             .padding(.trailing, BrowserChrome.edgeInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
-            .animation(.snappy(duration: 0.22), value: metrics.tabWidth)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
         .frame(height: BrowserChrome.tabRowHeight)
     }
 
+    private func horizontalSections(_ sections: [BrowserModel.TabSection], width: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: spacing) {
+                    ForEach(sections) { section in
+                        HStack(spacing: spacing) {
+                            if let group = section.group { groupHeader(group, section: section) }
+                            ForEach(section.visibleCards) { card in
+                                tabGroup(card, width: width)
+                            }
+                        }
+                    }
+                }
+                .frame(height: BrowserChrome.tabRowHeight)
+            }
+            .scrollIndicators(.never)
+            .onAppear { revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: width) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
+        }
+    }
+
+    private func revealActiveTab(in sections: [BrowserModel.TabSection], using proxy: ScrollViewProxy) {
+        guard let id = browser.activeTabID,
+              sections.contains(where: { $0.cards.contains { $0.tabs.contains { $0.id == id } } }) else { return }
+        proxy.scrollTo(id)
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(WindowDragGesture())
-                    .browserContextMenu { stripMenuActions }
-            }
-            .padding(.leading, isFullScreen ? BrowserChrome.edgeInset
-                     : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.navigationBarHeight) + 8)
-            .padding(.trailing, BrowserChrome.edgeInset)
-            .frame(height: BrowserChrome.navigationBarHeight)
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(WindowDragGesture())
+                .browserContextMenu { stripMenuActions }
+                .frame(height: BrowserChrome.navigationBarHeight)
 
-            ScrollViewReader { scrollProxy in
-                ScrollView(.vertical) {
-                    VStack(spacing: 2) {
-                        ForEach(browser.tabStripGroups) { group in
-                            tabGroup(group, width: nil)
+            GeometryReader { geometry in
+                let sections = browser.tabSections
+                let pinned = sections.filter(\.isPinned)
+                let columns = max(1, Int((geometry.size.width - BrowserChrome.edgeInset * 2 + 4) / 40))
+                let pinnedHeight = pinned.reduce(CGFloat(8)) { height, section in
+                    let count = section.visibleCards.reduce(0) { $0 + $1.tabs.count }
+                    let rows = (count + columns - 1) / columns
+                    return height + CGFloat(rows) * 36 + (section.group == nil ? 0 : 30) + 4
+                }
+                VStack(spacing: 0) {
+                    if !pinned.isEmpty {
+                        sidebarSections(pinned, showsNewTab: false)
+                            .frame(height: min(pinnedHeight, geometry.size.height * 0.4))
+                        Divider().padding(.horizontal, BrowserChrome.edgeInset).padding(.vertical, 4)
+                    }
+                    sidebarSections(sections.filter { !$0.isPinned }, showsNewTab: true)
+                }
+            }
+            .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: browser.tabs.map(\.id))
+        }
+    }
+
+    private func sidebarSections(_ sections: [BrowserModel.TabSection], showsNewTab: Bool) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(spacing: 4) {
+                    ForEach(sections) { section in
+                        VStack(spacing: 2) {
+                            if let group = section.group { groupHeader(group, section: section) }
+                            if section.isPinned {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 36, maximum: 44), spacing: 4)], spacing: 4) {
+                                    ForEach(section.visibleCards.flatMap(\.tabs)) { tab in
+                                        tabItem(for: tab, width: 36).id(tab.id)
+                                    }
+                                }
+                            } else {
+                                ForEach(section.visibleCards) { card in tabGroup(card, width: nil) }
+                            }
                         }
+                    }
+                    if showsNewTab {
                         newTabButton
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id(addButtonID)
                     }
-                    .padding(.horizontal, BrowserChrome.edgeInset)
-                    .padding(.top, 2)
-                    .padding(.bottom, BrowserChrome.edgeInset)
                 }
-                .scrollIndicators(.never)
-                .onAppear { revealActiveSidebarTab(using: scrollProxy) }
-                .onChange(of: browser.activeTabID) { _, _ in
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        revealActiveSidebarTab(using: scrollProxy)
-                    }
-                }
+                .padding(.horizontal, BrowserChrome.edgeInset)
+                .padding(.top, 2)
+                .padding(.bottom, BrowserChrome.edgeInset)
             }
-            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2)
-                                + BrowserChrome.sidebarTabHeight + 2 + BrowserChrome.edgeInset
-                                + (browser.isSplitView ? 4 : 0)) { stripMenuActions }
-            .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
+            .scrollIndicators(.never)
+            .onAppear { revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .contextMenu { BrowserMenuContent(actions: stripMenuActions) }
         }
     }
 
-    private func revealActiveSidebarTab(using proxy: ScrollViewProxy) {
-        guard let activeTabID = browser.activeTabID else { return }
-        if browser.tabStripGroups.last?.tabs.contains(where: { $0.id == activeTabID }) == true {
-            proxy.scrollTo(addButtonID, anchor: .bottom)
-        } else {
-            proxy.scrollTo(activeTabID)
+    private func groupHeader(_ group: TabGroup, section: BrowserModel.TabSection) -> some View {
+        let isSelected = section.cards.contains { $0.tabs.contains { browser.isTabVisible($0.id) } }
+        return Button { browser.toggleGroupCollapsed(group.id) } label: {
+            HStack(spacing: 6) {
+                Image(browserIcon: group.isCollapsed ? .forward : .chevronDown, size: 10)
+                Image(browserIcon: .tabGroup, size: 13).foregroundStyle(group.color.tint)
+                Text(group.name).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                Text(String(section.tabCount)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .font(.system(size: 11.5, weight: .medium))
+            .padding(.horizontal, 7)
+            .frame(width: layout == .horizontal ? 120 : nil, height: 28)
+            .background(group.color.tint.opacity(isSelected ? 0.14 : 0.07),
+                        in: RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(group.color.tint.opacity(isSelected ? 0.5 : 0.22), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("\(group.name) · \(group.color.title)")
+        .accessibilityLabel("\(group.name), \(section.tabCount) tabs")
+        .accessibilityValue("\(group.isCollapsed ? "Collapsed" : "Expanded"), \(group.color.title)")
+        .accessibilityIdentifier("tab-group-\(section.id)")
+        .browserContextMenu { groupMenuActions(group) }
+        .onDrop(of: [.text], isTargeted: nil) { providers in
+            guard let provider = providers.first, let id = draggedTabID else { return false }
+            draggedTabID = nil
+            let browser = browser
+            // Validate the payload too: a cancelled internal drag can leave its local ID behind.
+            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let value = object as? String, UUID(uuidString: value) == id else { return }
+                Task { @MainActor in browser.assignTab(id, to: group.id) }
+            }
+            return true
         }
     }
 
@@ -247,6 +326,13 @@ struct TabStrip: View {
                            hoverCardTabID = nil
                            browser.closeTab(tab.id)
                        })
+            .overlay(alignment: .bottom) {
+                if let group = browser.groups.first(where: { $0.id == tab.groupID }) {
+                    Capsule().fill(group.color.tint).frame(width: tab.isPinned ? 12 : 24, height: 2)
+                        .padding(.bottom, 1).allowsHitTesting(false)
+                }
+            }
+            .help(tab.isPinned ? "\(tab.title) · Pinned" : tab.title)
             .overlay(alignment: .trailing) {
                 Rectangle()
                     .fill(Color.primary.opacity(0.12))
@@ -301,31 +387,67 @@ struct TabStrip: View {
     }
     private var stripMenuActions: [BrowserContextAction] {
         [.init(title: "New Tab", icon: .add) { browser.addTab() },
+         .init(title: "New Group…", icon: .tabGroup) { groupEditor = TabGroupEditorRequest() },
          .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
          .separator, layoutAction]
     }
+
+    private func groupMenuActions(_ group: TabGroup) -> [BrowserContextAction] {
+        let index = browser.groups.firstIndex { $0.id == group.id } ?? 0
+        return [
+            .init(title: "New Tab in Group", icon: .add) { browser.addTab(in: group.id) },
+            .init(title: "Edit Name and Color…", icon: .rename) { groupEditor = TabGroupEditorRequest(group: group) },
+            .init(title: group.isCollapsed ? "Expand Group" : "Collapse Group", icon: .tabGroup) { browser.toggleGroupCollapsed(group.id) },
+            .separator,
+            .init(title: "Move Group Earlier", icon: .back, isEnabled: index > 0) { browser.moveGroup(group.id, by: -1) },
+            .init(title: "Move Group Later", icon: .forward, isEnabled: index + 1 < browser.groups.count) { browser.moveGroup(group.id, by: 1) },
+            .separator,
+            .init(title: "Ungroup Tabs", icon: .ungroup) { browser.ungroup(group.id) }
+        ]
+    }
+
     private func tabMenuActions(for tab: BrowserTab) -> [BrowserContextAction] {
-        let isJoined = browser.splitTabIDs.contains(tab.id)
-        let lastGroupContainsTab = browser.tabStripGroups.last?.tabs.contains { $0.id == tab.id } ?? true
-        return [.init(title: "New Tab", icon: .add) { browser.addTab() }, .separator,
-         .init(title: "Reload", icon: .reload, isEnabled: !tab.isNewTab) { browser.reloadTab(tab.id) },
-         .init(title: browser.splitTabIDs.contains(tab.id) ? "Exit Split View" : "Open Beside Current Tab",
-               icon: .splitView, isEnabled: browser.isSplitView || browser.activeTabID != tab.id) {
-             if browser.splitTabIDs.contains(tab.id) { browser.endSplitView(keeping: tab.id) }
-             else { browser.startSplitView(with: tab.id) }
-         },
-         .init(title: "Duplicate", icon: .copy) { browser.duplicateTab(tab.id) },
-         .init(title: "Copy Link", icon: .copy, isEnabled: tab.url != nil) {
-             guard let url = tab.url else { return }
-             NSPasteboard.general.clearContents()
-             NSPasteboard.general.setString(url.absoluteString, forType: .string)
-         }, .separator,
-         .init(title: "Close Tab", icon: .close) { browser.closeTab(tab.id) },
-         .init(title: "Close Other Tabs", icon: .close, isEnabled: browser.tabs.count >= 2) { browser.closeOtherTabs(than: tab.id) },
-         .init(title: isJoined ? "Close Tabs After Split View" : "Close Tabs to the Right",
-               icon: .close, isEnabled: !lastGroupContainsTab) { browser.closeTabs(afterGroupContaining: tab.id) }, .separator,
-         .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
-         .separator, layoutAction]
+        let cards = browser.tabStripGroups
+        let index = cards.firstIndex { $0.tabs.contains { $0.id == tab.id } } ?? 0
+        let isJoined = cards.indices.contains(index) && cards[index].tabs.count == 2
+        let canCloseAfter = cards.dropFirst(index + 1).contains { $0.tabs.contains { !$0.isPinned } }
+        var groupActions: [BrowserContextAction] = [
+            .init(title: "New Group…", icon: .tabGroup) { groupEditor = TabGroupEditorRequest(tabID: tab.id) }
+        ]
+        groupActions += browser.groups.map { group in
+            .init(title: group.name, icon: tab.groupID == group.id ? .checkmark : .tabGroup) {
+                browser.assignTab(tab.id, to: group.id)
+            }
+        }
+        if tab.groupID != nil {
+            groupActions += [.separator, .init(title: "Remove from Group", icon: .ungroup) { browser.assignTab(tab.id, to: nil) }]
+        }
+        var actions: [BrowserContextAction] = [
+            .init(title: "New Tab", icon: .add) { browser.addTab() }, .separator,
+            .init(title: tab.isPinned ? "Unpin Tab" : "Pin Tab", icon: .pin) { browser.setPinned(!tab.isPinned, for: tab.id) },
+            .init(title: "Move to Group", icon: .tabGroup, children: groupActions),
+            .init(title: "Reload", icon: .reload, isEnabled: !tab.isNewTab) { browser.reloadTab(tab.id) },
+            .init(title: browser.splitTabIDs.contains(tab.id) ? "Exit Split View" : "Open Beside Current Tab",
+                  icon: .splitView, isEnabled: browser.isSplitView || browser.activeTabID != tab.id) {
+                if browser.splitTabIDs.contains(tab.id) { browser.endSplitView(keeping: tab.id) }
+                else { browser.startSplitView(with: tab.id) }
+            },
+            .init(title: "Duplicate", icon: .copy) { browser.duplicateTab(tab.id) },
+            .init(title: "Copy Link", icon: .copy, isEnabled: tab.url != nil) {
+                guard let url = tab.url else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            }, .separator
+        ]
+        if !tab.isPinned { actions.append(.init(title: "Close Tab", icon: .close) { browser.closeTab(tab.id) }) }
+        actions += [
+            .init(title: "Close Other Tabs", icon: .close, isEnabled: browser.tabs.contains { $0.id != tab.id && !$0.isPinned }) { browser.closeOtherTabs(than: tab.id) },
+            .init(title: isJoined ? "Close Tabs After Split View" : layout == .vertical ? "Close Tabs Below" : "Close Tabs to the Right",
+                  icon: .close, isEnabled: canCloseAfter) { browser.closeTabs(afterGroupContaining: tab.id) }, .separator,
+            .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
+            .separator, layoutAction
+        ]
+        return actions
     }
 
 }
@@ -342,10 +464,10 @@ private struct TabItem: View {
     let select: () -> Void
     let close: () -> Void
 
-    private var isCompact: Bool { (width ?? .infinity) < 100 }
+    private var isCompact: Bool { tab.isPinned || (width ?? .infinity) < 100 }
     private var isJoined: Bool { splitPosition != nil }
     /// Narrow tabs keep their icon visible and only swap in the close button while hovered.
-    private var showsCloseButton: Bool { isHovered || (isActive && !isCompact) }
+    private var showsCloseButton: Bool { !tab.isPinned && (isHovered || (isActive && !isCompact)) }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -355,6 +477,7 @@ private struct TabItem: View {
                 TabIcon(tab: tab, isActive: isActive)
                     .opacity(tab.isSuspended ? 0.5 : 1)
                     .accessibilityLabel(tab.title)
+                    .accessibilityIdentifier("tab-icon-\(tab.id)")
                     .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction(.default, select)
                     .accessibilityHidden(!isCompact)
@@ -384,7 +507,7 @@ private struct TabItem: View {
         .onTapGesture(perform: select)
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityElement(children: .contain)
-        .accessibilityValue(splitPosition.map { $0 == 0 ? "Left pane" : "Right pane" } ?? "")
+        .accessibilityValue([tab.isPinned ? "Pinned" : nil, splitPosition.map { $0 == 0 ? "Left pane" : "Right pane" }].compactMap { $0 }.joined(separator: ", "))
     }
 
     private var title: some View {
@@ -410,6 +533,7 @@ private struct TabItem: View {
             .clipped()
             .accessibilityElement()
             .accessibilityLabel(tab.title)
+            .accessibilityIdentifier("tab-title-\(tab.id)")
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction(.default, select)
     }
@@ -423,6 +547,7 @@ private struct TabItem: View {
         .buttonStyle(ChromeCloseButtonStyle())
         .help("Close Tab (⌘W)")
         .accessibilityLabel("Close \(tab.title)")
+        .accessibilityIdentifier("close-tab-\(tab.id)")
     }
 }
 

@@ -8,6 +8,24 @@ struct TabSession: Codable, Equatable, Sendable {
     var title: String
     /// The archived back-forward history and scroll position. WebKit's interaction state is an `NSData`.
     var interactionState: Data?
+    var isPinned = false
+    var groupID: UUID? = nil
+
+    private enum CodingKeys: String, CodingKey { case url, title, interactionState, isPinned, groupID }
+
+    init(url: URL?, title: String, interactionState: Data?, isPinned: Bool = false, groupID: UUID? = nil) {
+        self.url = url; self.title = title; self.interactionState = interactionState
+        self.isPinned = isPinned; self.groupID = groupID
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        url = try values.decodeIfPresent(URL.self, forKey: .url)
+        title = try values.decode(String.self, forKey: .title)
+        interactionState = try values.decodeIfPresent(Data.self, forKey: .interactionState)
+        isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        groupID = try values.decodeIfPresent(UUID.self, forKey: .groupID)
+    }
 }
 
 struct WindowSession: Codable, Equatable, Sendable {
@@ -15,6 +33,22 @@ struct WindowSession: Codable, Equatable, Sendable {
     var selectedIndex: Int
     /// Links a parked profile session to its physical browser window across launches.
     var profileWindowID: UUID? = nil
+    var groups: [TabGroup] = []
+
+    private enum CodingKeys: String, CodingKey { case tabs, selectedIndex, profileWindowID, groups }
+
+    init(tabs: [TabSession], selectedIndex: Int, profileWindowID: UUID? = nil, groups: [TabGroup] = []) {
+        self.tabs = tabs; self.selectedIndex = selectedIndex
+        self.profileWindowID = profileWindowID; self.groups = groups
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tabs = try values.decode([TabSession].self, forKey: .tabs)
+        selectedIndex = try values.decode(Int.self, forKey: .selectedIndex)
+        profileWindowID = try values.decodeIfPresent(UUID.self, forKey: .profileWindowID)
+        groups = try values.decodeIfPresent([TabGroup].self, forKey: .groups) ?? []
+    }
 }
 
 struct SessionSnapshot: Codable, Equatable, Sendable {
@@ -182,10 +216,13 @@ final class SessionStore {
         withObservationTracking {
             for browser in openBrowsers {
                 _ = browser.activeTabID
+                _ = browser.groups
                 for tab in browser.tabs {
                     _ = tab.url
                     _ = tab.pageTitle
                     _ = tab.isNewTab
+                    _ = tab.isPinned
+                    _ = tab.groupID
                 }
             }
         } onChange: { [weak self] in

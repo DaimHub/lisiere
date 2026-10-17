@@ -56,6 +56,8 @@ enum BrowserIcon: CaseIterable {
     case graduation
     case flask
     case bookmark
+    case pin
+    case tabGroup
     case bookmarkSelected
     case window
     case reopen
@@ -128,6 +130,8 @@ enum BrowserIcon: CaseIterable {
         case .graduation: Hugeicons.mortarboard01
         case .flask: Hugeicons.testTube01
         case .bookmark: Hugeicons.bookmark02
+        case .pin: Hugeicons.pin
+        case .tabGroup: Hugeicons.folder01
         case .bookmarkSelected: Hugeicons.bookmarkCheck02
         case .window: Hugeicons.browser
         case .reopen: Hugeicons.arrowTurnBackward
