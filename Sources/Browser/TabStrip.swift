@@ -146,7 +146,7 @@ struct TabStrip: View {
             }
             .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2)
                                 + BrowserChrome.sidebarTabHeight + 2 + BrowserChrome.edgeInset
-                                + (browser.isSplitView ? 4 : 0)) { stripMenuActions }
+                                + (browser.hasSplitPair ? 4 : 0)) { stripMenuActions }
             .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
     }
@@ -211,8 +211,11 @@ struct TabStrip: View {
                 }
             }
             .padding(2)
-            .background(accent.opacity(0.055), in: shape)
-            .overlay { shape.strokeBorder(accent.opacity(0.45), lineWidth: 1).allowsHitTesting(false) }
+            .background(accent.opacity(browser.isSplitView ? 0.055 : 0.025), in: shape)
+            .overlay {
+                shape.strokeBorder(accent.opacity(browser.isSplitView ? 0.45 : 0.3), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Split View")
         } else if let tab = group.tabs.first {

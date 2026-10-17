@@ -284,6 +284,11 @@ struct BrowserWindow: View {
                         ForEach(browser.splitTabs) { tab in
                             splitPane(for: tab)
                                 .frame(minWidth: 180, maxWidth: .infinity, maxHeight: .infinity)
+                                .background {
+                                    if tab.id == browser.splitTabIDs.first {
+                                        SplitDividerPosition(browser: browser)
+                                    }
+                                }
                         }
                     }
                 } else if let tab = browser.activeTab {
