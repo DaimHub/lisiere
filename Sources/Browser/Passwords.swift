@@ -47,12 +47,24 @@ struct SavedPassword: Identifiable, Hashable, Sendable {
     var id: String { "\(origin) \(username)" }
 }
 
-@MainActor
-protocol PasswordStorage: AnyObject {
-    func savedPasswords() throws -> [SavedPassword]
-    func password(for account: SavedPassword) throws -> String?
-    func save(_ password: String, for account: SavedPassword) throws
-    func remove(_ account: SavedPassword) throws
+protocol PasswordStorage: AnyObject, Sendable {
+    func savedPasswords() async throws -> [SavedPassword]
+    func password(for account: SavedPassword) async throws -> String?
+    func save(_ password: String, for account: SavedPassword) async throws
+    func remove(_ account: SavedPassword) async throws
+    func removeAll() async throws
+}
+
+extension PasswordStorage {
+    func removeAll() async throws {
+        for account in try await savedPasswords() { try await remove(account) }
+    }
+}
+
+/// Serializes blocking Security calls across profiles without occupying the UI's actor.
+@globalActor
+actor KeychainActor {
+    static let shared = KeychainActor()
 }
 
 enum PasswordStorageError: Error {
@@ -61,12 +73,13 @@ enum PasswordStorageError: Error {
 
 /// Keeps passwords as internet password items in the login keychain, which only this app can read without asking.
 /// The data protection keychain would need a provisioning profile in every build.
+@KeychainActor
 final class KeychainPasswordStorage: PasswordStorage {
     /// Marks the items this app saves, so it never lists or reads another app's.
     private static let itemDescription = "io.github.daimhub.lisiere website password"
     private let securityDomain: String
 
-    init(profileID: UUID? = nil) {
+    nonisolated init(profileID: UUID? = nil) {
         // Security domain participates in Keychain's unique key; description alone does not.
         securityDomain = profileID.map { "io.github.daimhub.lisiere.profile.\($0)" } ?? ""
     }
@@ -130,6 +143,11 @@ final class KeychainPasswordStorage: PasswordStorage {
         let status = SecItemDelete(query(for: account.origin, username: account.username) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw PasswordStorageError.keychain(status) }
     }
+
+    func removeAll() throws {
+        for account in try savedPasswords() { try remove(account) }
+    }
+
 }
 
 /// Saves the passwords the user signs in with, and fills them back in when asked. Private windows have none.
@@ -156,6 +174,8 @@ final class PasswordManager {
     @ObservationIgnored private let storage: PasswordStorage
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private var hasLoaded = false
+    @ObservationIgnored private var loading: Task<Void, Never>?
+    @ObservationIgnored private var reloadRevision = 0
 
     /// Pass `nil` defaults to keep the settings in memory only.
     init(storage: PasswordStorage, defaults: UserDefaults? = nil) {
@@ -165,20 +185,31 @@ final class PasswordManager {
         neverSaveSites = defaults?.stringArray(forKey: Self.neverSaveKey) ?? []
     }
 
-    func removeAll() throws {
-        for account in try storage.savedPasswords() { try storage.remove(account) }
+    func removeAll() async throws {
+        try await storage.removeAll()
+        reloadRevision += 1
+        hasLoaded = true
         passwords = []
     }
 
-    func reload() {
-        hasLoaded = true
-        passwords = ((try? storage.savedPasswords()) ?? []).sorted {
+    func reload() async {
+        reloadRevision += 1
+        let revision = reloadRevision
+        let saved = (try? await storage.savedPasswords()) ?? []
+        guard revision == reloadRevision else { return }
+        passwords = saved.sorted {
             ($0.origin, $0.username.localizedLowercase) < ($1.origin, $1.username.localizedLowercase)
         }
+        hasLoaded = true
     }
 
-    func loadIfNeeded() {
-        if !hasLoaded { reload() }
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        if let loading { await loading.value; return }
+        let task = Task { await self.reload() }
+        loading = task
+        await task.value
+        loading = nil
     }
 
     /// The sign-ins saved for exactly this origin.
@@ -187,28 +218,31 @@ final class PasswordManager {
         return passwords.filter { $0.origin == origin }
     }
 
-    func password(for account: SavedPassword) -> String? {
-        try? storage.password(for: account)
+    func password(for account: SavedPassword) async -> String? {
+        try? await storage.password(for: account)
     }
 
     /// Whether to offer to save a sign-in: not when saving is off or refused for the site, or the same password is
     /// already saved.
-    func offer(for capture: PasswordCapture) -> Offer? {
+    func offer(for capture: PasswordCapture) async -> Offer? {
         guard offersToSave, !neverSaveSites.contains(capture.origin.description) else { return nil }
-        loadIfNeeded()
+        await loadIfNeeded()
+        guard offersToSave, !neverSaveSites.contains(capture.origin.description) else { return nil }
         let account = capture.account
         guard passwords(for: capture.origin).contains(account) else { return .save }
-        return password(for: account) == capture.password ? nil : .update
+        let saved = await password(for: account)
+        guard offersToSave, !neverSaveSites.contains(capture.origin.description) else { return nil }
+        return saved == capture.password ? nil : .update
     }
 
-    func save(_ capture: PasswordCapture) throws {
-        try storage.save(capture.password, for: capture.account)
-        reload()
+    func save(_ capture: PasswordCapture) async throws {
+        try await storage.save(capture.password, for: capture.account)
+        await reload()
     }
 
-    func remove(_ account: SavedPassword) {
-        try? storage.remove(account)
-        reload()
+    func remove(_ account: SavedPassword) async {
+        try? await storage.remove(account)
+        await reload()
     }
 
     func neverSave(on origin: PasswordOrigin) {

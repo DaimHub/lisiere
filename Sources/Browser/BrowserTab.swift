@@ -246,6 +246,10 @@ final class BrowserTab: Identifiable {
         return token
     }
 
+    func isPasswordPromptPending(_ token: UUID) -> Bool {
+        acceptsPageRequests && passwordPrompts.contains(token)
+    }
+
     func finishPasswordPrompt(_ token: UUID) {
         guard passwordPrompts.remove(token) != nil, passwordPrompts.isEmpty else { return }
         let shouldClose = closesAfterPasswordDecision

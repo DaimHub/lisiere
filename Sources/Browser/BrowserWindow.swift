@@ -19,6 +19,10 @@ struct BrowserWindow: View {
     @State private var typedAddress = ""
     @State private var completionStart: Int?
     @State private var suggestions: [AddressSuggestion] = []
+    @State private var suggestionSearch = AddressSuggestionSearch()
+    @State private var suggestionTask: Task<Void, Never>?
+    @State private var suggestionRequest = 0
+    @State private var queuedAddressCommands: [AddressField.Command] = []
     @State private var selectedSuggestion: Int?
     @State private var addressBlurRequest = 0
     @State private var hoverCardTabID: UUID?
@@ -122,6 +126,12 @@ struct BrowserWindow: View {
                 }
             }
         }
+        .task(id: addressIsFocused) {
+            guard addressIsFocused else { return }
+            await suggestionSearch.prepare(visits: browser.history?.visits ?? [],
+                                           revision: browser.history?.revision ?? 0, bookmarks: bookmarks.bookmarks)
+        }
+        .onDisappear { closeSuggestions() }
         .onAppear {
             if browser.activeTab?.isNewTab == true {
                 browser.requestAddressFocus()
@@ -153,22 +163,46 @@ struct BrowserWindow: View {
 
     // MARK: Address bar
 
-    private func editAddress(_ text: String) {
+    private func editAddress(_ edit: AddressField.Edit) {
+        let text = edit.text
         // Typing more of the text completes it again; deleting doesn't, so the deleted completion stays gone.
         let isAppending = text.count > typedAddress.count && text.hasPrefix(typedAddress)
         typedAddress = text
         selectedSuggestion = nil
-        suggestions = AddressSuggestions.rank(text, pages: browser.history?.pages ?? [],
-                                              bookmarks: bookmarks.bookmarks)
-        if isAppending, let completion = AddressSuggestions.inlineCompletion(of: text, with: suggestions.first) {
-            completionStart = (text as NSString).length
-            address = completion
-        } else {
-            completionStart = nil
+        completionStart = nil
+        suggestionTask?.cancel()
+        suggestionRequest += 1
+        let request = suggestionRequest
+        queuedAddressCommands = []
+        let visits = browser.history?.visits ?? []
+        let revision = browser.history?.revision ?? 0
+        let bookmarks = bookmarks.bookmarks
+        suggestionTask = Task {
+            let result = await suggestionSearch.rank(text, visits: visits, revision: revision, bookmarks: bookmarks)
+            guard !Task.isCancelled, request == suggestionRequest else { return }
+            suggestions = result
+            if isAppending, edit.canComplete(), let completion = AddressSuggestions.inlineCompletion(of: text, with: result.first) {
+                completionStart = (text as NSString).length
+                address = completion
+            } else {
+                completionStart = nil
+            }
+            suggestionTask = nil
+            let commands = queuedAddressCommands
+            queuedAddressCommands = []
+            for command in commands {
+                guard request == suggestionRequest else { break }
+                _ = performAddressCommand(command)
+            }
         }
     }
 
     private func performAddressCommand(_ command: AddressField.Command) -> Bool {
+        // Commands must use the latest text's results, never the preceding keystroke's suggestions.
+        if suggestionTask != nil {
+            queuedAddressCommands.append(command)
+            return true
+        }
         switch command {
         case .moveDown, .moveUp:
             guard !suggestions.isEmpty else { return false }
@@ -207,6 +241,9 @@ struct BrowserWindow: View {
     private func open(_ suggestion: AddressSuggestion) {
         // The list can report a click more than once before it closes.
         guard !suggestions.isEmpty else { return }
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        suggestionRequest += 1
         address = suggestion.url.absoluteString
         browser.open(suggestion.url)
         finishEditingAddress()
@@ -219,6 +256,10 @@ struct BrowserWindow: View {
     }
 
     private func closeSuggestions() {
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        suggestionRequest += 1
+        queuedAddressCommands = []
         suggestions = []
         selectedSuggestion = nil
         typedAddress = ""

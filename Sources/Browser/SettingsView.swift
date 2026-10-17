@@ -185,9 +185,12 @@ private struct PasswordSettings: View {
     @Bindable var passwords: PasswordManager
     let passkeys: Passkeys
     @State private var isUnlocked = false
+    @State private var isVisible = false
     @State private var query = ""
     @State private var revealed: [SavedPassword.ID: String] = [:]
     @State private var removing: SavedPassword?
+    @State private var unlockRevision = 0
+    @State private var revealRequests: [SavedPassword.ID: UUID] = [:]
 
     private var accounts: [SavedPassword] {
         let query = query.trimmingCharacters(in: .whitespaces)
@@ -241,14 +244,16 @@ private struct PasswordSettings: View {
                 passkeyStatus
             }
         }
-        .onDisappear(perform: lock)
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false; lock() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in lock() }
         .confirmationDialog("Remove this saved password?", isPresented: Binding(get: { removing != nil },
                                                                                 set: { if !$0 { removing = nil } }),
                             presenting: removing) { account in
             Button("Remove", role: .destructive) {
                 revealed[account.id] = nil
-                passwords.remove(account)
+                revealRequests[account.id] = nil
+                Task { await passwords.remove(account) }
             }
         } message: { account in
             Text("Lisière forgets the password for \(account.username.isEmpty ? "this site" : "“\(account.username)”") "
@@ -278,13 +283,13 @@ private struct PasswordSettings: View {
                     .textSelection(.enabled)
                     .lineLimit(1)
                 Button {
-                    revealed[account.id] = revealed[account.id] == nil ? passwords.password(for: account) : nil
+                    toggleRevealed(account)
                 } label: {
                     Image(browserIcon: revealed[account.id] == nil ? .view : .viewOff)
                 }
                 .help(revealed[account.id] == nil ? "Show Password" : "Hide Password")
                 .accessibilityLabel(revealed[account.id] == nil ? "Show password" : "Hide password")
-                Button { copy(account) } label: {
+                Button { Task { await copy(account) } } label: {
                     Image(browserIcon: .copy)
                 }
                 .help("Copy Password")
@@ -323,20 +328,46 @@ private struct PasswordSettings: View {
     private func unlock() async {
         let context = LAContext()
         guard (try? await context.evaluatePolicy(.deviceOwnerAuthentication,
-                                                 localizedReason: "show your saved passwords")) == true else { return }
-        passwords.reload()
+                                                 localizedReason: "show your saved passwords")) == true,
+              isVisible else { return }
+        // Authentication may temporarily deactivate the app. Only a later lock cancels this authorized load.
+        let revision = unlockRevision
+        await passwords.reload()
+        guard isVisible, revision == unlockRevision else { return }
         isUnlocked = true
     }
 
     private func lock() {
+        unlockRevision += 1
+        revealRequests = [:]
         isUnlocked = false
         revealed = [:]
         query = ""
     }
 
+    private func toggleRevealed(_ account: SavedPassword) {
+        guard isUnlocked else { return }
+        if revealed[account.id] != nil || revealRequests[account.id] != nil {
+            revealed[account.id] = nil
+            revealRequests[account.id] = nil
+            return
+        }
+        let request = UUID()
+        revealRequests[account.id] = request
+        let revision = unlockRevision
+        Task {
+            let secret = await passwords.password(for: account)
+            guard isUnlocked, revision == unlockRevision, revealRequests[account.id] == request else { return }
+            revealRequests[account.id] = nil
+            revealed[account.id] = secret
+        }
+    }
+
     /// Marked as concealed, so clipboard managers that respect it don't keep the password.
-    private func copy(_ account: SavedPassword) {
-        guard let password = passwords.password(for: account) else { return }
+    private func copy(_ account: SavedPassword) async {
+        let revision = unlockRevision
+        guard isUnlocked, let password = await passwords.password(for: account),
+              isUnlocked, revision == unlockRevision else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(password, forType: .string)

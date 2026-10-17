@@ -8,7 +8,6 @@ struct HistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var clearRange: HistoryClearRange?
-    @State private var hoveredEntryID: String?
 
     var body: some View {
         let days = history.days(matching: query)
@@ -29,7 +28,9 @@ struct HistoryView: View {
                     ForEach(days) { day in
                         Section(Self.title(for: day.date)) {
                             ForEach(day.entries) { entry in
-                                row(entry)
+                                HistoryRow(entry: entry, open: open) {
+                                    history.removeVisits(to: entry.url, onDayOf: entry.date)
+                                }
                             }
                         }
                     }
@@ -83,55 +84,6 @@ struct HistoryView: View {
         .padding(12)
     }
 
-    private func row(_ entry: HistoryEntry) -> some View {
-        HStack(spacing: 10) {
-            SiteIcon(url: entry.url, size: 16)
-            Text(entry.displayTitle)
-                .lineLimit(1)
-                .layoutPriority(1)
-            Text(AddressSuggestions.strippedAddress(entry.url))
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            if hoveredEntryID == entry.id {
-                Button { delete(entry) } label: {
-                    Image(browserIcon: .close)
-                }
-                .buttonStyle(ChromeIconButtonStyle(size: 20))
-                .help("Delete")
-                .accessibilityLabel("Delete history entry")
-            }
-            Text(entry.date, format: .dateTime.hour().minute())
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .font(.system(size: 13))
-        .frame(height: 24)
-        .contentShape(Rectangle())
-        .onHover { hoveredEntryID = $0 ? entry.id : (hoveredEntryID == entry.id ? nil : hoveredEntryID) }
-        .onTapGesture {
-            open(entry.url, NSEvent.modifierFlags.contains(.command))
-        }
-        .browserContextMenu {
-            [.init(title: "Open", icon: .open) { open(entry.url, false) },
-             .init(title: "Open in New Tab", icon: .add) { open(entry.url, true) },
-             .separator,
-             .init(title: "Copy Address", icon: .copy) {
-                 NSPasteboard.general.clearContents()
-                 NSPasteboard.general.setString(entry.url.absoluteString, forType: .string)
-             },
-             .separator,
-             .init(title: "Delete", icon: .trash) { delete(entry) }]
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { open(entry.url, false) }
-    }
-
-    private func delete(_ entry: HistoryEntry) {
-        history.removeVisits(to: entry.url, onDayOf: entry.date)
-    }
-
     private static func title(for day: Date) -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(day) { return "Today" }
@@ -147,4 +99,58 @@ struct HistoryView: View {
         case .all: "Clear all history?"
         }
     }
+}
+
+/// Hover changes only this row, never the history grouping or the rest of the list.
+private struct HistoryRow: View {
+    let entry: HistoryEntry
+    let open: (URL, Bool) -> Void
+    let delete: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SiteIcon(url: entry.url, size: 16)
+            Text(entry.displayTitle)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Text(AddressSuggestions.strippedAddress(entry.url))
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            if isHovered {
+                Button { delete() } label: {
+                    Image(browserIcon: .close)
+                }
+                .buttonStyle(ChromeIconButtonStyle(size: 20))
+                .help("Delete")
+                .accessibilityLabel("Delete history entry")
+            }
+            Text(entry.date, format: .dateTime.hour().minute())
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .font(.system(size: 13))
+        .frame(height: 24)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onTapGesture {
+            open(entry.url, NSEvent.modifierFlags.contains(.command))
+        }
+        .browserContextMenu {
+            [.init(title: "Open", icon: .open) { open(entry.url, false) },
+             .init(title: "Open in New Tab", icon: .add) { open(entry.url, true) },
+             .separator,
+             .init(title: "Copy Address", icon: .copy) {
+                 NSPasteboard.general.clearContents()
+                 NSPasteboard.general.setString(entry.url.absoluteString, forType: .string)
+             },
+             .separator,
+             .init(title: "Delete", icon: .trash) { delete() }]
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { open(entry.url, false) }
+    }
+
 }

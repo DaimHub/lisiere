@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 /// A sign-in the page's top frame submitted over HTTPS, offered for saving.
-struct PasswordCapture: Equatable {
+struct PasswordCapture: Equatable, Sendable {
     let origin: PasswordOrigin
     let username: String
     let password: String
@@ -73,14 +73,27 @@ enum PasswordAutofill {
       document.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && event.target instanceof HTMLInputElement) send(event.target.form);
       }, true);
+      const containsPassword = (root) => root.nodeType === Node.ELEMENT_NODE && root.isConnected &&
+        ((root.matches('input[type=password]') && !root.disabled) || passwordFields(root).length > 0);
       const announce = () => {
         if (!passwordFields(document).length) return false;
         handler.postMessage({ type: 'fields' });
         return true;
       };
       if (!announce()) {
-        const observer = new MutationObserver(() => { if (announce()) observer.disconnect(); });
-        observer.observe(document, { childList: true, subtree: true });
+        // Inspect only changed subtrees. A busy page without a sign-in form must not be rescanned on every render.
+        // Attributes also cover an existing field becoming a password or being enabled later.
+        const observer = new MutationObserver((records) => {
+          const found = records.some((record) => record.type === 'attributes'
+            ? containsPassword(record.target)
+            : [...record.addedNodes].some(containsPassword));
+          if (found) {
+            handler.postMessage({ type: 'fields' });
+            observer.disconnect();
+          }
+        });
+        observer.observe(document, { childList: true, subtree: true, attributes: true,
+                                     attributeFilter: ['type', 'disabled'] });
       }
     })();
     """
@@ -112,7 +125,8 @@ enum PasswordAutofill {
     /// exactly the password's origin, both before and after reading the keychain.
     static func fill(_ account: SavedPassword, in tab: BrowserTab, from passwords: PasswordManager) async {
         guard let webView = tab.webView, PasswordOrigin(url: webView.url) == account.origin,
-              let secret = passwords.password(for: account),
+              let secret = await passwords.password(for: account),
+              tab.webView === webView, tab.browser?.tab(withID: tab.id) === tab,
               PasswordOrigin(url: webView.url) == account.origin else { return }
         _ = try? await webView.callAsyncJavaScript(fillScript, arguments: [
             "origin": account.origin.description, "username": account.username, "secret": secret,
@@ -138,13 +152,13 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
               let tab = browser.tabs.first(where: { $0.webView === webView }) else { return }
         if (message.body as? [String: Any])?["type"] as? String == "fields" {
             guard message.frameInfo.isMainFrame else { return }
-            passwords.loadIfNeeded()
+            Task { await passwords.loadIfNeeded() }
             tab.hasPasswordFields = true
             return
         }
         guard let capture = PasswordCapture(body: message.body, isMainFrame: message.frameInfo.isMainFrame,
                                             origin: PasswordOrigin(message.frameInfo.securityOrigin)),
-              let offer = passwords.offer(for: capture), !offering.contains(capture.account) else { return }
+              !offering.contains(capture.account) else { return }
         offering.insert(capture.account)
         let prompt = tab.beginPasswordPrompt()
         Task {
@@ -152,6 +166,9 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
                 offering.remove(capture.account)
                 tab.finishPasswordPrompt(prompt)
             }
+            guard let offer = await passwords.offer(for: capture), tab.isPasswordPromptPending(prompt),
+                  browser.tab(withID: tab.id) === tab, tab.webView === webView,
+                  PasswordOrigin(url: webView.url) == capture.origin else { return }
             await ask(offer, capture, in: tab, passwords: passwords)
         }
     }
@@ -174,7 +191,7 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
         alert.addButton(withTitle: "Not Now")
         if offer == .save { alert.addButton(withTitle: "Never for This Website") }
         switch await tab.present(alert) {
-        case .alertFirstButtonReturn?: try? passwords.save(capture)
+        case .alertFirstButtonReturn?: try? await passwords.save(capture)
         case .alertThirdButtonReturn?: passwords.neverSave(on: capture.origin)
         default: break
         }

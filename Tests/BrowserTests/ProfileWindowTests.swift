@@ -178,4 +178,28 @@ final class ProfileWindowTests: XCTestCase {
         XCTAssertEqual(other.browser.tabs.count, 2)
         XCTAssertNotEqual(first.id, other.id)
     }
+    func testSessionDiscoveryDoesNotInitializeUnusedProfileResources() throws {
+        let a = try profiles.create(name: "Lazy A")
+        let b = try profiles.create(name: "Lazy B")
+        let file = StoreFile(url: try XCTUnwrap(profiles.directory(for: b)).appending(path: "Session.plist"))
+        file.writeNow(try PropertyListEncoder.binary.encode(SessionSnapshot(windows: [
+            WindowSession(tabs: [TabSession(url: nil, title: "", interactionState: nil)], selectedIndex: 0)
+        ])))
+        var openedStores = [UUID]()
+        let restarted = ProfileStore(root: root, defaults: defaults, dataStoreFactory: { profile in
+            openedStores.append(profile.id)
+            return .nonPersistent()
+        })
+        XCTAssertEqual(restarted.defaultWindowProfileID, b.id)
+        XCTAssertTrue(openedStores.isEmpty)
+        let discovered = try XCTUnwrap(restarted.session(for: b.id))
+        XCTAssertTrue(discovered.hasPendingWindows)
+        let context = try XCTUnwrap(restarted.context(for: b.id))
+        XCTAssertTrue(context.session === discovered)
+        XCTAssertEqual(openedStores, [b.id])
+        restarted.session(for: a.id)?.closeParkedWindow(ownerID: UUID())
+        XCTAssertEqual(openedStores, [b.id])
+        context.prepareForDeletion()
+    }
+
 }

@@ -97,7 +97,7 @@ final class ProfileContext {
     private let files: [StoreFile]
 
     init(profile: BrowserProfile, directory: URL?, defaults: UserDefaults,
-         restoresWindows: Bool?, dataStore: WKWebsiteDataStore) {
+         session: SessionStore, dataStore: WKWebsiteDataStore) {
         id = profile.id
         self.defaults = defaults
         preferences = ProfilePreferences(defaults: defaults)
@@ -111,10 +111,9 @@ final class ProfileContext {
             (directory ?? FileManager.default.temporaryDirectory.appending(path: "Lisiere-\(profile.id)"))
                 .appending(path: "Favicons"))
         let historyFile = directory.map { StoreFile(url: $0.appending(path: "History.plist")) }
-        let sessionFile = directory.map { StoreFile(url: $0.appending(path: "Session.plist")) }
-        files = [historyFile, sessionFile].compactMap { $0 }
+        files = [historyFile].compactMap { $0 }
         history = HistoryStore(file: historyFile)
-        session = SessionStore(file: sessionFile, restoresWindows: restoresWindows ?? preferences.restoresWindows)
+        self.session = session
         sitePermissions = SitePermissions(defaults: defaults)
         zoomLevels = ZoomStore(defaults: defaults)
         browsingData = BrowsingData(history: history, session: session, dataStore: dataStore, favicons: favicons)
@@ -132,6 +131,7 @@ final class ProfileContext {
 
     func prepareForDeletion() {
         files.forEach { $0.disableWrites() }
+        session.disableWrites()
         downloads.releaseFinishedDownloads()
         browsingData.releaseDataStore()
     }
@@ -174,6 +174,8 @@ final class ProfileStore {
     @ObservationIgnored private let restoresWindows: Bool?
     @ObservationIgnored private let dataStoreFactory: (BrowserProfile) -> WKWebsiteDataStore
     @ObservationIgnored private var contexts: [UUID: ProfileContext] = [:]
+    /// Session discovery must not open WebKit stores, load history, or compile tracker rules for unused profiles.
+    @ObservationIgnored private var sessions: [UUID: SessionStore] = [:]
     @ObservationIgnored private var browsers: [WeakBrowser] = []
     @ObservationIgnored private var restoredAtLaunch = false
 
@@ -213,8 +215,8 @@ final class ProfileStore {
     /// Settings or a private window may select a parked profile before quit. Restore an actual visible
     /// session first, so that selection alone doesn't manufacture an extra physical window on launch.
     var defaultWindowProfileID: UUID {
-        guard !restoredAtLaunch, context(for: selectedID)?.session.hasPendingWindows != true else { return selectedID }
-        return availableProfiles.first { context(for: $0.id)?.session.hasPendingWindows == true }?.id ?? selectedID
+        guard !restoredAtLaunch, session(for: selectedID)?.hasPendingWindows != true else { return selectedID }
+        return availableProfiles.first { session(for: $0.id)?.hasPendingWindows == true }?.id ?? selectedID
     }
 
     private var manifestURL: URL? { root?.appending(path: "Profiles.plist") }
@@ -236,10 +238,22 @@ final class ProfileStore {
     func context(for id: UUID) -> ProfileContext? {
         guard loadError == nil, let profile = profile(id), !profile.pendingDeletion else { return nil }
         if let context = contexts[id] { return context }
+        guard let session = session(for: id) else { return nil }
         let context = ProfileContext(profile: profile, directory: directory(for: profile), defaults: preferencesDefaults(for: profile),
-                                     restoresWindows: restoresWindows, dataStore: dataStoreFactory(profile))
+                                     session: session, dataStore: dataStoreFactory(profile))
         contexts[id] = context
         return context
+    }
+
+    func session(for id: UUID) -> SessionStore? {
+        guard loadError == nil, let profile = profile(id), !profile.pendingDeletion else { return nil }
+        if let session = sessions[id] { return session }
+        let file = directory(for: profile).map { StoreFile(url: $0.appending(path: "Session.plist")) }
+        let restores = restoresWindows
+            ?? (preferencesDefaults(for: profile).object(forKey: SessionPreferences.restoresWindowsKey) as? Bool ?? true)
+        let session = SessionStore(file: file, restoresWindows: restores)
+        sessions[id] = session
+        return session
     }
 
     private func save(_ profiles: [BrowserProfile], selectedID: UUID) throws {
@@ -352,7 +366,7 @@ final class ProfileStore {
         guard !restoredAtLaunch else { return }
         restoredAtLaunch = true
         for profile in availableProfiles where profile.id != id {
-            if context(for: profile.id)?.session.hasPendingWindows == true {
+            if session(for: profile.id)?.hasPendingWindows == true {
                 openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profile.id))
             }
         }
@@ -399,7 +413,7 @@ final class ProfileStore {
         // Password errors keep the visible tombstone retryable, rather than silently leaving secrets behind.
         let passwordStore = contexts[id]?.passwords ?? PasswordManager(
             storage: KeychainPasswordStorage(profileID: profile.isInitial ? nil : profile.id))
-        try passwordStore.removeAll()
+        try await passwordStore.removeAll()
         let blocker = contexts[id]?.contentBlocker ?? ContentBlocker(defaults: preferencesDefaults(for: profile),
             store: .default(), identifier: profile.isInitial ? "Trackers" : "Trackers-\(profile.id)")
         await blocker.removeCompiledRules()
@@ -407,6 +421,7 @@ final class ProfileStore {
         await Self.clearWebsiteData(in: dataStoreFactory(profile))
         contexts[id]?.prepareForDeletion()
         contexts[id] = nil
+        sessions.removeValue(forKey: id)?.disableWrites()
         if !profile.isInitial { try await Self.removeWebsiteDataStore(id) }
         if let directory = directory(for: profile) {
             // The initial directory also contains shared data and the registry. Remove only its owned files.
