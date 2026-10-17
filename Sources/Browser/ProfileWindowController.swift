@@ -43,8 +43,10 @@ final class ProfileWindowController {
     }
 
     func connect(_ window: NSWindow?) {
+        if let previous = self.window { browser.appearance.detach(previous) }
         self.window = window
         browser.window = window
+        if let window { browser.appearance.attach(window) }
         if window?.isKeyWindow == true { becameKey() }
     }
 
@@ -81,10 +83,12 @@ final class ProfileWindowController {
             }
             ExternalURLRouter.shared.unregister(browser)
             browser.setWorkspaceActive(false)
+            if let window { browser.appearance.detach(window) }
             browser.window = nil
             browser = next
             browser.setWorkspaceActive(true)
             browser.window = window
+            if let window { browser.appearance.attach(window) }
             profiles.lastActiveWindow = self
             browser.preferences.mascot.applyDockIcon(palette: browser.preferences.mascotPalette)
             onActivate?(browser)
@@ -94,6 +98,7 @@ final class ProfileWindowController {
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        if let window { browser.appearance.detach(window) }
         for (id, model) in browsers {
             if !isPrivate { profiles.context(for: id)?.session.detach(model) }
             profiles.unregister(model)

@@ -70,6 +70,11 @@ enum WebPageAppearance: String, CaseIterable, Identifiable {
 final class AppearanceStore {
     static let shared = AppearanceStore()
 
+    // Resolve System from the application, never from a window still showing the previous profile.
+    // SwiftUI can retain the last explicit presentation theme when preferredColorScheme becomes nil.
+    private var systemColorScheme: ColorScheme
+    var colorScheme: ColorScheme { selection.colorScheme ?? systemColorScheme }
+
     var interfaceColor: BrowserInterfaceColor {
         didSet {
             guard interfaceColor != oldValue else { return }
@@ -92,6 +97,7 @@ final class AppearanceStore {
             guard selection != oldValue else { return }
             defaults?.set(selection.rawValue, forKey: BrowserAppearance.storageKey)
             if appliesToApplication { applyAppearance(selection.appearance) }
+            for window in windows.allObjects { window.appearance = selection.appearance }
             refreshWebViews()
         }
     }
@@ -127,15 +133,18 @@ final class AppearanceStore {
 
     // Background tabs must update too, without retaining closed or suspended web views.
     @ObservationIgnored private let webViews = NSHashTable<WKWebView>.weakObjects()
+    @ObservationIgnored private let windows = NSHashTable<NSWindow>.weakObjects()
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let appliesToApplication: Bool
     @ObservationIgnored private let applyAppearance: (NSAppearance?) -> Void
+    @ObservationIgnored private var systemAppearanceObservation: NSKeyValueObservation?
 
     init(defaults: UserDefaults? = .standard, appliesToApplication: Bool = true,
          applyAppearance: @escaping (NSAppearance?) -> Void = { NSApp.appearance = $0 }) {
         self.defaults = defaults
         self.appliesToApplication = appliesToApplication
         self.applyAppearance = applyAppearance
+        systemColorScheme = Self.currentSystemColorScheme()
         interfaceColor = defaults?.string(forKey: BrowserInterfaceColor.storageKey).flatMap(BrowserInterfaceColor.init) ?? .original
         let customHex = defaults?.string(forKey: BrowserInterfaceColor.customStorageKey) ?? ""
         customInterfaceColorHex = BrowserInterfaceColor.color(hex: customHex) == nil
@@ -144,12 +153,33 @@ final class AppearanceStore {
         pageSelection = defaults?.string(forKey: WebPageAppearance.storageKey).flatMap(WebPageAppearance.init) ?? .followApp
         // Set this before the first window appears. nil returns ownership to macOS, including live system changes.
         if appliesToApplication { applyAppearance(selection.appearance) }
+        systemColorScheme = Self.currentSystemColorScheme()
+        systemAppearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.systemColorScheme = Self.currentSystemColorScheme()
+            }
+        }
+    }
+
+    private static func currentSystemColorScheme() -> ColorScheme {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
     }
 
     /// Called for every new web view, including pop-ups and recreated suspended tabs, before it loads a page.
     func attach(_ webView: WKWebView) {
         webViews.add(webView)
         applyPageAppearance(to: webView)
+    }
+
+    /// Native materials must switch with the profile, without waiting for a SwiftUI presentation refresh.
+    func attach(_ window: NSWindow) {
+        windows.add(window)
+        window.appearance = selection.appearance
+    }
+
+    /// Parked profiles retain their pages, but must no longer update the shared physical window.
+    func detach(_ window: NSWindow) {
+        windows.remove(window)
     }
 
     private func refreshWebViews() {

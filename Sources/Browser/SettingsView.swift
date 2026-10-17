@@ -52,7 +52,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .preferredColorScheme(profiles.context(for: profiles.selectedID)?.preferences.appearance.selection.colorScheme)
+        .preferredColorScheme(profiles.context(for: profiles.selectedID)?.preferences.appearance.colorScheme)
         .tint(profiles.context(for: profiles.selectedID)?.preferences.accentColor ?? .accentColor)
         .formStyle(.grouped)
         .frame(width: 580, height: 560)

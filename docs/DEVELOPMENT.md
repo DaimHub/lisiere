@@ -88,6 +88,14 @@ Home uses the bundled `BrowserHome01` template, imported from the official `Home
 
 Profile icon identifiers keep their historical raw values for on-disk compatibility. Only their `browserIcon` presentation changes. Favicons, mascots, Dock artwork and macOS-owned window controls keep their own artwork. Both builds include `Resources/Brand/LICENSE-hugeicons.txt`; no Pro assets are bundled.
 
+## Profile appearance
+
+`ProfileWindowController` attaches the physical window to the active profile's `AppearanceStore` and detaches it before switching or closing. The store applies the native appearance immediately and updates all windows currently displaying that profile when its theme changes. Parked profiles keep their page appearance but cannot recolor a window that now displays another profile. System clears the explicit window appearance. Keep `ProfileBrowserWindow.preferredColorScheme` too: SwiftUI's hosting layers and the glass background need it alongside the native window update.
+
+System mode resolves a concrete SwiftUI color scheme from [`NSApplication.effectiveAppearance`](https://developer.apple.com/documentation/appkit/nsapplication/effectiveappearance) and observes its changes. Passing nil after an explicit dark theme can leave SwiftUI's hosting appearance dark until Settings opens. Resolve each profile's workspace palette from its own store too, so an outgoing System profile cannot inherit the incoming profile's forced theme. Website appearance remains separate.
+
+Validation on 2026-10-17: the native-window round-trip regression failed before the fix. Coverage includes explicit light/dark round trips, System with separate light websites, live application appearance changes, parked profiles, multiple windows, detachment, and private windows. Native Release checks cover switching without opening Settings. Physical trackpad input was not exercised; the keyboard commands use the same profile controller as swipes.
+
 ## Toolbar customization
 
 `ToolbarSettings` uses the horizontal preview as its editor. Select an individual button to move it left or right, or select the group icon to move the entire group. Option-Left and Option-Right invoke the same actions. Buttons inside a group move only among their siblings; use Move Out of Group before moving them elsewhere. The selected entry stays visible as the preview scrolls. Grouping, separation, adding, removal and Restore Default all update the same per-profile layout immediately.
