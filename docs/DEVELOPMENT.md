@@ -85,3 +85,9 @@ Application-owned menu actions use `Button(_:browserIcon:role:action:)` or the m
 Settings dropdowns containing icons use `BrowserIconPicker`, backed by `NSPopUpButton`. Its menu items and selection mark use Hugeicons template images directly, so mouse, keyboard and accessibility activation share the same native tinting. Do not put custom image labels inside SwiftUI `Picker`: their menu pixels can remain black in dark appearance. Text-only settings pickers retain their standard SwiftUI controls.
 
 Profile icon identifiers keep their historical raw values for on-disk compatibility. Only their `browserIcon` presentation changes. Favicons, mascots, Dock artwork and macOS-owned window controls keep their own artwork. Both builds include `Resources/Brand/LICENSE-hugeicons.txt`; no Pro assets are bundled.
+
+## Toolbar reordering
+
+Toolbar customization and both tab layouts share `ReorderDropDelegate`: rows move as the pointer enters a destination, with the same 0.2-second snappy animation. Toolbar rows keep stable identities in a flat SwiftUI stack, including when a button enters or leaves a group. Group headers reorder top-level entries; child rows accept groupable buttons. Profile and Address remain standalone. Group menus, disclosure state and accessible move buttons remain available, and the existing per-profile layout format is unchanged.
+
+Validation on 2026-10-17: all 210 XCTest tests passed, including 16 toolbar layout tests. The Release build passed strict signature verification. A separate validation bundle retained the Release sandbox and hardened runtime and passed startup smoke. Native inspection verified button-driven reordering, preview updates, sheet reopening and collapsed-group preservation. Automated pointer dragging did not reorder either horizontal tabs or toolbar rows, so physical drag gestures still require manual verification.

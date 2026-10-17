@@ -164,7 +164,28 @@ struct BrowserToolbarLayout: Equatable {
         _ = move(id, toGroup: parent, at: index + offset + (offset > 0 ? 1 : 0))
     }
 
-    /// Destination indices use the pre-move list, matching NSOutlineView's drop contract.
+    /// Move over a visible row, just like tabs: downwards goes after it, upwards before it.
+    /// Group headers reorder whole entries; child rows accept groupable buttons.
+    @discardableResult
+    mutating func move(_ id: String, over targetID: String) -> Bool {
+        guard id != targetID, let source = location(id), let target = location(targetID) else { return false }
+        let sourceIsGroup = source.child == nil && entries[source.root].isGroup
+        // Whole groups and required controls use group headers, never individual child targets.
+        guard target.child == nil || (!sourceIsGroup && canGroup(id)) else { return false }
+        let intoGroup = target.child != nil
+        let parent = intoGroup ? entries[target.root].id : nil
+        // A group cannot be moved onto its own children.
+        guard parent != id, !(sourceIsGroup && source.root == target.root) else { return false }
+        let oldParent = source.child == nil ? nil : entries[source.root].id
+        let targetIndex = target.child ?? target.root
+        let sourceIndex = source.child ?? source.root
+        let destination = targetIndex + (oldParent == parent && sourceIndex < targetIndex ? 1 : 0)
+        let old = self
+        _ = move(id, toGroup: parent, at: destination)
+        return self != old
+    }
+
+    /// Destination indices refer to the list before removing the source.
     @discardableResult
     mutating func move(_ id: String, toGroup groupID: String?, at proposedIndex: Int) -> Bool {
         guard let source = location(id), groupID != id else { return false }

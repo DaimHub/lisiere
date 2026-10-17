@@ -167,9 +167,13 @@ struct TabStrip: View {
                 suppressedHoverCardTabID = tab.id
                 return NSItemProvider(object: tab.id.uuidString as NSString)
             }
-            .onDrop(of: [.text], delegate: TabDropDelegate(targetTabID: tab.id,
-                                                           browser: browser,
-                                                           draggedTabID: $draggedTabID))
+            .onDrop(of: [.text], delegate: ReorderDropDelegate(targetID: tab.id, draggedID: $draggedTabID,
+                canMove: { id in browser.tabs.contains { $0.id == id } },
+                move: { id, target in
+                    if let index = browser.tabs.firstIndex(where: { $0.id == target }) {
+                        browser.moveTab(id, to: index)
+                    }
+                }))
             .browserContextMenu { tabMenuActions(for: tab, at: index) }
     }
 
@@ -384,33 +388,6 @@ struct TabHoverCard: View {
         let host = tab.host.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 }
             ?? tab.url?.absoluteString ?? ""
         return tab.isLoading ? "\(host) · Loading…" : host
-    }
-}
-
-private struct TabDropDelegate: DropDelegate {
-    let targetTabID: UUID
-    let browser: BrowserModel
-    @Binding var draggedTabID: UUID?
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedTabID, draggedTabID != targetTabID,
-              let destinationIndex = browser.tabs.firstIndex(where: { $0.id == targetTabID }) else { return }
-        withAnimation(.snappy(duration: 0.2)) {
-            browser.moveTab(draggedTabID, to: destinationIndex)
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggedTabID = nil
-        return true
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        draggedTabID != nil
     }
 }
 
