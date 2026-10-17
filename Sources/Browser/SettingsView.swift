@@ -15,12 +15,13 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             if profiles.settingsTab != .profiles {
-                Picker("Profile", selection: Binding(get: { profiles.selectedID }, set: { id in
-                    do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
-                })) {
-                    ForEach(profiles.availableProfiles) { profile in
-                        Label(profile.name, browserIcon: profile.icon.browserIcon).tag(profile.id)
-                    }
+                HStack {
+                    Text("Profile")
+                    BrowserIconPicker(title: "Profile", selection: Binding(get: { profiles.selectedID }, set: { id in
+                        do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
+                    }), options: profiles.availableProfiles.map {
+                        .init(value: $0.id, title: $0.name, icon: $0.icon.browserIcon)
+                    }, tint: profiles.context(for: profiles.selectedID)?.preferences.accentColor ?? .accentColor)
                 }
                 .padding()
                 Divider()
