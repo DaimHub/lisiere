@@ -13,7 +13,7 @@ struct FindBar: View {
             TextField("Find on Page", text: $tab.findText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .frame(width: 180)
+                .frame(minWidth: 30, idealWidth: 180, maxWidth: 180)
                 .focused($isFocused)
                 .onSubmit { browser.findNext() }
                 .onExitCommand { browser.closeFindBar() }

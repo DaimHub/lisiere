@@ -103,3 +103,43 @@ Validation on 2026-10-17: the native-window round-trip regression failed before 
 Toolbar customization has no drag sources, drop targets, drag handles or vertical reorder list. `ReorderDropDelegate` remains owned by the horizontal and vertical tab layouts. Profile and Address remain required standalone controls, and the existing per-profile storage format is unchanged.
 
 Validation on 2026-10-17: 216 XCTest tests passed, including 14 toolbar layout tests. The Release build and strict signature verification passed. A separate copy of the Release binary, with an isolated bundle identifier and the Release sandbox/hardened runtime retained, passed startup smoke. Native checks covered left/right buttons, Option-arrow shortcuts, group movement, child movement, grouping, separation, adding/removing buttons, required controls, both edge limits, horizontal scrolling, layout persistence after relaunch, sheet reopening, Restore Default, and light/dark appearance. Native secondary button tint stays independent of custom profile accents for readable labels. The installed application was not replaced.
+
+## Split view
+
+Split view displays exactly two existing `BrowserTab` instances in a native horizontal split view.
+Open it from All Actions > Split View, from an inactive tab's context menu, or with Control-Command-S
+(new tab). Control-Command-Right Arrow focuses the other pane. The active pane has a checked header
+and accent outline; the shared toolbar, address field and page commands target that pane.
+
+The two tabs form one outlined card in both layouts: stacked in the sidebar and side by side in the
+horizontal strip. Their order matches the left and right panes. Each member retains its own focus,
+close button, hover preview and context menu. The active member has a tinted fill; the shared outline
+identifies the pair. Grouping alone never changes stored tab order, and exiting split restores the
+ordinary cards. Dragging either member moves the joined card as a unit. Pane outlines use the same
+12-point outside corner geometry as the page container, with straight edges at the native divider.
+
+Dragging the native divider resizes both pages, with a 180-point minimum per pane. Removing a pane
+or exiting split view keeps both tabs open. Closing an actual tab keeps its split partner selected.
+Selecting a third tab exits split view without closing either page. Each profile retains its own
+split while switching profiles in the same window; private windows only use their own in-memory
+WebKit store. Both visible pages are excluded from background suspension.
+
+Split presentation is window-local and is not persisted across app restarts. The existing session
+store still saves the two ordinary tabs and their history. `PageDelegate` recovers either visible
+page after a WebKit process termination. Pointer activation observes native events without consuming
+them, and `BrowserWebView` updates the active pane when keyboard/accessibility focus changes.
+
+Validation on 2026-10-17: 233 XCTest tests passed. Coverage includes independent page navigation,
+history, form state and zoom; native host attachment across split transitions; tab closure and session
+replacement; joined-card ordering, unit reordering and bulk closure; profile/private cookie isolation;
+keyboard focus; and visible-page recovery after WebKit termination. The Release build, strict signature
+verification and startup smoke passed using dedicated Derived Data and an isolated QA bundle identifier,
+with the Release sandbox and hardened runtime retained. The installed application was not replaced.
+
+Native Release checks covered light/dark appearance, sidebar/horizontal joined cards, both active
+corner outlines, page/toolbar focus, retained form input, exiting split, bulk closure after a joined
+card, profile round trips and private windows. Divider resizing was verified through its accessibility
+value. Continuous physical divider dragging and tab-card dragging remain unverified; card reorder
+semantics are covered by XCTest. Full VoiceOver traversal and distribution/notarization were not tested.
+Private tab layout was changed through its context menu: the existing View-menu layout shortcut does
+not update private-window preferences.

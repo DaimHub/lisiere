@@ -63,6 +63,7 @@ enum BrowserIcon: CaseIterable {
     case zoomIn
     case zoomOut
     case actualSize
+    case splitView
     case horizontalTabs
     case verticalTabs
     case open
@@ -134,6 +135,7 @@ enum BrowserIcon: CaseIterable {
         case .zoomIn: Hugeicons.zoomInArea
         case .zoomOut: Hugeicons.zoomOutArea
         case .actualSize: Hugeicons.arrowExpand
+        case .splitView: Hugeicons.layoutTwoColumn
         case .horizontalTabs: Hugeicons.layoutTop
         case .verticalTabs: Hugeicons.layoutLeft
         case .open: Hugeicons.arrowUpRight01

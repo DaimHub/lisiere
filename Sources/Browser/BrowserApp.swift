@@ -175,6 +175,16 @@ private struct BrowserCommands: Commands {
                 .disabled(!(browser?.canZoom ?? false))
         }
         CommandGroup(after: .sidebar) {
+            Button(browser?.isSplitView == true ? "Exit Split View" : "Split View with New Tab", browserIcon: .splitView) {
+                guard let browser else { return }
+                if browser.isSplitView { browser.endSplitView() } else { browser.startSplitView() }
+            }
+            .keyboardShortcut("s", modifiers: [.command, .control])
+            .disabled(browser == nil)
+            Button("Focus Other Pane", browserIcon: .splitView) { browser?.focusOtherSplitPane() }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .disabled(browser?.isSplitView != true)
+            Divider()
             Button(tabLayout == .vertical ? "Use Horizontal Tabs" : "Use Vertical Tabs",
                    browserIcon: tabLayout == .vertical ? .horizontalTabs : .verticalTabs) {
                 tabLayout = tabLayout.toggled

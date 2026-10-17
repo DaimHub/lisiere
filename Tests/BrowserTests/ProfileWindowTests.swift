@@ -71,6 +71,29 @@ final class ProfileWindowTests: XCTestCase {
         XCTAssertEqual(NSApp.windows.count, count)
     }
 
+    func testProfileRoundTripRetainsSplitWithoutSharingPagesOrCookies() async throws {
+        let a = try profiles.create(name: "Split A")
+        let b = try profiles.create(name: "Split B")
+        let window = try owner(a.id)
+        let original = window.browser
+        original.startSplitView()
+        let ids = original.splitTabIDs
+        let views = original.splitTabs.compactMap(\.webView)
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [.domain: "split.example", .path: "/", .name: "split", .value: "a"]))
+        await original.websiteDataStore.httpCookieStore.setCookie(cookie)
+        window.switchTo(b.id)
+        XCTAssertFalse(window.browser.isSplitView)
+        window.browser.startSplitView()
+        XCTAssertFalse(window.browser.splitTabIDs.contains { ids.contains($0) })
+        let cookies = await window.browser.websiteDataStore.httpCookieStore.allCookies()
+        XCTAssertFalse(cookies.contains { $0.name == "split" })
+        window.switchTo(a.id)
+        XCTAssertTrue(window.browser === original)
+        XCTAssertEqual(original.splitTabIDs, ids)
+        XCTAssertEqual(original.splitTabs.compactMap(\.webView), views)
+        XCTAssertTrue(original.splitTabs.allSatisfy { $0.webView?.configuration.websiteDataStore.identifier == a.id })
+    }
+
     func testRestartRestoresOnePhysicalWindowAndItsParkedProfileOnDemand() throws {
         let a = try profiles.create(name: "A")
         let b = try profiles.create(name: "B")
