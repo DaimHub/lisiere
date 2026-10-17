@@ -5,6 +5,8 @@ enum BrowserToolbarItem: String, CaseIterable, Identifiable {
     case profile, back, forward, reload, address, newTab, home, privateWindow, history, downloads, bookmarks, settings, allActions
 
     var id: Self { self }
+    // Keep the raw value for old layouts and menu commands; the button now belongs to TabStrip.
+    var isToolbarItem: Bool { self != .newTab }
     var isRequired: Bool { self == .profile || self == .address }
     var canGroup: Bool { self != .profile && self != .address }
     var canOverflow: Bool { ![.profile, .back, .forward, .reload, .address, .newTab, .allActions].contains(self) }
@@ -65,10 +67,10 @@ struct BrowserToolbarLayout: Equatable {
     static let storageKey = "navigationToolbarLayoutV2"
     static let standard = Self(entries: [ToolbarEntry(.profile),
         ToolbarEntry(id: "group.navigation", items: [.back, .forward, .reload]),
-        ToolbarEntry(.address), ToolbarEntry(.newTab), ToolbarEntry(.allActions)])
+        ToolbarEntry(.address), ToolbarEntry(.allActions)])
     private(set) var entries: [ToolbarEntry]
     var items: [BrowserToolbarItem] { entries.flatMap(\.items) }
-    var availableItems: [BrowserToolbarItem] { BrowserToolbarItem.allCases.filter { !items.contains($0) } }
+    var availableItems: [BrowserToolbarItem] { BrowserToolbarItem.allCases.filter { $0.isToolbarItem && !items.contains($0) } }
 
     private struct StoredLayout: Codable {
         var version: Int
@@ -112,7 +114,7 @@ struct BrowserToolbarLayout: Equatable {
         var seen = Set<BrowserToolbarItem>()
         var ids = Set<String>()
         self.entries = entries.flatMap { entry -> [ToolbarEntry] in
-            let items = entry.items.filter { seen.insert($0).inserted }
+            let items = entry.items.filter { $0.isToolbarItem && seen.insert($0).inserted }
             var result: [ToolbarEntry] = []
             var buttons: [BrowserToolbarItem] = []
             func flushButtons() {
@@ -147,7 +149,7 @@ struct BrowserToolbarLayout: Equatable {
         return entries.first(where: { $0.items.contains { $0.rawValue == id } })?.items.map(\.rawValue) ?? []
     }
     mutating func add(_ item: BrowserToolbarItem) {
-        guard !items.contains(item) else { return }
+        guard item.isToolbarItem, !items.contains(item) else { return }
         entries.append(ToolbarEntry(item))
     }
     mutating func remove(_ item: BrowserToolbarItem) {

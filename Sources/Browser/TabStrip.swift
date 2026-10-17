@@ -9,6 +9,27 @@ struct TabFrameKey: PreferenceKey {
     }
 }
 
+/// Reserve the add button and a window-drag area before shrinking or scrolling tabs.
+struct HorizontalTabStripMetrics {
+    static let spacing: CGFloat = 4
+    static let addButtonSize: CGFloat = 32
+    static let dragAreaWidth: CGFloat = 40
+    let tabWidth: CGFloat
+    let contentWidth: CGFloat
+    let viewportWidth: CGFloat
+    var scrolls: Bool { contentWidth > viewportWidth }
+
+    init(tabCount: Int, width: CGFloat, leading: CGFloat) {
+        let count = CGFloat(max(0, tabCount))
+        let gaps = Self.spacing * max(0, count - 1)
+        let available = max(0, width - leading - BrowserChrome.edgeInset
+                            - Self.addButtonSize - Self.dragAreaWidth - Self.spacing * 2)
+        tabWidth = count == 0 ? 0 : min(220, max(56, ((available - gaps) / count).rounded(.down)))
+        contentWidth = tabWidth * count + gaps
+        viewportWidth = min(contentWidth, available)
+    }
+}
+
 struct TabStrip: View {
     let browser: BrowserModel
     let layout: TabLayout
@@ -22,12 +43,10 @@ struct TabStrip: View {
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
     @State private var draggedTabID: UUID?
+    @FocusState private var addButtonIsFocused: Bool
 
-    private let spacing: CGFloat = 4
-    private let maxTabWidth: CGFloat = 220
-    private let minTabWidth: CGFloat = 56
-    /// Always leave some empty strip to drag the window by.
-    private let minDragAreaWidth: CGFloat = 40
+    private let spacing = HorizontalTabStripMetrics.spacing
+    private let addButtonID = "new-tab-button"
 
     var body: some View {
         Group {
@@ -43,26 +62,28 @@ struct TabStrip: View {
         GeometryReader { geometry in
             let leading = isFullScreen ? BrowserChrome.edgeInset
                 : BrowserChrome.windowButtonsTrailing(titlebarHeight: BrowserChrome.tabRowHeight) + 12
-            let count = CGFloat(browser.tabs.count)
-            let availableWidth = max(minTabWidth, geometry.size.width - leading - BrowserChrome.edgeInset
-                                     - minDragAreaWidth)
-            let tabWidth = min(maxTabWidth,
-                               max(minTabWidth, ((availableWidth - spacing * (count - 1)) / count).rounded(.down)))
-            let tabsWidth = tabWidth * count + spacing * (count - 1)
+            let metrics = HorizontalTabStripMetrics(tabCount: browser.tabs.count,
+                                                    width: geometry.size.width, leading: leading)
 
             HStack(spacing: spacing) {
                 ScrollViewReader { scrollProxy in
                     ScrollView(.horizontal) {
                         HStack(spacing: spacing) {
                             ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
-                                tabItem(for: tab, at: index, width: tabWidth)
+                                tabItem(for: tab, at: index, width: metrics.tabWidth)
                                     .id(tab.id)
                             }
                         }
                         .frame(height: BrowserChrome.tabRowHeight)
                     }
                     .scrollIndicators(.never)
-                    .scrollDisabled(tabsWidth <= availableWidth)
+                    .scrollDisabled(!metrics.scrolls)
+                    .onAppear {
+                        if let activeTabID = browser.activeTabID { scrollProxy.scrollTo(activeTabID) }
+                    }
+                    .onChange(of: metrics.viewportWidth) { _, _ in
+                        if let activeTabID = browser.activeTabID { scrollProxy.scrollTo(activeTabID) }
+                    }
                     .onChange(of: browser.activeTabID) { _, activeTabID in
                         guard let activeTabID else { return }
                         withAnimation(.easeOut(duration: 0.2)) {
@@ -70,7 +91,9 @@ struct TabStrip: View {
                         }
                     }
                 }
-                .frame(width: min(tabsWidth, availableWidth))
+                .frame(width: metrics.viewportWidth)
+
+                newTabButton
 
                 Color.clear
                     .contentShape(Rectangle())
@@ -81,7 +104,7 @@ struct TabStrip: View {
             .padding(.trailing, BrowserChrome.edgeInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
-            .animation(.snappy(duration: 0.22), value: tabWidth)
+            .animation(.snappy(duration: 0.22), value: metrics.tabWidth)
         }
         .frame(height: BrowserChrome.tabRowHeight)
     }
@@ -106,22 +129,73 @@ struct TabStrip: View {
                             tabItem(for: tab, at: index, width: nil)
                                 .id(tab.id)
                         }
+                        newTabButton
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(addButtonID)
                     }
                     .padding(.horizontal, BrowserChrome.edgeInset)
                     .padding(.top, 2)
                     .padding(.bottom, BrowserChrome.edgeInset)
                 }
                 .scrollIndicators(.never)
-                .onChange(of: browser.activeTabID) { _, activeTabID in
-                    guard let activeTabID else { return }
+                .onAppear { revealActiveSidebarTab(using: scrollProxy) }
+                .onChange(of: browser.activeTabID) { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
-                        scrollProxy.scrollTo(activeTabID)
+                        revealActiveSidebarTab(using: scrollProxy)
                     }
                 }
             }
-            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2) + BrowserChrome.edgeInset) { stripMenuActions }
+            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2)
+                                + HorizontalTabStripMetrics.addButtonSize + 2 + BrowserChrome.edgeInset) { stripMenuActions }
             .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
+    }
+
+    private func revealActiveSidebarTab(using proxy: ScrollViewProxy) {
+        guard let activeTabID = browser.activeTabID else { return }
+        if activeTabID == browser.tabs.last?.id {
+            proxy.scrollTo(addButtonID, anchor: .bottom)
+        } else {
+            proxy.scrollTo(activeTabID)
+        }
+    }
+
+    private var newTabButton: some View {
+        Group {
+            if layout == .vertical {
+                Button(action: addTab) {
+                    HStack(spacing: 7) {
+                        Image(browserIcon: .add, size: 14)
+                        Text("New Tab")
+                            .font(.system(size: 12.5))
+                            .tracking(-0.1)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: BrowserChrome.sidebarTabHeight)
+                }
+                .buttonStyle(SidebarNewTabButtonStyle())
+            } else {
+                Button(action: addTab) {
+                    Image(browserIcon: .add, size: 14)
+                }
+                .buttonStyle(ChromeIconButtonStyle(size: HorizontalTabStripMetrics.addButtonSize))
+            }
+        }
+        .focused($addButtonIsFocused)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(addButtonIsFocused ? Color.accentColor : .clear, lineWidth: 2)
+                .allowsHitTesting(false)
+        }
+        .help("New Tab (⌘T)")
+        .accessibilityLabel("New Tab")
+        .accessibilityIdentifier(addButtonID)
+    }
+
+    private func addTab() {
+        hoverCardTabID = nil
+        browser.addTab()
     }
 
     private func tabItem(for tab: BrowserTab, at index: Int, width: CGFloat?) -> some View {
@@ -406,6 +480,20 @@ struct ChromeIconButtonStyle: ButtonStyle {
                         isHovered ? Color.primary.opacity(0.07) : Color.clear,
                         in: RoundedRectangle(cornerRadius: size <= 28 ? 8 : 10, style: .continuous))
             .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+    }
+}
+
+private struct SidebarNewTabButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        configuration.label
+            .foregroundStyle(isHovered ? Color.primary : Color.secondary)
+            .background(configuration.isPressed ? Color.primary.opacity(0.11) :
+                        isHovered ? Color.primary.opacity(0.07) : Color.clear, in: shape)
+            .contentShape(shape)
             .onHover { isHovered = $0 }
     }
 }
