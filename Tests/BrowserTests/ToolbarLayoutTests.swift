@@ -54,52 +54,29 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(BrowserToolbarLayout(data: layout.storedValue), layout)
     }
 
-    func testHoverReordersRootRowsInBothDirectionsWithoutGroupingThem() {
+    func testPreviewMovesGroupsAndButtonsLeftAndRightWithoutCrossingBoundaries() {
         var layout = BrowserToolbarLayout.standard
-        XCTAssertTrue(layout.move("profile", over: "allActions"))
-        XCTAssertEqual(layout.entries.last?.id, "profile")
-        XCTAssertTrue(layout.move("profile", over: "group.navigation"))
+        layout.move("group.navigation", by: -1)
+        XCTAssertEqual(layout.entries.first?.id, "group.navigation")
+        layout.move("group.navigation", by: -1)
+        XCTAssertEqual(layout.entries.first?.id, "group.navigation")
+        layout.move("group.navigation", by: 1)
         XCTAssertEqual(layout, .standard)
-        XCTAssertTrue(layout.move("group.navigation", over: "newTab"))
-        XCTAssertEqual(layout.entries.map(\.id), ["profile", "address", "newTab", "group.navigation", "allActions"])
-        XCTAssertTrue(layout.move("group.navigation", over: "address"))
-        XCTAssertEqual(layout, .standard)
-        XCTAssertTrue(layout.move("newTab", over: "group.navigation"))
-        XCTAssertEqual(layout.entry(containing: .newTab)?.id, "newTab")
-        XCTAssertFalse(layout.move("newTab", over: "newTab"))
-        XCTAssertFalse(layout.move("missing", over: "profile"))
-        XCTAssertFalse(layout.move("profile", over: "missing"))
-    }
 
-    func testHoverReordersChildrenAndMovesInAndOutOfGroupsWithoutLosingButtons() {
-        var layout = BrowserToolbarLayout.standard
-        XCTAssertTrue(layout.move("back", over: "reload"))
-        XCTAssertEqual(layout.entry(containing: .back)?.items, [.forward, .reload, .back])
-        XCTAssertTrue(layout.move("back", over: "forward"))
+        layout.move("back", by: -1)
         XCTAssertEqual(layout, .standard)
-        XCTAssertTrue(layout.move("newTab", over: "forward"))
-        XCTAssertEqual(layout.entry(containing: .back)?.items, [.back, .newTab, .forward, .reload])
-        XCTAssertTrue(layout.move("newTab", over: "allActions"))
-        XCTAssertEqual(layout.entries.map(\.id), BrowserToolbarLayout.standard.entries.map(\.id))
-        let before = layout
-        XCTAssertFalse(layout.move("group.navigation", over: "forward"))
-        XCTAssertEqual(layout, before)
-        for id in ["profile", "address"] {
-            XCTAssertFalse(layout.move(id, over: "forward"))
-            XCTAssertEqual(layout, before)
-        }
-        XCTAssertEqual(Set(layout.items), Set(BrowserToolbarLayout.standard.items))
-        XCTAssertEqual(layout.items.count, BrowserToolbarLayout.standard.items.count)
-        XCTAssertEqual(BrowserToolbarLayout(data: layout.storedValue), layout)
-    }
-
-    func testHoverBetweenGroupsNormalizesTheSourceAndPreservesTargetOrder() {
-        var layout = BrowserToolbarLayout.standard
-        layout.group("allActions", with: "newTab")
-        XCTAssertTrue(layout.move("newTab", over: "forward"))
-        XCTAssertEqual(layout.entry(containing: .allActions)?.id, "allActions")
-        XCTAssertEqual(layout.entry(containing: .back)?.items, [.back, .newTab, .forward, .reload])
-        XCTAssertEqual(Set(layout.items).count, layout.items.count)
+        layout.move("back", by: 1)
+        XCTAssertEqual(layout.entry(containing: .back)?.items, [.forward, .back, .reload])
+        layout.move("back", by: 1)
+        let atRightEdge = layout
+        layout.move("back", by: 1)
+        XCTAssertEqual(layout, atRightEdge)
+        layout.move("back", by: -1)
+        layout.move("back", by: -1)
+        layout.move("allActions", by: 1)
+        layout.move("missing", by: 1)
+        XCTAssertEqual(layout, .standard)
+        XCTAssertEqual(BrowserToolbarLayout(data: atRightEdge.storedValue), atRightEdge)
     }
 
     func testNavigationCanBeSeparatedAndRegroupedWithOtherActions() {
@@ -114,7 +91,7 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(layout.entry(containing: .reload)?.items, [.reload])
     }
 
-    func testNativeDropIndicesMoveRowsInBothDirectionsAndToEnd() {
+    func testMoveIndicesReorderEntriesInBothDirectionsAndToEnd() {
         var layout = BrowserToolbarLayout.standard
         XCTAssertTrue(layout.move("profile", toGroup: nil, at: layout.entries.count))
         XCTAssertEqual(layout.entries.last?.id, "profile")
@@ -128,7 +105,7 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(layout, .standard)
     }
 
-    func testDropReordersChildrenAndMovesButtonsInAndOutOfGroups() {
+    func testMoveIndicesReorderChildrenAndMoveButtonsInAndOutOfGroups() {
         var layout = BrowserToolbarLayout.standard
         XCTAssertTrue(layout.move("back", toGroup: "group.navigation", at: 3))
         XCTAssertEqual(layout.entry(containing: .back)?.items, [.forward, .reload, .back])
@@ -142,7 +119,7 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(Set(layout.items).count, layout.items.count)
     }
 
-    func testDraggingBetweenGroupsCollapsesSingletonsAndMergesWholeGroups() {
+    func testMovingBetweenGroupsCollapsesSingletonsAndMergesWholeGroups() {
         var layout = BrowserToolbarLayout.standard
         layout.add(.home)
         layout.group("home", with: "newTab")
