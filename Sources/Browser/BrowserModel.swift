@@ -288,6 +288,43 @@ final class BrowserModel {
         tabs.move(fromOffsets: offsets, toOffset: first < targetFirst ? targetLast + 1 : targetFirst)
     }
 
+    /// Drops commit once, after the pointer is released. Hovering or cancelling never changes membership.
+    func canDropTab(_ id: UUID, beside targetID: UUID) -> Bool {
+        guard let source = tab(withID: id), let target = tab(withID: targetID),
+              id != targetID, source.isPinned == target.isPinned else { return false }
+        return !tabStripGroups.contains { card in
+            card.tabs.contains { $0.id == id } && card.tabs.contains { $0.id == targetID }
+        }
+    }
+
+    func dropTab(_ id: UUID, beside targetID: UUID, after: Bool) {
+        guard canDropTab(id, beside: targetID),
+              let source = tabStripGroups.first(where: { $0.tabs.contains { $0.id == id } }),
+              let target = tabStripGroups.first(where: { $0.tabs.contains { $0.id == targetID } }),
+              let targetTab = target.tabs.first else { return }
+        let movingIDs = Set(source.tabs.map(\.id))
+        let targetIDs = Set(target.tabs.map(\.id))
+        var ordered = tabs.filter { !movingIDs.contains($0.id) }
+        let indices = ordered.indices.filter { targetIDs.contains(ordered[$0].id) }
+        guard let first = indices.first, let last = indices.last else { return }
+        source.tabs.forEach { $0.groupID = targetTab.groupID }
+        ordered.insert(contentsOf: source.tabs, at: after ? last + 1 : first)
+        tabs = ordered
+        expandGroup(targetTab.groupID)
+        normalizeTabOrder()
+    }
+
+    /// A group header also accepts pinned tabs and empty/collapsed groups, without unpinning or loading pages.
+    func dropTab(_ id: UUID, into groupID: UUID?) {
+        guard groupID == nil || validGroupID(groupID) != nil,
+              let source = tabStripGroups.first(where: { $0.tabs.contains { $0.id == id } }) else { return }
+        let movingIDs = Set(source.tabs.map(\.id))
+        source.tabs.forEach { $0.groupID = groupID }
+        tabs = tabs.filter { !movingIDs.contains($0.id) } + source.tabs
+        expandGroup(groupID)
+        normalizeTabOrder()
+    }
+
     func closeOtherTabs(than id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         for tab in tabs where tab.id != id && !tab.isPinned {

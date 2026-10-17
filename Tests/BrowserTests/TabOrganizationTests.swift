@@ -4,6 +4,78 @@ import XCTest
 
 @MainActor
 final class TabOrganizationTests: XCTestCase {
+    func testDropReordersPinsInBothDirectionsWithoutLoadingOrChangingSelection() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        browser.restoreSession(WindowSession(tabs: (0..<5).map {
+            TabSession(url: URL(string: "https://example.com/\($0)"), title: "Pin \($0)", interactionState: nil, isPinned: true)
+        } + [TabSession(url: nil, title: "", interactionState: nil)], selectedIndex: 5))
+        let ids = browser.tabs.map(\.id)
+        let active = browser.activeTabID
+        browser.dropTab(ids[4], beside: ids[0], after: false)
+        XCTAssertEqual(browser.tabs.map(\.id), [ids[4], ids[0], ids[1], ids[2], ids[3], ids[5]])
+        browser.dropTab(ids[0], beside: ids[3], after: true)
+        XCTAssertEqual(browser.tabs.map(\.id), [ids[4], ids[1], ids[2], ids[3], ids[0], ids[5]])
+        XCTAssertEqual(browser.activeTabID, active)
+        XCTAssertTrue(browser.tabs.prefix(5).allSatisfy { $0.isPinned && $0.isSuspended && $0.webView == nil })
+        let before = browser.tabs.map(\.id)
+        browser.dropTab(ids[0], beside: ids[5], after: true)
+        browser.dropTab(UUID(), beside: ids[3], after: false)
+        XCTAssertEqual(browser.tabs.map(\.id), before)
+    }
+
+    func testDropOntoAnotherGroupsTabChangesMembershipAndExactPosition() {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        for _ in 0..<3 { browser.addTab() }
+        let tabs = browser.tabs
+        let views = tabs.map(\.webView)
+        let first = browser.createGroup(name: "First", color: .blue, tabID: tabs[0].id)
+        let second = browser.createGroup(name: "Second", color: .green, tabID: tabs[1].id)
+        browser.assignTab(tabs[2].id, to: second)
+        browser.dropTab(tabs[0].id, beside: tabs[1].id, after: true)
+        XCTAssertEqual(tabs[0].groupID, second)
+        XCTAssertEqual(browser.tabs.map(\.id), [tabs[1].id, tabs[0].id, tabs[2].id, tabs[3].id])
+        XCTAssertEqual(browser.tabSections.first?.group?.id, first)
+        XCTAssertEqual(browser.tabSections.first?.tabCount, 0)
+        browser.dropTab(tabs[0].id, beside: tabs[3].id, after: false)
+        XCTAssertNil(tabs[0].groupID)
+        XCTAssertEqual(tabs.map(\.webView), views)
+    }
+
+    func testDropIntoCollapsedEmptyGroupAndOutPreservesPinsAndSplitPair() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        browser.startSplitView()
+        let pair = browser.tabs
+        pair.forEach { browser.setPinned(true, for: $0.id) }
+        let group = browser.createGroup(name: "Empty", color: .purple)
+        browser.toggleGroupCollapsed(group)
+        browser.dropTab(pair[0].id, into: group)
+        XCTAssertTrue(pair.allSatisfy { $0.groupID == group && $0.isPinned })
+        XCTAssertFalse(browser.groups[0].isCollapsed)
+        XCTAssertEqual(browser.splitTabIDs, pair.map(\.id))
+        XCTAssertEqual(browser.tabStripGroups.count, 1)
+        browser.dropTab(pair[0].id, into: nil)
+        XCTAssertTrue(pair.allSatisfy { $0.groupID == nil && $0.isPinned })
+        browser.dropTab(pair[0].id, into: UUID())
+        XCTAssertTrue(pair.allSatisfy { $0.groupID == nil })
+    }
+
+    func testTabDragProviderKeepsItsIdentityInThePayloadAndRejectsPlainText() async throws {
+        let id = UUID()
+        let provider = TabDragPayload.provider(for: id)
+        XCTAssertEqual(TabDragPayload.id(from: provider), id)
+        XCTAssertNil(TabDragPayload.id(from: NSItemProvider(object: id.uuidString as NSString)))
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: TabDragPayload.type.identifier) { data, error in
+                if let data { continuation.resume(returning: data) }
+                else { continuation.resume(throwing: error ?? CocoaError(.fileReadCorruptFile)) }
+            }
+        }
+        XCTAssertEqual(String(data: data, encoding: .utf8), id.uuidString)
+    }
+
     func testPinsLeadAndSurviveEveryTabClosurePath() throws {
         let browser = BrowserModel.makePrivate()
         defer { browser.releaseClosedWindow() }

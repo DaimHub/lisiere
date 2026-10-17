@@ -87,7 +87,6 @@ struct TabStrip: View {
 
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
-    @State private var draggedTabID: UUID?
     @State private var groupEditor: TabGroupEditorRequest?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
@@ -271,17 +270,7 @@ struct TabStrip: View {
         .accessibilityValue("\(group.isCollapsed ? "Collapsed" : "Expanded"), \(group.color.title)")
         .accessibilityIdentifier("tab-group-\(section.id)")
         .browserContextMenu { groupMenuActions(group) }
-        .onDrop(of: [.text], isTargeted: nil) { providers in
-            guard let provider = providers.first, let id = draggedTabID else { return false }
-            draggedTabID = nil
-            let browser = browser
-            // Validate the payload too: a cancelled internal drag can leave its local ID behind.
-            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
-                guard let value = object as? String, UUID(uuidString: value) == id else { return }
-                Task { @MainActor in browser.assignTab(id, to: group.id) }
-            }
-            return true
-        }
+        .tabDropDestination(browser: browser, target: .group(group.id), horizontal: false, accent: group.color.tint)
     }
 
     private var newTabButton: some View {
@@ -315,6 +304,7 @@ struct TabStrip: View {
         .help("New Tab (⌘T)")
         .accessibilityLabel("New Tab")
         .accessibilityIdentifier(addButtonID)
+        .tabDropDestination(browser: browser, target: .group(nil), horizontal: false, accent: accent)
     }
 
     private func addTab() {
@@ -399,16 +389,12 @@ struct TabStrip: View {
                 }
             }
             .onDrag {
-                draggedTabID = tab.id
                 hoverCardTabID = nil
                 suppressedHoverCardTabID = tab.id
-                return NSItemProvider(object: tab.id.uuidString as NSString)
+                return TabDragPayload.provider(for: tab.id)
             }
-            .onDrop(of: [.text], delegate: ReorderDropDelegate(targetID: tab.id, draggedID: $draggedTabID,
-                canMove: { id in browser.tabs.contains { $0.id == id } },
-                move: { id, target in
-                    browser.moveTabGroup(containing: id, beside: target)
-                }))
+            .tabDropDestination(browser: browser, target: .tab(tab.id),
+                                horizontal: layout == .horizontal || tab.isPinned, accent: accent)
             .browserContextMenu { tabMenuActions(for: tab) }
     }
 

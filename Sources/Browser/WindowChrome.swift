@@ -76,15 +76,60 @@ final class WindowChromeView: NSView {
     var onClose: (() -> Void)?
     var titlebarHeight = BrowserChrome.tabRowHeight {
         didSet {
-            if titlebarHeight != oldValue { layoutWindowButtons() }
+            if titlebarHeight != oldValue { scheduleWindowButtonsLayout() }
         }
     }
     private var observers: [NSObjectProtocol] = []
+    private var titlebarObservers: [NSObjectProtocol] = []
+    private weak var observedTitlebar: NSView?
+    private var layoutScheduled = false
+    private var isLayingOutButtons = false
+    private var reportedFullScreen: Bool?
+
+    override func layout() {
+        super.layout()
+        scheduleWindowButtonsLayout()
+    }
+
+    /// AppKit can reset its titlebar after SwiftUI changes layout or replaces a profile's content.
+    /// Coalesce repairs after that pass, instead of reading the titlebar's previous height mid-update.
+    private func scheduleWindowButtonsLayout() {
+        guard !layoutScheduled, !isLayingOutButtons, window != nil else { return }
+        layoutScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.layoutScheduled = false
+            self.layoutWindowButtons()
+        }
+    }
+
+    private func observeTitlebar(_ view: NSView) {
+        guard observedTitlebar !== view else { return }
+        titlebarObservers.forEach(NotificationCenter.default.removeObserver)
+        titlebarObservers = []
+        observedTitlebar = view
+        let controls = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window?.standardWindowButton($0) }
+        for observed in [view, view.superview].compactMap({ $0 }) + controls {
+            observed.postsFrameChangedNotifications = true
+            observed.postsBoundsChangedNotifications = true
+            for name in [NSView.frameDidChangeNotification, NSView.boundsDidChangeNotification] {
+                titlebarObservers.append(NotificationCenter.default.addObserver(forName: name, object: observed,
+                                                                                queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.scheduleWindowButtonsLayout() }
+                })
+            }
+        }
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
+        titlebarObservers.forEach(NotificationCenter.default.removeObserver)
+        titlebarObservers = []
+        observedTitlebar = nil
+        reportedFullScreen = nil
         onWindowChange?(window)
         guard let window else { return }
 
@@ -99,14 +144,14 @@ final class WindowChromeView: NSView {
         ]
         observers = names.map { name in
             NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutWindowButtons() }
+                MainActor.assumeIsolated { self?.scheduleWindowButtonsLayout() }
             }
         }
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
                                                                 queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.onClose?() }
         })
-        DispatchQueue.main.async { [weak self] in self?.layoutWindowButtons() }
+        scheduleWindowButtonsLayout()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -114,8 +159,9 @@ final class WindowChromeView: NSView {
     private func layoutWindowButtons() {
         guard let window else { return }
         let isFullScreen = window.styleMask.contains(.fullScreen)
-        if let onFullScreenChange {
-            DispatchQueue.main.async { onFullScreenChange(isFullScreen) }
+        if reportedFullScreen != isFullScreen {
+            reportedFullScreen = isFullScreen
+            onFullScreenChange?(isFullScreen)
         }
 
         guard !isFullScreen,
@@ -123,6 +169,9 @@ final class WindowChromeView: NSView {
               let titlebarView = closeButton.superview,
               let titlebarContainer = titlebarView.superview else { return }
 
+        observeTitlebar(titlebarView)
+        isLayingOutButtons = true
+        defer { isLayingOutButtons = false }
         let height = titlebarHeight
         let containerFrame = NSRect(x: titlebarContainer.frame.minX,
                                     y: window.frame.height - height,
@@ -130,6 +179,12 @@ final class WindowChromeView: NSView {
                                     height: height)
         if titlebarContainer.frame != containerFrame {
             titlebarContainer.frame = containerFrame
+        }
+
+        // Resizing the outer container does not synchronously resize AppKit's inner titlebar.
+        // Keep both aligned before positioning controls, including a 40/46 pt layout switch.
+        if titlebarView.frame != titlebarContainer.bounds {
+            titlebarView.frame = titlebarContainer.bounds
         }
 
         let buttonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
