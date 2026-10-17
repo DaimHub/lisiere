@@ -161,7 +161,61 @@ final class SplitViewTests: XCTestCase {
         browser.startSplitView(with: pages[1].id)
         browser.activeTabID = outside
         XCTAssertFalse(browser.isSplitView)
+        XCTAssertTrue(browser.hasSplitPair)
+        XCTAssertEqual(browser.splitTabIDs, pages.map(\.id))
+        XCTAssertEqual(browser.tabStripGroups.filter { $0.tabs.count == 2 }.count, 1)
+        XCTAssertTrue(pages.allSatisfy { !browser.isTabVisible($0.id) })
+        for page in pages {
+            browser.activeTabID = page.id
+            XCTAssertTrue(browser.isSplitView)
+            XCTAssertTrue(pages.allSatisfy { browser.isTabVisible($0.id) })
+        }
         XCTAssertEqual(pages.compactMap(\.webView), views)
+    }
+
+    func testReturningToParkedPairRestoresBothSuspendedPages() async throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        let left = try XCTUnwrap(browser.activeTab)
+        browser.open(page("ParkedLeft"))
+        try await waitUntil { left.pageTitle == "ParkedLeft" && !left.isLoading }
+        browser.startSplitView()
+        let right = try XCTUnwrap(browser.activeTab)
+        browser.open(page("ParkedRight"))
+        try await waitUntil { right.pageTitle == "ParkedRight" && !right.isLoading }
+        browser.addTab()
+        let outside = browser.activeTabID
+        XCTAssertFalse(browser.isSplitView)
+        XCTAssertTrue(browser.hasSplitPair)
+        XCTAssertTrue(browser.suspendableTabs.contains { $0 === left })
+        XCTAssertTrue(browser.suspendableTabs.contains { $0 === right })
+        browser.focusOtherSplitPane()
+        XCTAssertEqual(browser.activeTabID, outside)
+        await browser.suspendTabs([left, right])
+        XCTAssertTrue(left.isSuspended)
+        XCTAssertTrue(right.isSuspended)
+        browser.activeTabID = right.id
+        try await waitUntil { !left.isSuspended && !right.isSuspended && !left.isLoading && !right.isLoading }
+        XCTAssertEqual(browser.splitTabIDs, [left.id, right.id])
+        XCTAssertTrue(browser.suspendableTabs.isEmpty)
+        XCTAssertTrue(browser.isTabVisible(left.id))
+    }
+
+    func testClosingOrUngroupingParkedPairDoesNotSelectItsSurvivor() throws {
+        for closesTab in [true, false] {
+            let browser = BrowserModel.makePrivate()
+            defer { browser.releaseClosedWindow() }
+            browser.startSplitView()
+            let pair = browser.splitTabIDs
+            browser.addTab()
+            let outside = browser.activeTabID
+            if closesTab { browser.closeTab(pair[1]) }
+            else { browser.endSplitView() }
+            XCTAssertFalse(browser.hasSplitPair)
+            XCTAssertEqual(browser.activeTabID, outside)
+            browser.activeTabID = pair[0]
+            XCTAssertFalse(browser.isSplitView)
+        }
     }
 
     func testPrivateSplitSharesCookiesOnlyWithinItsWindow() async throws {
@@ -216,6 +270,25 @@ final class SplitViewTests: XCTestCase {
         browser.startSplitView()
         let second = try XCTUnwrap(browser.activeTab)
         try await waitUntil { first.webView?.window === window && second.webView?.window === window }
+
+        try await waitUntil { self.nativeSplit(in: window.contentView)?.arrangedSubviews.count == 2 }
+        // Wait until the divider observer has completed the initial restore, then resize natively.
+        try await Task.sleep(for: .milliseconds(200))
+        let split = try XCTUnwrap(nativeSplit(in: window.contentView))
+        split.setPosition(560, ofDividerAt: 0)
+        try await waitUntil { browser.splitDividerFraction > 0.6 }
+        let fraction = browser.splitDividerFraction
+        browser.addTab()
+        let outside = try XCTUnwrap(browser.activeTab)
+        try await waitUntil { outside.contentView.window === window && first.webView?.window == nil }
+        XCTAssertTrue(browser.hasSplitPair)
+        browser.activeTabID = first.id
+        try await waitUntil { first.webView?.window === window && second.webView?.window === window }
+        try await waitUntil {
+            guard let restored = self.nativeSplit(in: window.contentView), let leading = restored.arrangedSubviews.first else { return false }
+            return abs(leading.frame.width / (restored.bounds.width - restored.dividerThickness) - fraction) < 0.01
+        }
+        XCTAssertEqual(browser.splitDividerFraction, fraction, accuracy: 0.01)
         browser.endSplitView(keeping: first.id)
         // Allow both removal and insertion in SwiftUI's asynchronous transaction to finish.
         try await Task.sleep(for: .milliseconds(200))
@@ -228,6 +301,14 @@ final class SplitViewTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertTrue(first.webView?.window === window)
         window.contentView = nil
+    }
+
+    private func nativeSplit(in view: NSView?) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for child in view?.subviews ?? [] {
+            if let split = nativeSplit(in: child) { return split }
+        }
+        return nil
     }
 
     func testNonActiveVisiblePaneRecoversFromWebProcessTermination() async throws {
@@ -255,6 +336,11 @@ private struct SplitHostFixture: View {
                 HSplitView {
                     ForEach(browser.splitTabs) { tab in
                         PageHost(content: tab.contentView).frame(minWidth: 180)
+                            .background {
+                                if tab.id == browser.splitTabIDs.first {
+                                    SplitDividerPosition(browser: browser)
+                                }
+                            }
                     }
                 }
             } else if let tab = browser.activeTab {

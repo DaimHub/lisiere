@@ -119,10 +119,13 @@ ordinary cards. Dragging either member moves the joined card as a unit. Pane out
 12-point outside corner geometry as the page container, with straight edges at the native divider.
 
 Dragging the native divider resizes both pages, with a 180-point minimum per pane. Removing a pane
-or exiting split view keeps both tabs open. Closing an actual tab keeps its split partner selected.
-Selecting a third tab exits split view without closing either page. Each profile retains its own
-split while switching profiles in the same window; private windows only use their own in-memory
-WebKit store. Both visible pages are excluded from background suspension.
+or explicitly exiting split view keeps both tabs open. Closing a displayed split tab keeps its partner
+selected. Selecting or opening another tab parks the split: its joined card remains, and selecting
+either member restores both panes with the same divider proportion. All Actions > Split View > Return
+to Split View also reopens it. Closing a parked member dissolves that pair without changing the current
+page. Each profile retains its own split while switching profiles in the same window; private windows
+only use their own in-memory WebKit store. Visible pages are excluded from background suspension;
+parked pages can suspend normally, and returning restores both members together.
 
 Split presentation is window-local and is not persisted across app restarts. The existing session
 store still saves the two ordinary tabs and their history. `PageDelegate` recovers either visible
@@ -143,6 +146,14 @@ value. Continuous physical divider dragging and tab-card dragging remain unverif
 semantics are covered by XCTest. Full VoiceOver traversal and distribution/notarization were not tested.
 Private tab layout was changed through its context menu: the existing View-menu layout shortcut does
 not update private-window preferences.
+
+Follow-up validation on 2026-10-17: 240 XCTest tests passed after preserving parked split pairs.
+Regressions cover selecting other tabs, restoring both suspended members, closing or ungrouping a
+parked pair without changing the current page, and restoring the native divider proportion. Release
+build, strict signatures and isolated startup smoke passed. Native Release checks confirmed that
+sidebar and horizontal cards remain joined while another tab is open, and selecting either member
+restores both pages, form input and divider width. Opening a new tab and Return to Split View also
+preserved the pair. The installed application was not replaced.
 
 ## Pinned tabs and named groups
 

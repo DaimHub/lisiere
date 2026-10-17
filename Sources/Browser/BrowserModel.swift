@@ -31,17 +31,19 @@ final class BrowserModel {
     }
     private(set) var groups: [TabGroup] = []
 
-    /// Window-local presentation only. Both pages remain ordinary tabs with their own WebKit state.
+    /// Window-local pairing survives selection of other tabs; both pages keep their own WebKit state.
     private(set) var splitTabIDs: [UUID] = []
-    var isSplitView: Bool { splitTabIDs.count == 2 }
+    var hasSplitPair: Bool { splitTabIDs.count == 2 }
+    var isSplitView: Bool { hasSplitPair && splitTabIDs.contains { $0 == activeTabID } }
     var splitTabs: [BrowserTab] { splitTabIDs.compactMap { tab(withID: $0) } }
+    var splitDividerFraction: CGFloat = 0.5
 
     struct TabStripGroup: Identifiable {
         let id: UUID
         let tabs: [BrowserTab]
     }
 
-    /// Join the visible pair without changing stored tab order. The card mirrors left/right pane order.
+    /// Keep the pair joined even while another tab is visible. The card mirrors left/right pane order.
     var tabStripGroups: [TabStripGroup] {
         // A split across pin/group boundaries keeps separate cards in their proper sections.
         let pair = splitTabs
@@ -56,7 +58,7 @@ final class BrowserModel {
     }
 
     func isTabVisible(_ id: UUID) -> Bool {
-        id == activeTabID || splitTabIDs.contains(id)
+        id == activeTabID || (isSplitView && splitTabIDs.contains(id))
     }
 
     /// Uses only this model's tabs, so pages never cross profile or private-window data stores.
@@ -72,7 +74,9 @@ final class BrowserModel {
             tabs.append(second)
             normalizeTabOrder()
         }
-        splitTabIDs = [first.id, second.id]
+        let pair = [first.id, second.id]
+        if splitTabIDs != pair { splitDividerFraction = 0.5 }
+        splitTabIDs = pair
         first.restore()
         second.restore()
         activeTabID = second.id
@@ -87,14 +91,14 @@ final class BrowserModel {
     }
 
     func focusOtherSplitPane() {
-        guard let id = splitTabIDs.first(where: { $0 != activeTabID }) else { return }
+        guard isSplitView, let id = splitTabIDs.first(where: { $0 != activeTabID }) else { return }
         activeTabID = id
         if activeTab?.isNewTab == true { requestAddressFocus() }
         else { activeTab?.focusPage() }
     }
 
     private func reconcileSplitView() {
-        guard isSplitView, splitTabIDs.contains(where: { tab(withID: $0) == nil }) else { return }
+        guard hasSplitPair, splitTabIDs.contains(where: { tab(withID: $0) == nil }) else { return }
         let survivor = splitTabIDs.first { tab(withID: $0) != nil }
         splitTabIDs = []
         if activeTab == nil, let survivor { activeTabID = survivor }
@@ -104,15 +108,15 @@ final class BrowserModel {
     var activeTabID: UUID? {
         didSet {
             guard oldValue != activeTabID else { return }
-            // Selecting another tab returns to one page; the split pages stay open in the tab strip.
-            if isSplitView, !splitTabIDs.contains(where: { $0 == activeTabID }) { splitTabIDs = [] }
             if let previousTab = tab(withID: oldValue) {
                 // Keep a preview of the page being left for background-tab hover cards.
                 previousTab.captureThumbnail(afterScreenUpdates: false)
                 previousTab.lastActive = .now
             }
             if !isRestoringSession { expandGroup(activeTab?.groupID) }
-            activeTab?.restore()
+            // Returning to either member must also restore a partner suspended while the pair was parked.
+            if isSplitView { splitTabs.forEach { $0.restore() } }
+            else { activeTab?.restore() }
             activeTab?.didBecomeSelected()
             if isSplitView { activeTab?.focusPage() }
         }
