@@ -10,6 +10,7 @@ enum BrowserIcon: CaseIterable {
     case reload
     case search
     case add
+    case subtract
     case home
     case privateWindow
     case history
@@ -81,6 +82,7 @@ enum BrowserIcon: CaseIterable {
         case .reload: Hugeicons.refresh
         case .search: Hugeicons.search01
         case .add: Hugeicons.add01
+        case .subtract: Hugeicons.minusSign
         case .home: Hugeicons.home01
         case .privateWindow: Hugeicons.incognito
         case .history: Hugeicons.clock01
