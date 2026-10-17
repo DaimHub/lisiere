@@ -175,7 +175,10 @@ enum BrowserIcon: CaseIterable {
     /// Copy before resizing: the package caches its original 24-point template image.
     @MainActor
     func nsImage(size: CGFloat = 14, accessibilityDescription: String? = nil) -> NSImage {
-        guard let image = asset.nsImage()?.copy() as? NSImage else {
+        // The pinned Swift package's home01 still has the old inner curve.
+        // Use the current official Home01Icon artwork for every Home surface.
+        let original = self == .home ? NSImage(named: "BrowserHome01") : asset.nsImage()
+        guard let image = original?.copy() as? NSImage else {
             preconditionFailure("Missing Hugeicons resource: \(asset.resourceName)")
         }
         image.size = NSSize(width: size, height: size)
