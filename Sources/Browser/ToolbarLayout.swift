@@ -61,6 +61,8 @@ struct ToolbarEntry: Equatable, Identifiable {
 }
 
 struct BrowserToolbarLayout: Equatable {
+    /// Leave room for the address text beside page zoom and site controls.
+    static let minimumAddressWidth: CGFloat = 280
     static let legacyStorageKey = "navigationToolbarItems"
     static let storageKey = "navigationToolbarLayoutV2"
     static let standard = Self(entries: [ToolbarEntry(.profile),
@@ -217,14 +219,14 @@ struct BrowserToolbarLayout: Equatable {
 
     /// Overflow changes presentation only, leaving saved groups and ordering intact.
     func presentation(width: CGFloat, hasDownloads: Bool = false, isPrivate: Bool = false) -> ToolbarPresentation {
-        let compactProfile = width < 540
+        let compactProfile = width < 640
         var visible = entries
         if hasDownloads && !items.contains(.downloads) { visible.append(ToolbarEntry(.downloads)) }
         var hidden = Set<BrowserToolbarItem>()
         func requiredWidth() -> CGFloat {
             visible.reduce(CGFloat(0)) { result, entry in
                 result + entry.items.reduce(CGFloat(4)) { result, item in
-                    result + (item == .address ? 160 : item == .profile ? (isPrivate ? 94 : compactProfile ? 34 : 132) : 30)
+                    result + (item == .address ? Self.minimumAddressWidth : item == .profile ? (isPrivate ? 94 : compactProfile ? 34 : 132) : 30)
                 }
             } + CGFloat(max(0, visible.count - 1)) * 6
                 + (!hidden.isEmpty && !visible.contains(where: { $0.items.contains(.allActions) }) ? 40 : 0)

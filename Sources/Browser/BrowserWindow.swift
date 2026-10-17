@@ -73,6 +73,8 @@ struct BrowserWindow: View {
                 mainColumn
             }
         }
+        // Vertical tabs need room for the sidebar as well as the address bar's page controls.
+        .frame(minWidth: tabLayout == .vertical ? (browser.isPrivate ? 820 : 760) : 680, minHeight: 440)
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
         }
@@ -353,7 +355,9 @@ struct BrowserWindow: View {
         switch item {
         case .profile:
             if browser.isPrivate { privateLabel(grouped: grouped) } else { profileMenu(compact: compactProfile) }
-        case .address: addressControl(grouped: grouped).frame(minWidth: 160, maxWidth: .infinity)
+        case .address:
+            addressControl(grouped: grouped)
+                .frame(minWidth: BrowserToolbarLayout.minimumAddressWidth, maxWidth: .infinity)
         case .downloads: DownloadsButton(downloads: browser.downloads, controlSize: 30)
         case .allActions: allActionsMenu
         default:
@@ -478,8 +482,8 @@ struct BrowserWindow: View {
             AddressField(text: $address, isFocused: $addressIsFocused, completionStart: completionStart,
                          focusRequest: browser.addressFocusRequest, blurRequest: addressBlurRequest,
                          edit: editAddress, perform: performAddressCommand)
-            zoomButton
             passwordButton
+            zoomControls
             trackerBlockingButton
             bookmarkButton
         }
@@ -496,20 +500,39 @@ struct BrowserWindow: View {
     }
 
     @ViewBuilder
-    private var zoomButton: some View {
-        if let tab = browser.activeTab, !tab.isNewTab, tab.pageZoom != 1 {
-            Button { browser.resetZoom() } label: {
-                Text(tab.pageZoom, format: .percent.precision(.fractionLength(0)))
-                    .font(.system(size: 11, weight: .medium))
-                    .monospacedDigit()
-                    .padding(.horizontal, 6)
-                    .frame(height: 20)
-                    .background(Color.primary.opacity(0.08), in: Capsule())
+    private var zoomControls: some View {
+        if let tab = browser.activeTab, !tab.isNewTab {
+            HStack(spacing: 0) {
+                Button { browser.zoomOut() } label: {
+                    Image(browserIcon: .subtract, size: 12)
+                }
+                .buttonStyle(ChromeIconButtonStyle(size: 26))
+                .disabled(!browser.canZoom || ZoomStore.level(before: tab.pageZoom) >= tab.pageZoom)
+                .help("Zoom Out (⌘−)")
+                .accessibilityLabel("Zoom Out")
+
+                Button { browser.resetZoom() } label: {
+                    Text(tab.pageZoom, format: .percent.precision(.fractionLength(0)))
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                        .frame(minWidth: 40, minHeight: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(!browser.canZoom)
+                .help("Reset Zoom (⌘0)")
+                .accessibilityLabel("Zoom \(Int((tab.pageZoom * 100).rounded())) percent, reset")
+
+                Button { browser.zoomIn() } label: {
+                    Image(browserIcon: .add, size: 12)
+                }
+                .buttonStyle(ChromeIconButtonStyle(size: 26))
+                .disabled(!browser.canZoom || ZoomStore.level(after: tab.pageZoom) <= tab.pageZoom)
+                .help("Zoom In (⌘+)")
+                .accessibilityLabel("Zoom In")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Reset Zoom (⌘0)")
-            .accessibilityLabel("Zoom \(Int((tab.pageZoom * 100).rounded())) percent, reset")
+            .fixedSize()
         }
     }
 
