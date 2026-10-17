@@ -13,6 +13,7 @@ struct TabStrip: View {
     let browser: BrowserModel
     let layout: TabLayout
     let isFullScreen: Bool
+    let accent: Color
     @Binding var hoverCardTabID: UUID?
     private var tabLayout: TabLayout {
         get { browser.preferences.tabLayout }
@@ -54,9 +55,8 @@ struct TabStrip: View {
                 ScrollViewReader { scrollProxy in
                     ScrollView(.horizontal) {
                         HStack(spacing: spacing) {
-                            ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
-                                tabItem(for: tab, at: index, width: tabWidth)
-                                    .id(tab.id)
+                            ForEach(browser.tabStripGroups) { group in
+                                tabGroup(group, width: tabWidth)
                             }
                         }
                         .frame(height: BrowserChrome.tabRowHeight)
@@ -102,9 +102,8 @@ struct TabStrip: View {
             ScrollViewReader { scrollProxy in
                 ScrollView(.vertical) {
                     VStack(spacing: 2) {
-                        ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
-                            tabItem(for: tab, at: index, width: nil)
-                                .id(tab.id)
+                        ForEach(browser.tabStripGroups) { group in
+                            tabGroup(group, width: nil)
                         }
                     }
                     .padding(.horizontal, BrowserChrome.edgeInset)
@@ -119,17 +118,43 @@ struct TabStrip: View {
                     }
                 }
             }
-            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2) + BrowserChrome.edgeInset) { stripMenuActions }
+            .browserContextMenu(excludingTop: CGFloat(browser.tabs.count) * (BrowserChrome.sidebarTabHeight + 2)
+                                + BrowserChrome.edgeInset + (browser.isSplitView ? 4 : 0)) { stripMenuActions }
             .animation(.snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
     }
 
-    private func tabItem(for tab: BrowserTab, at index: Int, width: CGFloat?) -> some View {
+    @ViewBuilder
+    private func tabGroup(_ group: BrowserModel.TabStripGroup, width: CGFloat?) -> some View {
+        if group.tabs.count == 2 {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+            let arrangement = layout == .vertical
+                ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 0))
+            arrangement {
+                ForEach(group.tabs) { tab in
+                    tabItem(for: tab, width: width, joined: true)
+                        .id(tab.id)
+                }
+            }
+            .padding(2)
+            .background(accent.opacity(0.055), in: shape)
+            .overlay { shape.strokeBorder(accent.opacity(0.45), lineWidth: 1).allowsHitTesting(false) }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Split View")
+        } else if let tab = group.tabs.first {
+            tabItem(for: tab, width: width)
+                .id(tab.id)
+        }
+    }
+
+    private func tabItem(for tab: BrowserTab, width: CGFloat?, joined: Bool = false) -> some View {
         let isActive = browser.activeTabID == tab.id
         let isHovered = hoveredTabID == tab.id
+        let index = browser.tabs.firstIndex { $0.id == tab.id } ?? 0
         let nextTab = browser.tabs.indices.contains(index + 1) ? browser.tabs[index + 1] : nil
-        let showsSeparator = layout == .horizontal && nextTab.map { next in
-            !isActive && !isHovered && browser.activeTabID != next.id && hoveredTabID != next.id
+        let showsSeparator = !joined && layout == .horizontal && nextTab.map { next in
+            !browser.splitTabIDs.contains(next.id) && !isActive && !isHovered
+                && browser.activeTabID != next.id && hoveredTabID != next.id
         } ?? false
 
         return TabItem(tab: tab,
@@ -137,6 +162,8 @@ struct TabStrip: View {
                        isHovered: isHovered,
                        width: width,
                        height: layout == .vertical ? BrowserChrome.sidebarTabHeight : BrowserChrome.tabHeight,
+                       splitPosition: joined ? browser.splitTabIDs.firstIndex(of: tab.id) : nil,
+                       accent: accent,
                        select: {
                            suppressedHoverCardTabID = tab.id
                            hoverCardTabID = nil
@@ -170,11 +197,9 @@ struct TabStrip: View {
             .onDrop(of: [.text], delegate: ReorderDropDelegate(targetID: tab.id, draggedID: $draggedTabID,
                 canMove: { id in browser.tabs.contains { $0.id == id } },
                 move: { id, target in
-                    if let index = browser.tabs.firstIndex(where: { $0.id == target }) {
-                        browser.moveTab(id, to: index)
-                    }
+                    browser.moveTabGroup(containing: id, beside: target)
                 }))
-            .browserContextMenu { tabMenuActions(for: tab, at: index) }
+            .browserContextMenu { tabMenuActions(for: tab) }
     }
 
     /// Shows the card after a short delay, then follows the pointer between tabs without waiting again.
@@ -205,9 +230,16 @@ struct TabStrip: View {
          .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
          .separator, layoutAction]
     }
-    private func tabMenuActions(for tab: BrowserTab, at index: Int) -> [BrowserContextAction] {
-        [.init(title: "New Tab", icon: .add) { browser.addTab() }, .separator,
+    private func tabMenuActions(for tab: BrowserTab) -> [BrowserContextAction] {
+        let isJoined = browser.splitTabIDs.contains(tab.id)
+        let lastGroupContainsTab = browser.tabStripGroups.last?.tabs.contains { $0.id == tab.id } ?? true
+        return [.init(title: "New Tab", icon: .add) { browser.addTab() }, .separator,
          .init(title: "Reload", icon: .reload, isEnabled: !tab.isNewTab) { browser.reloadTab(tab.id) },
+         .init(title: browser.splitTabIDs.contains(tab.id) ? "Exit Split View" : "Open Beside Current Tab",
+               icon: .splitView, isEnabled: browser.isSplitView || browser.activeTabID != tab.id) {
+             if browser.splitTabIDs.contains(tab.id) { browser.endSplitView(keeping: tab.id) }
+             else { browser.startSplitView(with: tab.id) }
+         },
          .init(title: "Duplicate", icon: .copy) { browser.duplicateTab(tab.id) },
          .init(title: "Copy Link", icon: .copy, isEnabled: tab.url != nil) {
              guard let url = tab.url else { return }
@@ -216,7 +248,8 @@ struct TabStrip: View {
          }, .separator,
          .init(title: "Close Tab", icon: .close) { browser.closeTab(tab.id) },
          .init(title: "Close Other Tabs", icon: .close, isEnabled: browser.tabs.count >= 2) { browser.closeOtherTabs(than: tab.id) },
-         .init(title: "Close Tabs to the Right", icon: .close, isEnabled: index != browser.tabs.count - 1) { browser.closeTabs(after: tab.id) }, .separator,
+         .init(title: isJoined ? "Close Tabs After Split View" : "Close Tabs to the Right",
+               icon: .close, isEnabled: !lastGroupContainsTab) { browser.closeTabs(afterGroupContaining: tab.id) }, .separator,
          .init(title: "Reopen Closed Tab", icon: .reopen, isEnabled: browser.canReopenClosedTab) { browser.reopenClosedTab() },
          .separator, layoutAction]
     }
@@ -230,10 +263,13 @@ private struct TabItem: View {
     /// A fixed width in the tab strip, or `nil` to fill the sidebar.
     let width: CGFloat?
     let height: CGFloat
+    let splitPosition: Int?
+    let accent: Color
     let select: () -> Void
     let close: () -> Void
 
     private var isCompact: Bool { (width ?? .infinity) < 100 }
+    private var isJoined: Bool { splitPosition != nil }
     /// Narrow tabs keep their icon visible and only swap in the close button while hovered.
     private var showsCloseButton: Bool { isHovered || (isActive && !isCompact) }
 
@@ -244,6 +280,10 @@ private struct TabItem: View {
             if !(isCompact && showsCloseButton) {
                 TabIcon(tab: tab, isActive: isActive)
                     .opacity(tab.isSuspended ? 0.5 : 1)
+                    .accessibilityLabel(tab.title)
+                    .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction(.default, select)
+                    .accessibilityHidden(!isCompact)
             }
             if !isCompact {
                 title
@@ -259,17 +299,18 @@ private struct TabItem: View {
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .background {
-            shape.fill(isActive ? Color.primary.opacity(0.11) :
+            shape.fill(isActive ? (isJoined ? accent.opacity(0.16) : Color.primary.opacity(0.11)) :
                        isHovered ? Color.primary.opacity(0.055) : Color.clear)
-                .shadow(color: .black.opacity(isActive ? 0.08 : 0), radius: 1, y: 0.5)
+                .shadow(color: .black.opacity(isActive && !isJoined ? 0.08 : 0), radius: 1, y: 0.5)
         }
         .overlay {
-            shape.strokeBorder(Color.primary.opacity(isActive ? 0.07 : 0), lineWidth: 1)
+            shape.strokeBorder(Color.primary.opacity(isActive && !isJoined ? 0.07 : 0), lineWidth: 1)
         }
         .contentShape(shape)
         .onTapGesture(perform: select)
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityElement(children: .contain)
+        .accessibilityValue(splitPosition.map { $0 == 0 ? "Left pane" : "Right pane" } ?? "")
     }
 
     private var title: some View {

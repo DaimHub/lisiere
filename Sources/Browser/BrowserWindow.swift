@@ -61,7 +61,7 @@ struct BrowserWindow: View {
         // The main column keeps one identity across layouts, so switching layouts doesn't rebuild the page host.
         HStack(spacing: 0) {
             if tabLayout == .vertical {
-                TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen,
+                TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen, accent: accent,
                          hoverCardTabID: $hoverCardTabID)
                     .background(profileSwipeArea)
                     .frame(width: BrowserChrome.sidebarWidth)
@@ -69,7 +69,7 @@ struct BrowserWindow: View {
             }
             VStack(spacing: 0) {
                 if tabLayout == .horizontal {
-                    TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen,
+                    TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen, accent: accent,
                              hoverCardTabID: $hoverCardTabID)
                         .background(profileSwipeArea)
                         .transition(.opacity)
@@ -278,22 +278,89 @@ struct BrowserWindow: View {
                     .transition(.opacity)
             }
 
-            if let tab = browser.activeTab {
-                Group {
-                    if tab.isNewTab {
-                        NewTabView(bookmarks: bookmarks, browser: browser) { browser.requestAddressFocus() }
-                    } else {
-                        webView(for: tab)
+            Group {
+                if browser.isSplitView {
+                    HSplitView {
+                        ForEach(browser.splitTabs) { tab in
+                            splitPane(for: tab)
+                                .frame(minWidth: 180, maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     }
+                } else if let tab = browser.activeTab {
+                    page(for: tab)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                }
-                .padding(.leading, leadingInset)
-                .padding([.trailing, .bottom], BrowserChrome.edgeInset)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .padding(.leading, leadingInset)
+            .padding([.trailing, .bottom], BrowserChrome.edgeInset)
+        }
+    }
+
+    @ViewBuilder
+    private func page(for tab: BrowserTab) -> some View {
+        if tab.isNewTab {
+            NewTabView(bookmarks: bookmarks, browser: browser, tab: tab) {
+                browser.activeTabID = tab.id
+                browser.requestAddressFocus()
+            }
+        } else {
+            webView(for: tab)
+        }
+    }
+
+    private func splitPane(for tab: BrowserTab) -> some View {
+        let isActive = browser.activeTabID == tab.id
+        let isLeading = browser.splitTabIDs.first == tab.id
+        // Match the page container at the outside corners; keep the shared divider straight.
+        let shape = UnevenRoundedRectangle(topLeadingRadius: isLeading ? 12 : 0,
+                                           bottomLeadingRadius: isLeading ? 12 : 0,
+                                           bottomTrailingRadius: isLeading ? 0 : 12,
+                                           topTrailingRadius: isLeading ? 0 : 12)
+        return VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Button {
+                    browser.activeTabID = tab.id
+                    if tab.isNewTab { browser.requestAddressFocus() } else { tab.focusPage() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(browserIcon: isActive ? .checkmarkCircle : .circle, size: 12)
+                        Text(tab.title).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(isActive ? "Active" : "Activate") pane: \(tab.title)")
+                Button {
+                    browser.endSplitView(keeping: browser.splitTabIDs.first { $0 != tab.id })
+                } label: {
+                    Image(browserIcon: .close, size: 11)
+                }
+                .buttonStyle(ChromeIconButtonStyle(size: 24))
+                .help("Remove from Split View (keeps tab open)")
+                .accessibilityLabel("Remove \(tab.title) from Split View")
+            }
+            .font(.system(size: 11, weight: isActive ? .medium : .regular))
+            .foregroundStyle(isActive ? accent : .secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .background(isActive ? accent.opacity(0.09) : Color.primary.opacity(0.035))
+            page(for: tab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(SplitPaneActivation {
+            guard browser.isActiveInWorkspace, browser.isTabVisible(tab.id) else { return }
+            browser.activeTabID = tab.id
+        })
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(isActive ? accent.opacity(0.65) : .clear, lineWidth: 2)
+                .allowsHitTesting(false)
         }
     }
 
@@ -326,7 +393,7 @@ struct BrowserWindow: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if tab.isFindBarVisible {
+                if tab.isFindBarVisible, browser.activeTabID == tab.id {
                     FindBar(tab: tab, browser: browser)
                         .padding(10)
                         .transition(.opacity.combined(with: .offset(y: -4)))
@@ -348,10 +415,10 @@ struct BrowserWindow: View {
                 }
             }
             .onChange(of: tab.url) { _, url in
-                if !addressIsFocused { address = url?.absoluteString ?? "" }
+                if browser.activeTabID == tab.id, !addressIsFocused { address = url?.absoluteString ?? "" }
             }
             .onAppear {
-                if !addressIsFocused { address = tab.url?.absoluteString ?? "" }
+                if browser.activeTabID == tab.id, !addressIsFocused { address = tab.url?.absoluteString ?? "" }
             }
     }
 
@@ -486,6 +553,7 @@ struct BrowserWindow: View {
             }
             actions.append(.separator)
         }
+        actions += [.init(title: "Split View", icon: .splitView, children: browser.splitViewActions), .separator]
         actions.append(.init(title: "Customize Toolbar…", icon: .sliders) { isCustomizingToolbar = true })
         return actions
     }

@@ -143,7 +143,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// suspended, and loads again when it's selected.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard let tab else { return }
-        if tab.browser?.activeTabID == tab.id {
+        if tab.browser?.isTabVisible(tab.id) == true {
             webView.reload()
         } else {
             tab.suspend()

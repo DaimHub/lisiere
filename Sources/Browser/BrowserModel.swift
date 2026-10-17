@@ -26,11 +26,78 @@ final class BrowserModel {
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored weak var profileWindow: ProfileWindowController?
 
-    private(set) var tabs: [BrowserTab] = []
+    private(set) var tabs: [BrowserTab] = [] {
+        didSet { reconcileSplitView() }
+    }
+    /// Window-local presentation only. Both pages remain ordinary tabs with their own WebKit state.
+    private(set) var splitTabIDs: [UUID] = []
+    var isSplitView: Bool { splitTabIDs.count == 2 }
+    var splitTabs: [BrowserTab] { splitTabIDs.compactMap { tab(withID: $0) } }
+
+    struct TabStripGroup: Identifiable {
+        let id: UUID
+        let tabs: [BrowserTab]
+    }
+
+    /// Join the visible pair without changing stored tab order. The card mirrors left/right pane order.
+    var tabStripGroups: [TabStripGroup] {
+        let anchor = tabs.first { splitTabIDs.contains($0.id) }?.id
+        return tabs.compactMap { tab in
+            if isSplitView, splitTabIDs.contains(tab.id) {
+                return tab.id == anchor ? TabStripGroup(id: tab.id, tabs: splitTabs) : nil
+            }
+            return TabStripGroup(id: tab.id, tabs: [tab])
+        }
+    }
+
+    func isTabVisible(_ id: UUID) -> Bool {
+        id == activeTabID || splitTabIDs.contains(id)
+    }
+
+    /// Uses only this model's tabs, so pages never cross profile or private-window data stores.
+    func startSplitView(with id: UUID? = nil) {
+        guard let first = activeTab else { return }
+        let second: BrowserTab
+        if let id {
+            guard id != first.id, let existing = tab(withID: id) else { return }
+            second = existing
+        } else {
+            second = makeTab()
+            tabs.append(second)
+        }
+        splitTabIDs = [first.id, second.id]
+        first.restore()
+        second.restore()
+        activeTabID = second.id
+        if second.isNewTab { requestAddressFocus() }
+    }
+
+    /// Exiting split view never closes either page or discards form input/history.
+    func endSplitView(keeping id: UUID? = nil) {
+        let keptID = id.flatMap { splitTabIDs.contains($0) ? $0 : nil } ?? activeTabID
+        splitTabIDs = []
+        activeTabID = keptID
+    }
+
+    func focusOtherSplitPane() {
+        guard let id = splitTabIDs.first(where: { $0 != activeTabID }) else { return }
+        activeTabID = id
+        if activeTab?.isNewTab == true { requestAddressFocus() }
+        else { activeTab?.focusPage() }
+    }
+
+    private func reconcileSplitView() {
+        guard isSplitView, splitTabIDs.contains(where: { tab(withID: $0) == nil }) else { return }
+        let survivor = splitTabIDs.first { tab(withID: $0) != nil }
+        splitTabIDs = []
+        if activeTab == nil, let survivor { activeTabID = survivor }
+    }
     private var closedTabs: [ClosedTab] = []
     var activeTabID: UUID? {
         didSet {
             guard oldValue != activeTabID else { return }
+            // Selecting another tab returns to one page; the split pages stay open in the tab strip.
+            if isSplitView, !splitTabIDs.contains(where: { $0 == activeTabID }) { splitTabIDs = [] }
             if let previousTab = tab(withID: oldValue) {
                 // Keep a preview of the page being left for background-tab hover cards.
                 previousTab.captureThumbnail(afterScreenUpdates: false)
@@ -38,6 +105,7 @@ final class BrowserModel {
             }
             activeTab?.restore()
             activeTab?.didBecomeSelected()
+            if isSplitView { activeTab?.focusPage() }
         }
     }
     var addressFocusRequest = 0
@@ -181,6 +249,21 @@ final class BrowserModel {
                   toOffset: destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex)
     }
 
+    /// A joined split card moves as a unit, even when its tabs were originally non-adjacent.
+    func moveTabGroup(containing id: UUID, beside targetID: UUID) {
+        let groups = tabStripGroups
+        guard let source = groups.first(where: { $0.tabs.contains { $0.id == id } }),
+              let target = groups.first(where: { $0.tabs.contains { $0.id == targetID } }),
+              source.id != target.id else { return }
+        let sourceIDs = Set(source.tabs.map(\.id))
+        let targetIDs = Set(target.tabs.map(\.id))
+        let offsets = IndexSet(tabs.indices.filter { sourceIDs.contains(tabs[$0].id) })
+        let destinations = tabs.indices.filter { targetIDs.contains(tabs[$0].id) }
+        guard let first = offsets.first, let targetFirst = destinations.first,
+              let targetLast = destinations.last else { return }
+        tabs.move(fromOffsets: offsets, toOffset: first < targetFirst ? targetLast + 1 : targetFirst)
+    }
+
     func closeOtherTabs(than id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         for tab in tabs where tab.id != id {
@@ -199,6 +282,16 @@ final class BrowserModel {
         if let activeTabID, closingIDs.contains(activeTabID) {
             self.activeTabID = id
         }
+    }
+
+    /// Context-menu ordering follows the visible cards, including a non-adjacent split pair.
+    func closeTabs(afterGroupContaining id: UUID) {
+        let groups = tabStripGroups
+        guard let index = groups.firstIndex(where: { $0.tabs.contains { $0.id == id } }) else { return }
+        let closingIDs = Set(groups.dropFirst(index + 1).flatMap { $0.tabs.map(\.id) })
+        for tab in tabs where closingIDs.contains(tab.id) { rememberClosedTab(tab) }
+        tabs.removeAll { closingIDs.contains($0.id) }
+        if let activeTabID, closingIDs.contains(activeTabID) { self.activeTabID = id }
     }
 
     func closeActiveTab() {
@@ -444,7 +537,7 @@ final class BrowserModel {
             linkedIDs.formUnion([tab.id, openerID])
         }
         return tabs
-            .filter { $0.id != activeTabID && $0.canSuspend && !linkedIDs.contains($0.id) }
+            .filter { !isTabVisible($0.id) && $0.canSuspend && !linkedIDs.contains($0.id) }
             .sorted { $0.lastActive < $1.lastActive }
     }
 

@@ -71,7 +71,7 @@ final class BrowserTab: Identifiable {
          appearance: AppearanceStore = .shared) {
         self.appearance = appearance
         pageDelegate.tab = self
-        install(WKWebView(frame: .zero, configuration: configuration))
+        install(BrowserWebView(frame: .zero, configuration: configuration))
     }
 
     /// A suspended tab for a page's saved history, such as a duplicated or reopened tab, which loads when it's selected.
@@ -100,6 +100,7 @@ final class BrowserTab: Identifiable {
     /// once the page starts loading, so the tab's title and address don't flash blank.
     private func install(_ webView: WKWebView, isRestoring: Bool = false) {
         acceptsPageRequests = true
+        (webView as? BrowserWebView)?.tab = self
         appearance.attach(webView)
         webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
@@ -176,7 +177,7 @@ final class BrowserTab: Identifiable {
     /// A pop-up gets a fresh configuration too, since its tie to the opener can't be restored.
     func restore() {
         guard isSuspended else { return }
-        let webView = WKWebView(frame: .zero, configuration: browser?.makeConfiguration() ?? Self.makeConfiguration())
+        let webView = BrowserWebView(frame: .zero, configuration: browser?.makeConfiguration() ?? Self.makeConfiguration())
         install(webView, isRestoring: true)
         if let suspendedState {
             webView.interactionState = suspendedState
@@ -562,14 +563,51 @@ struct PageHost: NSViewRepresentable {
     func updateNSView(_ view: PageHostView, context: Context) {
         view.show(content)
     }
+
+    static func dismantleNSView(_ view: PageHostView, coordinator: ()) { view.releaseContent() }
 }
 
 final class PageHostView: NSView {
+    private var content: NSView?
+
     func show(_ content: NSView) {
-        guard content.superview !== self else { return }
+        self.content = content
+        attachContent()
+        // SwiftUI may update the departing host after its replacement. Reconcile ownership once
+        // that transaction has dismantled the old host, without rebuilding/reloading the page.
+        DispatchQueue.main.async { [weak self] in self?.attachContent() }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        attachContent()
+    }
+
+    private func attachContent() {
+        guard window != nil, let content, content.superview !== self else { return }
         subviews.forEach { $0.removeFromSuperview() }
         content.frame = bounds
         content.autoresizingMask = [.width, .height]
         addSubview(content)
+    }
+
+    func releaseContent() {
+        // A newer host may already own this same page. Never detach it from that host.
+        if content?.superview === self { content?.removeFromSuperview() }
+        content = nil
+    }
+}
+
+/// Keyboard/accessibility focus follows the same active-pane state as pointer activation.
+final class BrowserWebView: WKWebView {
+    weak var tab: BrowserTab?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted, let tab, let browser = tab.browser, browser.isActiveInWorkspace,
+           browser.isTabVisible(tab.id), browser.activeTabID != tab.id {
+            browser.activeTabID = tab.id
+        }
+        return accepted
     }
 }

@@ -4,9 +4,10 @@ import SwiftUI
 struct NewTabView: View {
     let bookmarks: BookmarkStore
     let browser: BrowserModel
+    var tab: BrowserTab? = nil
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
-    private var page: NewTabPage { browser.activeTab?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
+    private var page: NewTabPage { (tab ?? browser.activeTab)?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
     private var mascot: Mascot { browser.preferences.mascot }
     private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
 
@@ -115,6 +116,7 @@ struct NewTabView: View {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                     ForEach(bookmarks.bookmarks.prefix(24)) { bookmark in
                         FavoriteTile(bookmark: bookmark) {
+                            if let tab { browser.activeTabID = tab.id }
                             browser.open(bookmark.url,
                                          inNewTab: NSApp.currentEvent?.modifierFlags.contains(.command) == true)
                         }
