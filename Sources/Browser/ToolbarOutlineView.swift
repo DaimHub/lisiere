@@ -1,354 +1,141 @@
-import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// AppKit owns native row dragging, insertion indicators, autoscroll and group drop targets.
-struct ToolbarOutlineView: NSViewRepresentable {
+/// A flat, stable set of SwiftUI rows keeps drag sources alive when buttons change groups.
+struct ToolbarOutlineView: View {
     @Binding var layout: BrowserToolbarLayout
+    @State private var draggedID: String?
+    @State private var collapsedGroups: Set<String> = []
+    private static let dragType = UTType(exportedAs: "io.github.daimhub.lisiere.toolbar-row")
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSScrollView {
-        let outline = NSOutlineView(frame: NSRect(x: 0, y: 0, width: 620, height: 300))
-        outline.autoresizingMask = [.width]
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("toolbar"))
-        column.resizingMask = .autoresizingMask
-        column.width = 600
-        outline.addTableColumn(column)
-        outline.outlineTableColumn = column
-        outline.headerView = nil
-        outline.rowHeight = 36
-        outline.intercellSpacing = NSSize(width: 0, height: 2)
-        outline.indentationPerLevel = 18
-        outline.style = .inset
-        outline.draggingDestinationFeedbackStyle = .regular
-        outline.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        outline.allowsMultipleSelection = false
-        outline.focusRingType = .none
-        outline.dataSource = context.coordinator
-        outline.delegate = context.coordinator
-        outline.registerForDraggedTypes([Coordinator.dragType])
-        outline.setDraggingSourceOperationMask(.move, forLocal: true)
-        outline.setDraggingSourceOperationMask([], forLocal: false)
-        outline.setAccessibilityLabel("Toolbar buttons and groups")
-        let scroll = NSScrollView()
-        scroll.documentView = outline
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.borderType = .noBorder
-        context.coordinator.outline = outline
-        context.coordinator.reload(layout)
-        return scroll
-    }
-    func updateNSView(_ view: NSScrollView, context: Context) {
-        context.coordinator.parent = self
-        if context.coordinator.current != layout { context.coordinator.reload(layout) }
+    private struct Row: Identifiable {
+        let entry: ToolbarEntry
+        var parentID: String? = nil
+        var id: String { entry.id }
     }
 
-    @MainActor
-    final class Node: NSObject {
-        let id: String
-        var entry: ToolbarEntry
-        var parentID: String?
-        var children: [Node] = []
-        init(id: String, entry: ToolbarEntry, parentID: String? = nil) {
-            self.id = id; self.entry = entry; self.parentID = parentID
+    private var rows: [Row] {
+        layout.entries.flatMap { entry in
+            [Row(entry: entry)] + (entry.isGroup && !collapsedGroups.contains(entry.id)
+                ? entry.items.map { Row(entry: ToolbarEntry($0), parentID: entry.id) } : [])
         }
-        var isGroup: Bool { parentID == nil && entry.isGroup }
     }
 
-    @MainActor
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
-        static let dragType = NSPasteboard.PasteboardType("io.github.daimhub.lisiere.toolbar-row")
-        var parent: ToolbarOutlineView
-        weak var outline: NSOutlineView?
-        var current: BrowserToolbarLayout?
-        var roots: [Node] = []
-        var nodes: [String: Node] = [:]
-        private var activeDragID: String?
-        init(_ parent: ToolbarOutlineView) { self.parent = parent }
-
-        func reload(_ layout: BrowserToolbarLayout) {
-            guard current != layout else { return }
-            let previous = current
-            let selectedID = outline.flatMap { $0.item(atRow: $0.selectedRow) as? Node }?.id
-            let expanded = Set(nodes.values.filter { outline?.isItemExpanded($0) == true }.map(\.id))
-            let previousIDs = Set(nodes.keys)
-            let scrollOrigin = outline?.enclosingScrollView?.contentView.bounds.origin
-            current = layout
-            var next: [String: Node] = [:]
-            func node(_ entry: ToolbarEntry, parentID: String? = nil) -> Node {
-                let value = nodes[entry.id] ?? Node(id: entry.id, entry: entry)
-                value.entry = entry
-                value.parentID = parentID
-                value.children = []
-                next[value.id] = value
-                return value
-            }
-            roots = layout.entries.map { entry in
-                let root = node(entry)
-                if entry.isGroup { root.children = entry.items.map { node(ToolbarEntry($0), parentID: entry.id) } }
-                return root
-            }
-            nodes = next
-            guard let outline else { return }
-            // A reorder must not discard all row views or expand collapsed groups.
-            let canMoveRows = previous.map { old in
-                Set(old.entries.map(\.id)) == Set(layout.entries.map(\.id)) && old.entries.allSatisfy { entry in
-                    layout.entries.first(where: { $0.id == entry.id }).map { Set($0.items) == Set(entry.items) } == true
-                }
-            } ?? false
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
-                context.allowsImplicitAnimation = false
-                if canMoveRows, let previous {
-                    outline.beginUpdates()
-                    reorder(previous.entries.map(\.id), to: roots.map(\.id), parent: nil, in: outline)
-                    for root in roots where root.isGroup {
-                        let old = previous.entries.first { $0.id == root.id }!
-                        reorder(old.items.map(\.rawValue), to: root.children.map(\.id), parent: root, in: outline)
-                    }
-                    outline.endUpdates()
-                    for row in 0..<outline.numberOfRows {
-                        if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? ToolbarRowCell,
-                           let node = outline.item(atRow: row) as? Node { cell.configure(node, coordinator: self) }
-                    }
-                } else {
-                    outline.reloadData()
-                    for root in roots where root.isGroup && (expanded.contains(root.id) || !previousIDs.contains(root.id)) {
-                        outline.expandItem(root)
-                    }
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach(rows) { row in
+                    rowView(row)
+                        .onDrag {
+                            draggedID = row.id
+                            let provider = NSItemProvider()
+                            provider.registerDataRepresentation(forTypeIdentifier: Self.dragType.identifier,
+                                                                visibility: .ownProcess) { completion in
+                                completion(Data(row.id.utf8), nil)
+                                return nil
+                            }
+                            return provider
+                        }
+                        .onDrop(of: [Self.dragType], delegate: dropDelegate(target: row.id))
                 }
             }
-            if let selectedID, let selected = nodes[selectedID] {
-                let row = outline.row(forItem: selected)
-                if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
-            }
-            if let scrollOrigin, let scroll = outline.enclosingScrollView {
-                scroll.contentView.scroll(to: scrollOrigin)
-                scroll.reflectScrolledClipView(scroll.contentView)
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
         }
-        private func reorder(_ old: [String], to new: [String], parent: Node?, in outline: NSOutlineView) {
-            var order = old
-            for (destination, id) in new.enumerated() {
-                guard let source = order.firstIndex(of: id), source != destination else { continue }
-                order.insert(order.remove(at: source), at: destination)
-                outline.moveItem(at: source, inParent: parent, to: destination, inParent: parent)
-            }
-        }
-        @discardableResult
-        func change(_ action: (inout BrowserToolbarLayout) -> Void) -> Bool {
-            var value = current ?? parent.layout
-            action(&value)
-            guard value != current else { return false }
-            // Update AppKit immediately; the following SwiftUI update then becomes a no-op.
-            reload(value)
-            parent.layout = value
-            return true
-        }
-        func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-            (item as? Node)?.children.count ?? roots.count
-        }
-        func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-            ((item as? Node)?.children ?? roots)[index]
-        }
-        func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { (item as? Node)?.isGroup == true }
-        func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-            guard let node = item as? Node else { return nil }
-            let cell = (outlineView.makeView(withIdentifier: ToolbarRowCell.reuseID, owner: nil) as? ToolbarRowCell)
-                ?? ToolbarRowCell()
-            cell.configure(node, coordinator: self)
-            return cell
-        }
-        func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-            guard let node = item as? Node else { return nil }
-            let writer = NSPasteboardItem()
-            writer.setString(node.id, forType: Self.dragType)
-            return writer
-        }
-        func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
-                         willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]) {
-            activeDragID = (draggedItems.first as? Node)?.id
-            session.animatesToStartingPositionsOnCancelOrFail = false
-        }
-        func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
-                         endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-            activeDragID = nil
-        }
-        private func draggedID(_ info: NSDraggingInfo) -> String? {
-            guard let source = info.draggingSource as? NSOutlineView, source === outline,
-                  let id = activeDragID ?? info.draggingPasteboard.string(forType: Self.dragType), nodes[id] != nil else { return nil }
-            return id
-        }
+        .onDrop(of: [Self.dragType], delegate: dropDelegate(target: nil))
+        .accessibilityLabel("Toolbar buttons and groups")
+        .onDisappear { draggedID = nil }
+    }
 
-        struct Insertion: Equatable {
-            let parentID: String?
-            let index: Int
-        }
+    private func dropDelegate(target: String?) -> ReorderDropDelegate<String> {
+        ReorderDropDelegate(targetID: target, draggedID: $draggedID,
+                            canMove: { !layout.siblings(of: $0).isEmpty },
+                            move: { id, target in layout.move(id, over: target) })
+    }
 
-        /// Resolve one stable insertion edge. Hovering a standalone row never creates a group.
-        func insertion(for id: String, target: Node?, index: Int, lowerHalf: Bool, outdent: Bool) -> Insertion? {
-            guard let source = nodes[id] else { return nil }
-            guard let target else { return Insertion(parentID: nil, index: max(0, index)) }
-            let rootOnly = source.isGroup || !source.entry.items.allSatisfy(\.canGroup) || outdent
-            if target.isGroup && !rootOnly && target.id != id && (index >= 0 || lowerHalf) {
-                return Insertion(parentID: target.id, index: index == NSOutlineViewDropOnItemIndex ? 0 : index)
-            }
-            if let parentID = target.parentID, !rootOnly, parentID != id,
-               let child = nodes[parentID]?.children.firstIndex(where: { $0.id == target.id }) {
-                return Insertion(parentID: parentID, index: child + (lowerHalf ? 1 : 0))
-            }
-            let rootID = target.parentID ?? target.id
-            guard let rootIndex = roots.firstIndex(where: { $0.id == rootID }) else { return nil }
-            return Insertion(parentID: nil, index: rootIndex + (target.parentID != nil || lowerHalf ? 1 : 0))
-        }
-        func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
-                         proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
-            guard let id = draggedID(info) else { return [] }
-            let point = outlineView.convert(info.draggingLocation, from: nil)
-            let target = item as? Node
-            let targetRow = target.map { outlineView.row(forItem: $0) } ?? -1
-            let lowerHalf = targetRow >= 0 && point.y >= outlineView.rect(ofRow: targetRow).midY
-            guard let insertion = insertion(for: id, target: target, index: index, lowerHalf: lowerHalf,
-                                            outdent: point.x < outlineView.indentationPerLevel * 2) else { return [] }
-            outlineView.setDropItem(insertion.parentID.flatMap { nodes[$0] }, dropChildIndex: insertion.index)
-            return .move
-        }
-        func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
-                         item: Any?, childIndex index: Int) -> Bool {
-            guard let id = draggedID(info), index >= 0 else { return false }
-            let target = item as? Node
-            guard target == nil || target?.isGroup == true else { return false }
-            return change { $0.move(id, toGroup: target?.id, at: index) }
-        }
-
-        func groupingMenu(for node: Node) -> NSMenu {
-            let menu = NSMenu()
-            guard node.entry.items.allSatisfy(\.canGroup) else { return menu }
-            for target in roots where target.id != node.id && target.id != node.parentID && target.entry.items.allSatisfy(\.canGroup) {
-                let item = ToolbarMenuItem(title: "Group with \(target.entry.title)") { [weak self] in
-                    self?.change { $0.group(node.id, with: target.id) }
+    private func rowView(_ row: Row) -> some View {
+        let entry = row.entry
+        let siblings = layout.siblings(of: row.id)
+        return HStack(spacing: 8) {
+            if entry.isGroup {
+                Button {
+                    if !collapsedGroups.insert(row.id).inserted { collapsedGroups.remove(row.id) }
+                } label: {
+                    Image(browserIcon: .chevronDown, size: 12)
+                        .rotationEffect(.degrees(collapsedGroups.contains(row.id) ? -90 : 0))
                 }
-                item.image = (target.isGroup ? BrowserIcon.group : target.entry.items[0].icon).nsImage()
-                menu.addItem(item)
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(collapsedGroups.contains(row.id) ? "Expand" : "Collapse") \(entry.title)")
+                .frame(width: 14)
+            } else {
+                Color.clear.frame(width: 14)
             }
-            if node.isGroup {
-                menu.addItem(.separator())
-                menu.addItem(ToolbarMenuItem(title: "Separate All Buttons", icon: .ungroup) { [weak self] in self?.change { $0.ungroup(node.id) } })
-            } else if let item = node.entry.items.first, node.parentID != nil {
-                menu.addItem(.separator())
-                menu.addItem(ToolbarMenuItem(title: "Move Out of Group", icon: .ungroup) { [weak self] in self?.change { $0.separate(item) } })
+            Image(browserIcon: .drag, size: 14).foregroundStyle(.tertiary)
+                .help("Drag to reorder")
+            Image(browserIcon: entry.isGroup ? .group : entry.items[0].icon, size: 16)
+                .foregroundStyle(Color.accentColor).frame(width: 20)
+            Text(entry.title)
+                .font(.system(size: 13, weight: entry.isGroup ? .semibold : .regular))
+                .lineLimit(1).help(entry.title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            action(.chevronUp, "Move \(entry.title) Up", enabled: siblings.first != row.id) {
+                layout.move(row.id, by: -1)
             }
-            return menu
-        }
-    }
-}
-
-@MainActor
-private final class ToolbarRowCell: NSTableCellView {
-    static let reuseID = NSUserInterfaceItemIdentifier("ToolbarRow")
-    private let handle = NSImageView()
-    private let symbol = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let up = ToolbarActionButton()
-    private let down = ToolbarActionButton()
-    private let group = ToolbarActionButton()
-    private let separate = ToolbarActionButton()
-    private let remove = ToolbarActionButton()
-
-    init() {
-        super.init(frame: .zero)
-        identifier = Self.reuseID
-        handle.image = BrowserIcon.drag.nsImage(accessibilityDescription: "Drag to reorder")
-        handle.contentTintColor = .tertiaryLabelColor
-        handle.toolTip = "Drag to reorder; drag left to move out of a group"
-        symbol.contentTintColor = .controlAccentColor
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        // AppKit derives the native drag image from these outlets.
-        textField = label
-        imageView = symbol
-        for (button, icon) in [(up, BrowserIcon.chevronUp), (down, .chevronDown), (group, .link),
-                               (separate, .ungroup), (remove, .remove)] {
-            button.image = icon.nsImage()
-            button.isBordered = false
-            button.bezelStyle = .regularSquare
-            button.imagePosition = .imageOnly
-            button.contentTintColor = .secondaryLabelColor
-            button.widthAnchor.constraint(equalToConstant: 24).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        }
-        let stack = NSStackView(views: [handle, symbol, label, up, down, group, separate, remove])
-        stack.orientation = .horizontal
-        stack.distribution = .fill
-        stack.alignment = .centerY
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            handle.widthAnchor.constraint(equalToConstant: 14), symbol.widthAnchor.constraint(equalToConstant: 20)
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// Only update values and handlers: keep controls, images and Auto Layout constraints reusable during dragging.
-    func configure(_ node: ToolbarOutlineView.Node, coordinator: ToolbarOutlineView.Coordinator) {
-        symbol.image = (node.isGroup ? BrowserIcon.group : node.entry.items[0].icon).nsImage()
-        label.stringValue = node.entry.title
-        label.font = .systemFont(ofSize: 13, weight: node.isGroup ? .semibold : .regular)
-        label.toolTip = node.entry.title
-        let siblings = coordinator.current?.siblings(of: node.id) ?? []
-        configure(up, "Move \(node.entry.title) Left", enabled: siblings.first != node.id) { [weak coordinator] in
-            coordinator?.change { $0.move(node.id, by: -1) }
-        }
-        configure(down, "Move \(node.entry.title) Right", enabled: siblings.last != node.id) { [weak coordinator] in
-            coordinator?.change { $0.move(node.id, by: 1) }
-        }
-        configure(group, "Group \(node.entry.title) with…", enabled: node.entry.items.allSatisfy(\.canGroup)) { [weak coordinator, weak group] in
-            guard let coordinator, let group else { return }
-            coordinator.groupingMenu(for: node).popUp(positioning: nil, at: NSPoint(x: 0, y: group.bounds.height), in: group)
-        }
-        configure(separate, node.isGroup ? "Separate All Buttons" : "Move Out of Group",
-                  enabled: node.isGroup || node.parentID != nil) { [weak coordinator] in
-            coordinator?.change { layout in
-                if node.isGroup { layout.ungroup(node.id) }
-                else if let item = node.entry.items.first { layout.separate(item) }
+            action(.chevronDown, "Move \(entry.title) Down", enabled: siblings.last != row.id) {
+                layout.move(row.id, by: 1)
+            }
+            Menu {
+                BrowserMenuContent(actions: groupingActions(for: row))
+            } label: {
+                Image(browserIcon: .link, size: 14).frame(width: 24, height: 28)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .browserMenu { groupingActions(for: row) }
+            .disabled(!layout.canGroup(row.id))
+            .help("Group \(entry.title) with…")
+            .accessibilityLabel("Group \(entry.title) with…")
+            action(.ungroup, entry.isGroup ? "Separate All Buttons" : "Move Out of Group",
+                   enabled: entry.isGroup || row.parentID != nil) {
+                if entry.isGroup { layout.ungroup(row.id) }
+                else { layout.separate(entry.items[0]) }
+            }
+            action(.remove, "Remove \(entry.title)", enabled: !entry.isGroup && !entry.items[0].isRequired) {
+                layout.remove(entry.items[0])
             }
         }
-        configure(remove, "Remove \(node.entry.title)", enabled: !node.isGroup && node.entry.items.first?.isRequired == false) { [weak coordinator] in
-            if let item = node.entry.items.first { coordinator?.change { $0.remove(item) } }
+        .padding(.leading, row.parentID == nil ? 0 : 18)
+        .padding(.horizontal, 4)
+        .frame(height: 36)
+        .contentShape(Rectangle())
+    }
+
+    private func action(_ icon: BrowserIcon, _ title: String, enabled: Bool,
+                        perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(browserIcon: icon, size: 14).frame(width: 24, height: 28)
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(!enabled)
+        .help(title)
+        .accessibilityLabel(title)
     }
-    private func configure(_ button: ToolbarActionButton, _ label: String, enabled: Bool = true,
-                           action: @escaping @MainActor () -> Void) {
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-        button.isEnabled = enabled
-        button.actionHandler = action
-    }
-}
 
-@MainActor
-private final class ToolbarActionButton: NSButton {
-    var actionHandler: (@MainActor () -> Void)?
-    init() { super.init(frame: .zero); target = self; action = #selector(invoke) }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    @objc private func invoke() { actionHandler?() }
-}
-
-@MainActor
-private final class ToolbarMenuItem: NSMenuItem {
-    let actionHandler: @MainActor () -> Void
-    init(title: String, icon: BrowserIcon? = nil, action: @escaping @MainActor () -> Void) {
-        actionHandler = action
-        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
-        target = self
-        image = icon?.nsImage()
-        if icon != nil { BrowserMenuImages.keepImageVisible(self) }
+    private func groupingActions(for row: Row) -> [BrowserContextAction] {
+        guard layout.canGroup(row.id) else { return [] }
+        var actions = layout.entries.filter {
+            $0.id != row.id && $0.id != row.parentID && $0.items.allSatisfy(\.canGroup)
+        }.map { target in
+            BrowserContextAction(title: "Group with \(target.title)",
+                                 icon: target.isGroup ? .group : target.items[0].icon) {
+                layout.group(row.id, with: target.id)
+            }
+        }
+        if row.entry.isGroup {
+            actions += [.separator, .init(title: "Separate All Buttons", icon: .ungroup) { layout.ungroup(row.id) }]
+        } else if row.parentID != nil {
+            actions += [.separator, .init(title: "Move Out of Group", icon: .ungroup) { layout.separate(row.entry.items[0]) }]
+        }
+        return actions
     }
-    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    @objc private func invoke() { actionHandler() }
 }
