@@ -21,6 +21,7 @@ struct BrowserApp: App {
     var body: some Scene {
         WindowGroup(id: Self.windowID, for: ProfileWindowRequest.self) { $request in
             ProfileBrowserWindow(profiles: profiles, profileID: request.profileID)
+                .frame(minWidth: 680, minHeight: 440)
                 // SwiftUI selects a scene before forwarding URLs to the app delegate. Without this,
                 // it creates a new window for every URL, even though our router can reuse an existing one.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
@@ -39,6 +40,7 @@ struct BrowserApp: App {
 
         WindowGroup("Private Window", id: Self.privateWindowID) {
             ProfileBrowserWindow(profiles: profiles, profileID: BrowserProfile.initialID, isPrivate: true)
+                .frame(minWidth: 680, minHeight: 440)
         }
         // External links must create a normal window when only private windows remain.
         .handlesExternalEvents(matching: [])
