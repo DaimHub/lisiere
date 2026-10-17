@@ -107,6 +107,78 @@ final class ProfileWindowTests: XCTestCase {
         restarted.context(for: b.id)?.prepareForDeletion()
     }
 
+    func testProfileRoundTripRestoresNativeWindowThemeWithoutOpeningSettings() throws {
+        let pro = try profiles.create(name: "Pro")
+        let perso = try profiles.create(name: "Perso")
+        let first = try owner(pro.id)
+        first.browser.appearance.selection = .light
+        try XCTUnwrap(profiles.context(for: perso.id)).preferences.appearance.selection = .dark
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        let material = NSVisualEffectView()
+        window.contentView = material
+        first.connect(window)
+
+        for _ in 0..<3 {
+            XCTAssertEqual(window.appearance?.name, .aqua)
+            XCTAssertEqual(material.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+            first.switchBy(1)
+            XCTAssertEqual(first.browser.profileID, perso.id)
+            XCTAssertEqual(window.appearance?.name, .darkAqua)
+            XCTAssertEqual(material.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+            first.switchBy(-1)
+            XCTAssertEqual(first.browser.profileID, pro.id)
+        }
+        XCTAssertEqual(window.appearance?.name, .aqua)
+    }
+
+    func testThemeChangesOnlyUpdateWindowsCurrentlyShowingThatProfile() throws {
+        let pro = try profiles.create(name: "Pro")
+        let perso = try profiles.create(name: "Perso")
+        let first = try owner(pro.id)
+        let second = try owner(pro.id)
+        let proAppearance = first.browser.appearance
+        let persoAppearance = try XCTUnwrap(profiles.context(for: perso.id)).preferences.appearance
+        proAppearance.selection = .light
+        persoAppearance.selection = .dark
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        let otherWindow = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        first.connect(window)
+        second.connect(otherWindow)
+        first.switchTo(perso.id)
+
+        proAppearance.selection = .dark
+        XCTAssertEqual(otherWindow.appearance?.name, .darkAqua)
+        proAppearance.selection = .light
+        XCTAssertEqual(otherWindow.appearance?.name, .aqua)
+        XCTAssertEqual(window.appearance?.name, .darkAqua, "A parked profile must not recolor this window")
+        persoAppearance.selection = .system
+        XCTAssertNil(window.appearance, "System must clear the explicit native appearance")
+        XCTAssertEqual(otherWindow.appearance?.name, .aqua)
+        first.switchTo(pro.id)
+        XCTAssertEqual(window.appearance?.name, .aqua)
+        first.switchTo(perso.id)
+        XCTAssertNil(window.appearance)
+
+        first.connect(nil)
+        persoAppearance.selection = .dark
+        XCTAssertNil(window.appearance, "A detached window must no longer follow this profile")
+        second.close()
+        proAppearance.selection = .dark
+        XCTAssertEqual(otherWindow.appearance?.name, .aqua, "A closed owner must detach its window")
+    }
+
+    func testPrivateWindowRemainsDarkWhenRegularProfileThemeChanges() throws {
+        let pro = try profiles.create(name: "Pro")
+        let regular = try owner(pro.id)
+        let privateOwner = try owner(pro.id, privateMode: true)
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        privateOwner.connect(window)
+        XCTAssertEqual(window.appearance?.name, .darkAqua)
+        regular.browser.appearance.selection = .light
+        privateOwner.switchTo(pro.id)
+        XCTAssertEqual(window.appearance?.name, .darkAqua)
+    }
+
     func testPrivateWindowIsIndependentAndCannotSwitchProfiles() throws {
         let a = try profiles.create(name: "A")
         let b = try profiles.create(name: "B")

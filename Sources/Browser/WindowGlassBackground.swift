@@ -11,7 +11,7 @@ struct WindowGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        // Inherit the application appearance, including a return to System.
+        // Inherit this window's profile appearance, including a return to System.
         view.appearance = nil
     }
 }

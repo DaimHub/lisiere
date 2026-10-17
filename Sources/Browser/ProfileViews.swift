@@ -45,6 +45,7 @@ struct ProfileBrowserWindow: View {
                 Color.clear
             }
         }
+        // Keep SwiftUI's hosting layers in sync with the native appearance applied by the controller.
         .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.selection.colorScheme)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner?.browser.profileID)
         // One material stays at full opacity beneath both layers, avoiding a flash of the desktop.

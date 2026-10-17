@@ -92,6 +92,7 @@ final class AppearanceStore {
             guard selection != oldValue else { return }
             defaults?.set(selection.rawValue, forKey: BrowserAppearance.storageKey)
             if appliesToApplication { applyAppearance(selection.appearance) }
+            for window in windows.allObjects { window.appearance = selection.appearance }
             refreshWebViews()
         }
     }
@@ -127,6 +128,7 @@ final class AppearanceStore {
 
     // Background tabs must update too, without retaining closed or suspended web views.
     @ObservationIgnored private let webViews = NSHashTable<WKWebView>.weakObjects()
+    @ObservationIgnored private let windows = NSHashTable<NSWindow>.weakObjects()
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let appliesToApplication: Bool
     @ObservationIgnored private let applyAppearance: (NSAppearance?) -> Void
@@ -150,6 +152,17 @@ final class AppearanceStore {
     func attach(_ webView: WKWebView) {
         webViews.add(webView)
         applyPageAppearance(to: webView)
+    }
+
+    /// Native materials must switch with the profile, without waiting for a SwiftUI presentation refresh.
+    func attach(_ window: NSWindow) {
+        windows.add(window)
+        window.appearance = selection.appearance
+    }
+
+    /// Parked profiles retain their pages, but must no longer update the shared physical window.
+    func detach(_ window: NSWindow) {
+        windows.remove(window)
     }
 
     private func refreshWebViews() {
