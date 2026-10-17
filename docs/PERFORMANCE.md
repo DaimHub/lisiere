@@ -26,7 +26,7 @@ La construction froide de l'index, mesurée avec une première recherche, coûte
 
 Les fichiers locaux de reproduction et résultats sont dans `.build/performance/benchmark.py`, `Benchmark.swift` et `benchmark.csv` (non versionnés). Lancer `python3 .build/performance/benchmark.py` depuis ce checkout pour reproduire la comparaison.
 
-## Validation
+## Validation initiale des optimisations
 
 - `make test` : 218 tests Debug réussis. 218 tests en configuration Release : réussis. L'hôte XCTest autorise l'injection et désactive temporairement sandbox/hardened runtime ; ces réglages ne servent pas à la Release livrée.
 - Comparaison de l'ancien et du nouvel algorithme : 1 800 pages, titres Unicode, favoris, égalités, plusieurs limites et dates de classement.
@@ -36,7 +36,7 @@ Les fichiers locaux de reproduction et résultats sont dans `.build/performance/
 
 Les deux rapports de crash transmis pendant le travail venaient de l'hôte Debug `io.github.daimhub.lisiere.perftests`. Une surcharge globale d'identifiant avait aussi remplacé celui du bundle de ressources Hugeicons. L'isolation a été limitée aux cibles application/tests dans le projet généré ; aucune icône ni solution de repli visuelle n'a été modifiée. Les essais suivants démarrent correctement. Des exécutions Debug intermédiaires ont aussi été interrompues par une terminaison normale de l'hôte avant la fin des tests ; elles ne comptent pas comme validations réussies.
 
-## Release locale vérifiée
+## Release initiale vérifiée en isolation
 
 - `make build DERIVED_DATA=/Users/davidnikolic/Library/Developer/Xcode/DerivedData/LisierePerformance` : réussi.
 - Bundle : `/Users/davidnikolic/Library/Developer/Xcode/DerivedData/LisierePerformance/Build/Products/Release/Lisiere.app`.
@@ -47,7 +47,20 @@ Les deux rapports de crash transmis pendant le travail venaient de l'hôte Debug
 - Deux profils QA : URLs distinctes, conservation du formulaire non envoyé pendant le changement de profil, restauration du profil actif et du profil conservé en arrière-plan après fermeture propre. Historique toujours limité à 50 000 visites.
 - Écran Mots de passe verrouillé inspecté. Les sauvegardes, mises à jour, origines autorisées et opérations du trousseau sont exercées par les tests Release avec des données temporaires.
 
-La copie QA possède ses propres données. L'application de `/Applications`, le profil personnel et les modifications concurrentes du checkout principal n'ont pas été remplacés. La branche n'est pas fusionnée automatiquement.
+Cette validation initiale utilisait une copie QA avec ses propres données. À cette étape, l'application de `/Applications`, le profil personnel et les modifications concurrentes du checkout principal n'avaient pas été remplacés ; la branche n'avait pas été fusionnée.
 
 Limites : pas de mesure des FPS ni du gain global de batterie/RAM ; les temps ci-dessus sont des microbenchmarks. Pas de comparaison pixel par pixel, de validation physique Touch ID, de connexion à des comptes réels, de passkeys ou de notarisation Developer ID. Les parcours contrôlés n'ont montré aucune régression visuelle ou fonctionnelle.
 
+## Intégration sur main et installation
+
+Sur demande explicite, les cinq optimisations ont été fusionnées avec les derniers changements de `main`, puis avec l'illustration officielle Home01 encore en attente dans le checkout principal. Les cinq fichiers Home01 ont été sauvegardés et comparés par SHA-256 avant intégration. Le commit applicatif construit est `e4c8b80` ; la documentation de livraison est ajoutée ensuite.
+
+- Nouvelle validation de l'ensemble intégré : 218 tests Debug et 218 tests Release réussis, sans échec.
+- `make build` avec Derived Data dédié `LisierePerformanceIntegrated` : réussi. Signature stricte, sandbox et hardened runtime vérifiés ; aucun hôte XCTest embarqué.
+- Démarrage de cinq secondes réussi sur une copie QA isolée avec les protections de la Release.
+- Fermeture propre de l'ancienne application ; sauvegarde du conteneur `Data`, des préférences externes et de l'ancien bundle. Les 10 089 fichiers/liens du manifeste de données sont identiques avant et immédiatement après le remplacement.
+- `/Applications/Lisiere.app` remplacé avec retour arrière prévu en cas d'échec ; son contenu correspond exactement au bundle Release construit. Signature stricte et lancement natif vérifiés sur ce chemin exact.
+- Au premier lancement, historique, sessions, profils et préférences sont inchangés. Le contrôle natif retrouve le même onglet actif, les favoris et le rendu initial, puis vérifie le passage entre les deux profils et le retour au profil initial.
+- Après ce passage, tous les historiques, favoris, préférences, URLs, titres, sélections et sessions conservées restent présents. Seul l'état d'interaction WebKit d'une session est renouvelé ; les fichiers WebKit temporaires peuvent évoluer normalement pendant la navigation.
+
+L'ancienne application, les données, les manifestes et les rapports de tests sont conservés dans `~/Library/Application Support/LisiereBuildBackups/main-performance-20261017-165622/`. Les données du trousseau n'ont pas été exportées ni réinitialisées.
