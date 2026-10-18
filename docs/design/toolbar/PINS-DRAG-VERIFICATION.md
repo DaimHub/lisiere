@@ -178,3 +178,50 @@ state. The same 24-click bursts used 2.85 s versus 2.27 s of process CPU in the 
 automation cadence also differed (sidebar 4.55/3.78 s, horizontal 3.99/4.57 s). They support reduced
 rendering work but are not controlled frame-pacing measurements. No new Instruments hitch-count
 comparison was made, and the held physical hover cycle remains outside this automation's capabilities.
+
+## Instruments remeasurement after the rendering optimization
+
+On 2026-10-18, Instruments 27.1 was attached to the exact isolated, signed Release process built from
+`d309343`. The fixture was a 900 × 472 pt window with five pins in Recherche and one active ordinary
+tab in Travail. Both layouts used the existing 240 ms disclosure animation. Pointer input timestamps
+were recorded separately from the trace; only hitch events for the attached PID inside the actual
+recording window were counted. Each action window includes 500 ms after the last input to capture its
+finishing animation. Counts describe these short samples, not a benchmark across machines.
+
+| Layout and action | Input duration | Hitches | Largest hitch |
+| --- | ---: | ---: | ---: |
+| Horizontal, 24 rapid header clicks | 4.342 s | 14 | 8.33 ms |
+| Sidebar, 24 rapid header click inputs | 4.168 s | 18 | 8.33 ms |
+| Horizontal, drag a pin out | 0.095 s | 1 | 8.33 ms |
+| Sidebar, drag a pin out | 0.076 s | 4 | 41.67 ms |
+| Horizontal, drop into a collapsed folder | 0.082 s | 6 | 41.67 ms |
+| Sidebar, drop into a collapsed folder, dedicated capture | 0.127 s | 1 | 8.33 ms |
+| Sidebar, eight ordinary-folder reversals after settling | 1.649 s | 13 | 33.33 ms |
+
+The first two traces used Hitches and Frame Lifetimes. The dedicated sidebar capture used Hitches
+alone. The first sidebar collapsed-folder drop fell outside the recording and is excluded; the
+dedicated capture above covers the complete action and settling window. The sidebar rapid inputs
+started the ordinary-folder burst while its header was still moving after pin expansion, so input
+count is not a claim that every click toggled that moving header. The separate eight-click burst
+used the settled header and returned it to its initial state. The sidebar rapid and drag-out windows
+overlap slightly; their counts must not be summed as independent events.
+
+The 41.67 ms horizontal drop prompted a targeted Hitches + Time Profiler capture with three repetitions.
+All three complete action windows were inside the recording. They reported respectively 1, 3 and 4
+hitches, with maxima of 8.33, 33.33 and 33.33 ms. The main-thread samples were spread across SwiftUI,
+AttributeGraph and runtime work. The inclusive `BrowserModel.dropTab` stacks accounted for 5, 4 and 3 ms
+of sampled time in those windows; these are nested stack weights, not additive costs. No specific
+new application bottleneck or drop/disclosure correctness defect was isolated, so no speculative
+animation or model change was made. Occasional 33–42 ms display delays remain measurable.
+
+These captures do not establish an improvement over the earlier Instruments run: instrumentation,
+input cadence, workload and background load differ. The native Release checks confirmed pin counts,
+membership, disclosure state and active-page preservation after the drops. The full suite passed
+291 tests, including the real-host continuous pointer/disclosure and hover/exit/re-entry regressions.
+The held physical hover/trackpad path remains unmeasured by the pointer automation.
+
+Raw traces and timestamped XML/JSON evidence are retained locally under the ignored
+`.build/folder-motion/remeasure-*` paths. `remeasure-summary.json` marks coverage explicitly and
+`remeasure-cpu-summary.json` contains the targeted stack weights. Trace archives can contain process
+environment data; only the measured results belong in source control. For follow-up captures, prefer
+short Hitches recordings; adding Frame Lifetimes substantially increased post-processing time here.
