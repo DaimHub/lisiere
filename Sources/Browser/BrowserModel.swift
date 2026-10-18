@@ -543,6 +543,11 @@ final class BrowserModel {
         groups[index].isCollapsed = false
     }
 
+    func collapseGroup(_ id: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == id }), !groups[index].isCollapsed else { return }
+        groups[index].isCollapsed = true
+    }
+
     /// Stable linear partition: pins lead; each named group stays contiguous within each pin section.
     private func normalizeTabOrder() {
         let pinned = Dictionary(grouping: tabs.filter(\.isPinned), by: \.groupID)

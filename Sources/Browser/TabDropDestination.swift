@@ -66,6 +66,7 @@ final class TabDragController {
     @ObservationIgnored private var escapeMonitor: Any?
     @ObservationIgnored private var hoveredGroupID: UUID?
     @ObservationIgnored private var groupExpansionTask: Task<Void, Never>?
+    @ObservationIgnored private var springLoadedGroupID: UUID?
 
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
@@ -97,6 +98,9 @@ final class TabDragController {
         }
         guard self.source == source, origin === browser else { return }
         self.location = location
+        if let groupID = springLoadedGroupID, !contains(location, inGroup: groupID, browser: browser) {
+            restoreSpringLoadedGroup()
+        }
         selection = destination(at: location, source: source, browser: browser)
         scrollRequest = scrolling(at: location)
         scheduleGroupExpansion(browser: browser)
@@ -123,8 +127,10 @@ final class TabDragController {
             self.groupExpansionTask = nil
             guard self.origin === browser, self.sourceID == tabID, browser.tab(withID: tabID) != nil,
                   let point = self.location,
-                  self.destination(at: point, source: .tab(tabID), browser: browser)?.region.target == .group(groupID)
+                  self.destination(at: point, source: .tab(tabID), browser: browser)?.region.target == .group(groupID),
+                  browser.groups.contains(where: { $0.id == groupID && $0.isCollapsed })
             else { return }
+            self.springLoadedGroupID = groupID
             browser.expandGroup(groupID)
         }
     }
@@ -133,6 +139,34 @@ final class TabDragController {
         groupExpansionTask?.cancel()
         groupExpansionTask = nil
         hoveredGroupID = nil
+    }
+
+    private func visibleFrame(of region: TabDropRegion) -> CGRect {
+        region.viewport.flatMap { frames.viewports[$0] }.map { region.frame.intersection($0) } ?? region.frame
+    }
+
+    /// Keep the folder open across its header, child cards and internal gaps, even over an invalid
+    /// insertion target (for example, a pinned site over an ordinary child). Clipped content is outside.
+    private func contains(_ point: CGPoint, inGroup groupID: UUID, browser: BrowserModel) -> Bool {
+        frames.regions.contains { region in
+            guard visibleFrame(of: region).contains(point) else { return false }
+            switch region.target {
+            case let .group(id): return id == groupID
+            case let .groupOrder(id): return id == groupID
+            case let .tab(id): return browser.tab(withID: id)?.groupID == groupID
+            }
+        }
+    }
+
+    private func restoreSpringLoadedGroup() {
+        guard let groupID = springLoadedGroupID else { return }
+        springLoadedGroupID = nil
+        origin?.collapseGroup(groupID)
+    }
+
+    private func keepSpringLoadedGroup(afterDropping tabID: UUID, into groupID: UUID?, browser: BrowserModel) {
+        guard let groupID, groupID == springLoadedGroupID, browser.tab(withID: tabID)?.groupID == groupID else { return }
+        springLoadedGroupID = nil
     }
 
     /// Pick the most specific visible target first, then validate it. An invalid tab must not fall through
@@ -144,8 +178,7 @@ final class TabDragController {
             case (.group, _), (.tab, .tab), (.tab, .group): break
             default: return false
             }
-            let visible = region.viewport.flatMap { frames.viewports[$0] }.map { region.frame.intersection($0) } ?? region.frame
-            return visible.contains(point)
+            return visibleFrame(of: region).contains(point)
         }.max { a, b in
             if case .group = source {
                 // A folder section owns its children while reordering whole folders.
@@ -188,8 +221,12 @@ final class TabDragController {
         update(source: source, location: location, browser: browser)
         guard let selection else { return }
         switch (source, selection.region.target) {
-        case let (.tab(id), .tab(target)): browser.dropTab(id, beside: target, after: selection.after)
-        case let (.tab(id), .group(group)): browser.dropTab(id, into: group)
+        case let (.tab(id), .tab(target)):
+            browser.dropTab(id, beside: target, after: selection.after)
+            keepSpringLoadedGroup(afterDropping: id, into: browser.tab(withID: target)?.groupID, browser: browser)
+        case let (.tab(id), .group(group)):
+            browser.dropTab(id, into: group)
+            keepSpringLoadedGroup(afterDropping: id, into: group, browser: browser)
         case let (.group(id), .groupOrder(target)): browser.moveGroup(id, beside: target, after: selection.after)
         case let (.group(id), .group(nil)): browser.moveGroupToEnd(id)
         default: break
@@ -204,6 +241,7 @@ final class TabDragController {
 
     func reset() {
         cancelGroupExpansion()
+        restoreSpringLoadedGroup()
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
         source = nil

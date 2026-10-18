@@ -47,6 +47,146 @@ final class TabDragTests: XCTestCase {
             XCTAssertEqual(source.groupID, target)
             XCTAssertEqual(source.isPinned, horizontal)
             XCTAssertEqual(browser.tabs.map(\.id), [source.id, child.id])
+            XCTAssertFalse(browser.groups[1].isCollapsed)
+            drag.reset()
+            XCTAssertFalse(browser.groups[1].isCollapsed)
+        }
+    }
+
+    func testSpringLoadedFolderCoversChildrenAndGapsThenClosesOnExitInBothLayouts() async throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            browser.setPinned(true, for: source.id)
+            browser.addTab()
+            let child = try XCTUnwrap(browser.activeTab)
+            let target = browser.createGroup(name: "Target", color: .green, tabID: child.id)
+            browser.activeTabID = source.id
+            browser.toggleGroupCollapsed(target)
+            let header = TabDropRegion(id: "header", target: .group(target),
+                                       frame: CGRect(x: 0, y: 0, width: 120, height: 28), horizontal: horizontal)
+            drag.updateFrames(.init(regions: [header]), browser: browser)
+            let start = CGPoint(x: 30, y: 14)
+            drag.update(id: source.id, location: start, browser: browser)
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertFalse(browser.groups[0].isCollapsed)
+            let childFrame = horizontal ? CGRect(x: 124, y: 0, width: 100, height: 28)
+                                        : CGRect(x: 0, y: 32, width: 120, height: 32)
+            drag.updateFrames(.init(regions: [header,
+                .init(id: "section", target: .groupOrder(target), frame: header.frame.union(childFrame), horizontal: horizontal),
+                .init(id: "child", target: .tab(child.id), frame: childFrame, horizontal: horizontal, priority: 2)
+            ]), browser: browser)
+            let gap = horizontal ? CGPoint(x: 122, y: 14) : CGPoint(x: 30, y: 30)
+            drag.update(id: source.id, location: gap, browser: browser)
+            XCTAssertFalse(browser.groups[0].isCollapsed)
+            drag.update(id: source.id, location: CGPoint(x: childFrame.midX, y: childFrame.midY), browser: browser)
+            XCTAssertNil(drag.selection, "Pin cannot insert beside an ordinary child")
+            XCTAssertFalse(browser.groups[0].isCollapsed, "Invalid child insertion is still inside the folder")
+            drag.update(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+            XCTAssertTrue(browser.groups[0].isCollapsed)
+            XCTAssertNil(source.groupID)
+            XCTAssertEqual(child.groupID, target)
+            XCTAssertEqual(browser.activeTabID, source.id)
+            drag.updateFrames(.init(regions: [header]), browser: browser)
+            drag.update(id: source.id, location: start, browser: browser)
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertFalse(browser.groups[0].isCollapsed, "Re-entry can spring-load the folder again")
+            drag.cancel()
+            XCTAssertTrue(browser.groups[0].isCollapsed)
+        }
+    }
+
+    func testOpenedHoverFolderRestoresOnAbortedDropClippingOrRemoval() async throws {
+        for interruption in ["cancel", "reset", "outside-release", "invalid-child-release", "clip", "remove-folder", "close-source"] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            browser.setPinned(true, for: source.id)
+            browser.addTab()
+            let child = try XCTUnwrap(browser.activeTab)
+            let target = browser.createGroup(name: "Target", color: .green, tabID: child.id)
+            browser.activeTabID = source.id
+            browser.toggleGroupCollapsed(target)
+            let header = TabDropRegion(id: "header", target: .group(target), frame: CGRect(x: 0, y: 0, width: 120, height: 28),
+                                       horizontal: false, viewport: "tabs")
+            var frames = TabDragFrames(regions: [header], viewports: ["tabs": CGRect(x: 0, y: 0, width: 120, height: 100)])
+            drag.updateFrames(frames, browser: browser)
+            let point = CGPoint(x: 30, y: 14)
+            drag.update(id: source.id, location: point, browser: browser)
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertFalse(browser.groups[0].isCollapsed, interruption)
+            switch interruption {
+            case "cancel": drag.cancel()
+            case "reset": drag.reset()
+            case "outside-release": drag.finish(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+            case "invalid-child-release":
+                frames.regions.append(.init(id: "child", target: .tab(child.id), frame: CGRect(x: 0, y: 32, width: 120, height: 32),
+                                             horizontal: false, viewport: "tabs", priority: 2))
+                drag.updateFrames(frames, browser: browser)
+                drag.finish(id: source.id, location: CGPoint(x: 30, y: 48), browser: browser)
+            case "clip":
+                frames.viewports["tabs"] = CGRect(x: 200, y: 200, width: 120, height: 100)
+                drag.updateFrames(frames, browser: browser)
+            case "remove-folder": browser.ungroup(target); drag.reset()
+            case "close-source":
+                browser.setPinned(false, for: source.id)
+                browser.closeTab(source.id)
+                drag.finish(id: source.id, location: point, browser: browser)
+            default: XCTFail("Unknown interruption")
+            }
+            XCTAssertTrue(browser.groups.allSatisfy(\.isCollapsed), interruption)
+            XCTAssertNil(source.groupID, interruption)
+        }
+    }
+
+    func testHeaderDropKeepsOnlyTheAcceptedSpringLoadedFolderOpen() async throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let source = try XCTUnwrap(browser.activeTab)
+        let first = browser.createGroup(name: "First", color: .blue)
+        let second = browser.createGroup(name: "Second", color: .green)
+        browser.toggleGroupCollapsed(first)
+        browser.toggleGroupCollapsed(second)
+        drag.updateFrames(.init(regions: [
+            .init(id: "first", target: .group(first), frame: CGRect(x: 0, y: 0, width: 120, height: 28), horizontal: false),
+            .init(id: "second", target: .group(second), frame: CGRect(x: 0, y: 40, width: 120, height: 28), horizontal: false)
+        ]), browser: browser)
+        drag.update(id: source.id, location: CGPoint(x: 30, y: 14), browser: browser)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertFalse(browser.groups[0].isCollapsed)
+        let destination = CGPoint(x: 30, y: 54)
+        drag.update(id: source.id, location: destination, browser: browser)
+        XCTAssertTrue(browser.groups[0].isCollapsed)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertFalse(browser.groups[1].isCollapsed)
+        drag.finish(id: source.id, location: destination, browser: browser)
+        XCTAssertEqual(source.groupID, second)
+        XCTAssertTrue(browser.groups[0].isCollapsed)
+        XCTAssertFalse(browser.groups[1].isCollapsed)
+    }
+
+    func testAlreadyOpenOrIndependentlyOpenedFoldersAreNeverAutoCollapsed() async throws {
+        for initiallyOpen in [true, false] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            let group = browser.createGroup(name: "Open", color: .green)
+            if !initiallyOpen { browser.toggleGroupCollapsed(group) }
+            drag.updateFrames(.init(regions: [
+                .init(id: "header", target: .group(group), frame: CGRect(x: 0, y: 0, width: 120, height: 28), horizontal: false)
+            ]), browser: browser)
+            drag.update(id: source.id, location: CGPoint(x: 30, y: 14), browser: browser)
+            if !initiallyOpen { browser.expandGroup(group) }
+            try await Task.sleep(for: .milliseconds(600))
+            drag.update(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+            drag.cancel()
+            XCTAssertFalse(browser.groups[0].isCollapsed)
+            XCTAssertNil(source.groupID)
         }
     }
 
