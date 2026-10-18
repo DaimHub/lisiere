@@ -225,3 +225,57 @@ Raw traces and timestamped XML/JSON evidence are retained locally under the igno
 `remeasure-cpu-summary.json` contains the targeted stack weights. Trace archives can contain process
 environment data; only the measured results belong in source control. For follow-up captures, prefer
 short Hitches recordings; adding Frame Lifetimes substantially increased post-processing time here.
+
+## Drag completion hitch investigation
+
+A follow-up on 2026-10-18 used SwiftUI (including layout tracing), Hitches and Time Profiler together.
+The fixture and 500 ms settling window remained the same. Four repetitions in each layout moved a
+loose pin into the collapsed Recherche folder, moved one pin back out and collapsed the folder again.
+The eight drop windows were checked against the recording bounds and overlapping events were deduplicated.
+
+Two sources of unnecessary work were isolated:
+
+- `activeTab` and `splitTabs` looked up their pages through the observable `tabs` array. Reordering that
+  array therefore invalidated page and toolbar consumers although their selection had not changed.
+  The sidebar trace contained 22 `BrowserWindow` body updates: eight caused by the drops and 14 driven
+  by environment updates. Storing identity-checked selection projections removed the eight drop-driven
+  updates; the corresponding trace contained only the 14 environment updates. A regression test failed
+  with the old implementation for both ordinary and split selection, then passed with the fix.
+- Selection isolation alone did not remove the late display stalls. A Hitches + Time Profiler recording
+  still showed repeated 33–50 ms hitches about 240 ms after release, at the end of the move animation.
+  The drag preview used a native material backdrop, and `withAnimation` at drop completion also animated
+  its removal. The preview now uses the native window background color and an animation-free transaction.
+  It disappears when the pointer releases, while the actual tab/folder move keeps its existing animation.
+  This also applies to folder previews. It avoids creating a moving native backdrop and delaying cleanup
+  until the tab animation completes.
+
+The following captures use Hitches + Time Profiler, without SwiftUI's detailed graph tracing. Each row
+contains eight drops and their finishing animation. `Selection only` is an intermediate build with the
+first fix but the old preview; `Final` includes both changes.
+
+| Build and layout | Hitch events | Total hitch duration | Largest hitch | Hitches over 25 ms |
+| --- | ---: | ---: | ---: | ---: |
+| Selection only, horizontal | 45 | 625.00 ms | 50.00 ms | 5 |
+| Final, horizontal | 18 | 150.00 ms | 8.33 ms | 0 |
+| Final, sidebar | 26 | 241.67 ms | 25.00 ms | 0 |
+
+These short traces support the preview cleanup change; they do not establish a universal frame-time
+ceiling or a reduction in total CPU time. Input and accessibility snapshot cadence differ between runs,
+background load is uncontrolled, and a new process was used for the final build. The detailed SwiftUI
+captures are diagnostic evidence for invalidations, not directly comparable hitch benchmarks. Their
+maxima were 16.67/50.00 ms before the changes and 41.67/50.00 ms with selection isolation alone
+(horizontal/sidebar). The combined correction is what removed the recurring late spikes in the final
+samples. Physical held-hover and trackpad gestures remain outside this automation's coverage.
+
+The native checks retained the active Example Domain page, pin membership/counts and collapsed state.
+The selection tests also cover close/restore, invalid IDs, selection changes and continued observation
+of the selected page's own properties. The native-host motion tests cover rapid reversals and continuous
+pointer movement against animated geometry, including spring-open/exit/re-entry/drop.
+
+Evidence is retained locally in the ignored `.build/folder-hitch-cause/` directory: timestamped
+`phases.json`, `*-hitch-summary.json`, `*-swiftui-summary.json`, `*-cpu-summary.json`, and the original
+traces. Only sanitized summaries belong in source control; trace metadata may contain process environment.
+
+Final validation: 294 XCTest tests passed with zero failures (116.881 s), including all four native-host
+motion tests. The Release used for the final captures passed strict signature verification. The extra
+cold-baseline comparison was interrupted by the Mac locking, so it is not included in the results.

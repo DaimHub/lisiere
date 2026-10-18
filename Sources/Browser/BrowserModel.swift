@@ -27,15 +27,22 @@ final class BrowserModel {
     @ObservationIgnored weak var profileWindow: ProfileWindowController?
 
     private(set) var tabs: [BrowserTab] = [] {
-        didSet { reconcileSplitView() }
+        didSet {
+            updateSelectedPages()
+            reconcileSplitView()
+        }
     }
     private(set) var groups: [TabGroup] = []
 
     /// Window-local pairing survives selection of other tabs; both pages keep their own WebKit state.
-    private(set) var splitTabIDs: [UUID] = []
+    private(set) var splitTabIDs: [UUID] = [] {
+        didSet { updateSelectedPages() }
+    }
     var hasSplitPair: Bool { splitTabIDs.count == 2 }
     var isSplitView: Bool { hasSplitPair && splitTabIDs.contains { $0 == activeTabID } }
-    var splitTabs: [BrowserTab] { splitTabIDs.compactMap { tab(withID: $0) } }
+    /// Page consumers observe selection identity, not the tab strip's changing order.
+    private(set) var activeTab: BrowserTab?
+    private(set) var splitTabs: [BrowserTab] = []
     var splitDividerFraction: CGFloat = 0.5
 
     struct TabStripGroup: Identifiable {
@@ -108,6 +115,7 @@ final class BrowserModel {
     var activeTabID: UUID? {
         didSet {
             guard oldValue != activeTabID else { return }
+            updateSelectedPages()
             if let previousTab = tab(withID: oldValue) {
                 // Keep a preview of the page being left for background-tab hover cards.
                 previousTab.captureThumbnail(afterScreenUpdates: false)
@@ -186,8 +194,15 @@ final class BrowserModel {
         return configuration
     }
 
-    var activeTab: BrowserTab? {
-        tab(withID: activeTabID)
+    /// Keep these projections synchronous with mutations. A drop can reorder the array twice;
+    /// unchanged page identities must not invalidate the toolbar, page host and their layout graph.
+    private func updateSelectedPages() {
+        let selected = tab(withID: activeTabID)
+        if activeTab !== selected { activeTab = selected }
+        let panes = splitTabIDs.compactMap { tab(withID: $0) }
+        if panes.count != splitTabs.count || !zip(panes, splitTabs).allSatisfy({ $0 === $1 }) {
+            splitTabs = panes
+        }
     }
 
     var canReopenClosedTab: Bool {
