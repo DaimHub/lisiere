@@ -92,6 +92,7 @@ struct TabStrip: View {
     @State private var groupEditor: TabGroupEditorRequest?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
+    @FocusState private var focusedGroupSection: String?
 
     private let spacing = HorizontalTabStripMetrics.spacing
     private let addButtonID = "new-tab-button"
@@ -304,7 +305,9 @@ struct TabStrip: View {
         let isSelected = section.cards.contains { $0.tabs.contains { browser.isTabVisible($0.id) } }
         return Button { browser.toggleGroupCollapsed(group.id) } label: {
             HStack(spacing: 6) {
-                Image(browserIcon: group.isCollapsed ? .forward : .chevronDown, size: 10)
+                Image(browserIcon: .forward, size: 10)
+                    .rotationEffect(.degrees(group.isCollapsed ? 0 : 90))
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: group.isCollapsed)
                 Image(browserIcon: .tabGroup, size: 13).foregroundStyle(group.color.tint)
                 Text(group.name).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
@@ -313,14 +316,12 @@ struct TabStrip: View {
             .font(.system(size: 11.5, weight: .medium))
             .padding(.horizontal, 7)
             .frame(width: layout == .horizontal ? 120 : nil, height: 28)
-            .background(group.color.tint.opacity(isSelected ? 0.14 : 0.07),
-                        in: RoundedRectangle(cornerRadius: 7))
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(group.color.tint.opacity(isSelected ? 0.5 : 0.22), lineWidth: 1)
-            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TabGroupButtonStyle(tint: group.color.tint, isSelected: isSelected,
+                                        isFocused: focusedGroupSection == section.id,
+                                        isDragging: drag.isDragging,
+                                        isDropTarget: drag.selection?.region.id == section.id))
+        .focused($focusedGroupSection, equals: section.id)
         .help("\(group.name) · \(group.color.title)")
         .accessibilityLabel("\(group.name), \(section.tabCount) tabs")
         .accessibilityValue("\(group.isCollapsed ? "Collapsed" : "Expanded"), \(group.color.title)")
@@ -777,6 +778,49 @@ struct ChromeIconButtonStyle: ButtonStyle {
                         isHovered ? Color.primary.opacity(0.07) : Color.clear,
                         in: RoundedRectangle(cornerRadius: size <= 28 ? 8 : 10, style: .continuous))
             .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+    }
+}
+
+/// Keep the full header's geometry stable while its surface responds to mouse and keyboard input.
+/// Each section owns its hover state, including when a group appears in both pin and ordinary lists.
+private struct TabGroupButtonStyle: ButtonStyle {
+    let tint: Color
+    let isSelected: Bool
+    let isFocused: Bool
+    let isDragging: Bool
+    let isDropTarget: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let pressed = configuration.isPressed && !isDragging
+        let hovered = isHovered && !isDragging
+        let emphasized = hovered || isDropTarget
+        let fill = pressed ? 0.23 : emphasized ? 0.14 : isSelected ? 0.10 : 0.045
+        let border = pressed ? 0.60 : emphasized ? 0.42 : isSelected ? 0.32 : 0.12
+        return configuration.label
+            .foregroundStyle(.primary)
+            .scaleEffect(pressed && !reduceMotion ? 0.985 : 1)
+            .offset(y: pressed && !reduceMotion ? 0.5 : 0)
+            .background {
+                shape.fill(Color.primary.opacity(pressed ? 0.05 : hovered ? 0.035 : 0.02))
+                shape.fill(tint.opacity(fill + (colorScheme == .dark ? 0.035 : 0)))
+            }
+            .overlay {
+                shape.strokeBorder(tint.opacity(contrast == .increased ? max(0.6, border) : border), lineWidth: 1)
+                    .allowsHitTesting(false)
+                if isFocused {
+                    shape.strokeBorder(Color.accentColor, lineWidth: 2)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+            .animation(reduceMotion || isDragging ? nil : .easeOut(duration: pressed ? 0.08 : 0.14), value: pressed)
+            .animation(reduceMotion || isDragging ? nil : .easeOut(duration: 0.14), value: hovered)
             .onHover { isHovered = $0 }
     }
 }

@@ -28,6 +28,20 @@ controller tracks only the folder it actually expanded and restores it before fo
 window, including when the source site or target folder disappears. Expansion and re-collapse preserve
 membership, pin state, order and selection.
 
+## Folder interaction states
+
+Pinned and ordinary folder headers share the same native button style in both layouts. At rest, a
+light tint and quiet border identify the folder; a folder containing a visible page keeps a stronger
+resting tint. Hover strengthens the fill and border. Pressing darkens the surface and slightly insets
+the label, while the outer header and drop bounds keep their existing dimensions. The disclosure
+chevron rotates over 160 ms; hover and release use 140 ms transitions and pressing uses 80 ms.
+
+Each visible section owns its hover state, so hovering a pinned header does not highlight the same
+group's ordinary header. Dragging suppresses mouse hover/press decoration and uses the existing drop
+outline with a tinted target surface. Keyboard focus receives a distinct ring. Dark appearance adjusts
+the fill, increased contrast strengthens borders, and Reduce Motion disables transitions and label
+movement while retaining color feedback. Group state, persistence and drag timing are unchanged.
+
 ## Folder ordering
 
 Drag a folder header to move the whole folder before or after another section. The insertion marker
@@ -54,6 +68,7 @@ background, so a self-drop or a drop on an ungrouped site cannot accidentally se
 - With hover expansion installed, Release pointer checks confirmed that a quick pass across a collapsed horizontal folder leaves it closed; a horizontal pin drop and a sidebar ordinary-site drop into collapsed folders still expand them and preserve the active page and pin state.
 - With re-collapse installed, dragging pins past already-expanded folders and releasing in empty space preserves those folders in both layouts. A sidebar drop into a collapsed folder still leaves the receiving folder open, with the active page intact.
 - With the 300 ms grace period installed, Release checks confirmed horizontal and sidebar pin entry/exit, preservation of already-open folders, and a sidebar drop into a collapsed folder remaining open. Folder counts, pin state and the active page stayed correct. The timed re-entry path remains controller-tested as noted below.
+- Folder button styling was checked in the signed Release in light/dark appearance and both layouts. Header clicks still collapse/expand pinned and ordinary sections; sidebar site drops and whole-folder moves in both layouts preserve membership and active content. Resting tints and disclosure states were inspected. The automation did not capture a reliable held-press or hover-only frame, so transient feedback, keyboard focus and system Reduce Motion/contrast remain direct manual checks.
 - Releasing over web content leaves the original folder unchanged. Ordinary tab selection, the Close button and native context menus remain usable.
 - The QA bundle retains sandbox and hardened runtime. Full Release signing, startup and installation checks are performed against exact bundle paths.
 - Native AppKit regressions continue to check traffic-light positioning after titlebar/button resets, alternating row heights and resizing. The automation's screen-sharing badge covers the traffic lights in screenshots, so screenshot evidence does not establish their exact position.
