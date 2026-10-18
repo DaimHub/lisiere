@@ -213,7 +213,7 @@ final class BrowserAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Mascot.current().applyDockIcon()
-        Passkeys.shared.requestAuthorizationIfNeeded()
+        if !ReleaseValidation.isQA { Passkeys.shared.requestAuthorizationIfNeeded() }
     }
 
     /// Links and HTML files opened from other apps and the Finder.

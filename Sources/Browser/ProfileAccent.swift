@@ -162,7 +162,7 @@ private struct ProfileColorWell: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var hex: Binding<String>
         init(hex: Binding<String>) { self.hex = hex }
         @objc func changed(_ sender: NSColorWell) {

@@ -72,3 +72,9 @@ WebKit only lets an app use passkeys and security keys on any website if Apple g
 The inherited target is retained for development. Athas's alternative licensing rights do not transfer to this fork. Do not submit this AGPL fork under incompatible store terms without the necessary permissions from all relevant copyright holders.
 
 The `LisiereAppStore` target builds the same app with the `APP_STORE` flag and without Sparkle, which the store replaces. It isn't automated: archive the `LisiereAppStore` scheme in Xcode and upload it from the Organizer.
+## Reliability gate
+
+The release tag now runs the reusable CI validation on that exact commit before signing or publication. The
+exported app is checked again through an isolated local QA copy. Validation artifacts, dSYMs, build provenance
+and SHA-256 checksums are retained. See [the acceptance protocol](docs/INDUSTRIALISATION.md) for the distinction
+between optimized test hosts, sandboxed ad hoc acceptance and actual Developer ID/Sparkle distribution checks.

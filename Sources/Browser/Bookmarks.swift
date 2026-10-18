@@ -54,14 +54,18 @@ enum BookmarksBarVisibility: String, CaseIterable, Identifiable {
 @Observable
 final class BookmarkStore {
     private(set) var bookmarks: [Bookmark] = []
+    private(set) var persistenceFailure: StoreFile.Failure?
     @ObservationIgnored private let defaults: UserDefaults?
     private static let storageKey = "bookmarks"
 
     init(defaults: UserDefaults? = .standard) {
         self.defaults = defaults
-        if let data = defaults?.data(forKey: Self.storageKey),
-           let bookmarks = try? JSONDecoder().decode([Bookmark].self, from: data) {
-            self.bookmarks = bookmarks
+        if let data = defaults?.data(forKey: Self.storageKey) {
+            do { bookmarks = try JSONDecoder().decode([Bookmark].self, from: data) }
+            catch {
+                persistenceFailure = .init(operation: .decode, code: (error as NSError).code, store: "bookmarks")
+                BrowserDiagnostics.storage.error("Bookmarks could not be decoded; saved data preserved")
+            }
         }
     }
 
@@ -112,6 +116,7 @@ final class BookmarkStore {
     }
 
     private func save() {
+        guard persistenceFailure == nil else { return }
         guard let data = try? JSONEncoder().encode(bookmarks) else { return }
         defaults?.set(data, forKey: Self.storageKey)
     }

@@ -5,7 +5,7 @@ import SwiftUI
 struct MascotView: View {
     let mascot: Mascot
     let palette: MascotPalette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var gaze = CGSize.zero
 

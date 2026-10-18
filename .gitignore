@@ -6,3 +6,4 @@ Config/*-Info.plist
 Lisiere.xcodeproj/
 build/
 *.xcresult
+__pycache__/

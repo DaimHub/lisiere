@@ -8,7 +8,7 @@ struct ProfileBrowserWindow: View {
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
 
     var body: some View {
         // Keep both profiles in the same bounds while their opacity changes.
@@ -68,6 +68,7 @@ struct ProfileBrowserWindow: View {
                     ExternalURLRouter.shared.register(browser, openWindow: openWindow)
                 }
                 owner = controller
+                if !isPrivate { ReleaseValidation.start(profiles: profiles, owner: controller, reduceMotion: reduceMotion) }
                 controller.onActivate?(controller.browser)
                 for _ in 0..<controller.additionalWindows {
                     openWindow(id: BrowserApp.windowID, value: ProfileWindowRequest(profileID: profileID))

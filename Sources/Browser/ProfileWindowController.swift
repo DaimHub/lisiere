@@ -64,6 +64,8 @@ final class ProfileWindowController {
 
     func switchTo(_ profileID: UUID) {
         guard !isClosed, !isPrivate, browser.profileID != profileID else { return }
+        let interval = BrowserDiagnostics.performance.beginInterval("Profile switch")
+        defer { BrowserDiagnostics.performance.endInterval("Profile switch", interval) }
         do {
             guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
             try profiles.select(profileID)
@@ -97,6 +99,7 @@ final class ProfileWindowController {
 
     func close() {
         guard !isClosed else { return }
+        BrowserDiagnostics.lifecycle.debug("Browser window closing")
         isClosed = true
         if let window { browser.appearance.detach(window) }
         for (id, model) in browsers {

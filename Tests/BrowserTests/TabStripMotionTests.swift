@@ -199,6 +199,10 @@ private final class MotionFixture {
             .overlayPreferenceValue(TabFrameKey.self) { anchors in
                 Color.clear.onChange(of: Set(anchors.keys), initial: true) { _, ids in recording.hoverTabIDs = ids }
             }
+        // This test supplies preview selection explicitly. Ignore real pointer hover: a CI cursor over
+        // the newly opened window must not schedule a competing delayed preview.
+        window.ignoresMouseEvents = true
+        window.setFrameOrigin(CGPoint(x: -4000, y: -4000))
         window.contentView = NSHostingView(rootView: strip)
         window.orderFront(nil)
     }

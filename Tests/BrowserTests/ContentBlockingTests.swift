@@ -1,8 +1,66 @@
 import XCTest
+import WebKit
 @testable import Browser
 
 @MainActor
 final class ContentBlockingTests: XCTestCase {
+    func testRapidExceptionChangesFinishWithTheLatestProtectionState() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "RuleChanges-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let blocker = ContentBlocker(store: try XCTUnwrap(WKContentRuleListStore(url: directory)))
+        let disable = Task { await blocker.setBlocking(false, on: "example.test") }
+        await Task.yield()
+        let enable = Task { await blocker.setBlocking(true, on: "example.test") }
+        await disable.value; await enable.value
+        await blocker.waitUntilLoaded()
+        XCTAssertEqual(blocker.state, .ready)
+        XCTAssertTrue(blocker.isBlocking(on: "example.test"))
+        XCTAssertTrue(blocker.exceptions.isEmpty)
+        await blocker.removeCompiledRules()
+        XCTAssertFalse(blocker.isBlocking(on: "example.test"))
+    }
+
+    func testFullRuleListCompilesInWebKitAndProtectionBecomesReady() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "Rules-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try XCTUnwrap(WKContentRuleListStore(url: directory))
+        let blocker = ContentBlocker(store: store, identifier: "test")
+        XCTAssertFalse(blocker.isBlocking(on: "example.com"))
+        await blocker.waitUntilLoaded()
+        XCTAssertEqual(blocker.state, .ready)
+        XCTAssertTrue(blocker.isBlocking(on: "example.com"))
+        await blocker.setBlocking(false, on: "example.com")
+        XCTAssertFalse(blocker.isBlocking(on: "example.com"))
+        XCTAssertTrue(blocker.isBlocking(on: "other.test"))
+        let compiled = try await store.contentRuleList(forIdentifier: "test")
+        XCTAssertNotNil(compiled)
+        await blocker.removeCompiledRules()
+    }
+
+    func testCompilationFailureNeverClaimsProtection() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "BadRules-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let blocker = ContentBlocker(store: try XCTUnwrap(WKContentRuleListStore(url: directory)),
+                                     ruleSource: { _ in "not JSON" })
+        await blocker.waitUntilLoaded()
+        XCTAssertEqual(blocker.state, .failed)
+        XCTAssertFalse(blocker.isBlocking(on: "example.com"))
+        XCTAssertEqual(blocker.statusText(on: "example.com"), "Tracker protection is unavailable")
+        let unavailable = ContentBlocker()
+        XCTAssertFalse(unavailable.isBlocking(on: "example.com"))
+    }
+
+    func testFacebookPixelPatternsPreserveBoundaries() throws {
+        let filters = TrackerBlocklist.urlFilters.filter { $0.contains("facebook") }
+        for suffix in ["", "/", "?id=1"] {
+            XCTAssertTrue(try filters.contains { try matches($0, "https://www.facebook.com/tr" + suffix) })
+        }
+        XCTAssertFalse(try filters.contains { try matches($0, "https://www.facebook.com/travel") })
+    }
+
     private func matches(_ filter: String, _ address: String) throws -> Bool {
         let expression = try NSRegularExpression(pattern: filter)
         return expression.firstMatch(in: address, range: NSRange(address.startIndex..., in: address)) != nil
@@ -59,15 +117,15 @@ final class ContentBlockingTests: XCTestCase {
         let defaults = makeDefaults()
         let blocker = ContentBlocker(defaults: defaults)
         XCTAssertTrue(blocker.isEnabled)
-        XCTAssertTrue(blocker.isBlocking(on: "www.example.com"))
+        XCTAssertTrue(blocker.wantsBlocking(on: "www.example.com"))
 
         await blocker.setBlocking(false, on: "www.Example.com")
 
         XCTAssertEqual(blocker.exceptions, ["example.com"])
-        XCTAssertFalse(blocker.isBlocking(on: "example.com"))
-        XCTAssertFalse(blocker.isBlocking(on: "news.example.com"))
-        XCTAssertTrue(blocker.isBlocking(on: "example.org"))
-        XCTAssertTrue(blocker.isBlocking(on: "notexample.com"))
+        XCTAssertFalse(blocker.wantsBlocking(on: "example.com"))
+        XCTAssertFalse(blocker.wantsBlocking(on: "news.example.com"))
+        XCTAssertTrue(blocker.wantsBlocking(on: "example.org"))
+        XCTAssertTrue(blocker.wantsBlocking(on: "notexample.com"))
 
         let relaunched = ContentBlocker(defaults: defaults)
         XCTAssertEqual(relaunched.exceptions, ["example.com"])
@@ -82,7 +140,7 @@ final class ContentBlockingTests: XCTestCase {
 
         blocker.setEnabled(false)
 
-        XCTAssertFalse(blocker.isBlocking(on: "example.com"))
+        XCTAssertFalse(blocker.wantsBlocking(on: "example.com"))
         XCTAssertFalse(ContentBlocker(defaults: defaults).isEnabled)
     }
 }

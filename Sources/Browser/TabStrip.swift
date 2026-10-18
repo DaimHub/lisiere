@@ -90,7 +90,7 @@ struct TabStrip: View {
     @State private var drag: TabDragController
     @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
     @FocusState private var focusedGroupSection: String?
 
@@ -844,7 +844,7 @@ private struct TabGroupButtonStyle: ButtonStyle {
     let isDropTarget: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     func makeBody(configuration: Configuration) -> some View {

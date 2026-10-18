@@ -1,20 +1,6 @@
 #!/bin/bash
-# Catch dyld/signing failures that signature verification and Debug tests cannot detect.
+# Compatibility entry point. The production bundle is never launched with personal data.
 set -euo pipefail
 app=${1:?Pass the built Lisiere.app path}
-launch_log=$(mktemp -t lisiere-launch)
-"$app/Contents/MacOS/Lisiere" > "$launch_log" 2>&1 &
-app_pid=$!
-cleanup() {
-  kill "$app_pid" 2>/dev/null || true
-  wait "$app_pid" 2>/dev/null || true
-  rm -f "$launch_log"
-}
-trap cleanup EXIT
-sleep 5
-if ! kill -0 "$app_pid" 2>/dev/null; then
-  cat "$launch_log"
-  echo "Lisière exited during launch." >&2
-  exit 1
-fi
-echo "Lisière stayed running through startup."
+output=${2:-"$(dirname "$app")/Validation-$(date +%Y%m%d-%H%M%S)"}
+exec python3 "$(dirname "$0")/validate-release.py" "$app" --output "$output"

@@ -77,6 +77,19 @@ struct BrowserWindow: View {
                 mainColumn
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !browser.isPrivate, let profileID, let context = profiles.context(for: profileID),
+               let failure = context.persistenceFailure {
+                HStack(spacing: 12) {
+                    Text(failure.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    if failure.canRetry { Button("Retry") { context.retryPersistence() } }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.regularMaterial)
+                .accessibilityIdentifier("persistence-error")
+            }
+        }
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
         }
@@ -645,13 +658,14 @@ struct BrowserWindow: View {
         if contentBlocker.isEnabled, let tab = browser.activeTab, !tab.isNewTab, let host = tab.host,
            ["http", "https"].contains(tab.url?.scheme?.lowercased() ?? "") {
             let isBlocking = contentBlocker.isBlocking(on: host)
-            let site = ContentBlocker.site(host)
+            let wantsBlocking = contentBlocker.wantsBlocking(on: host)
+            let statusText = contentBlocker.statusText(on: host)
             Menu {
-                Text(isBlocking ? "Trackers are blocked on \(site)" : "Tracker blocking is off for \(site)")
-                Button(isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
+                Text(statusText)
+                Button(wantsBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
                        browserIcon: isBlocking ? .shieldOff : .shield) {
                     Task {
-                        await contentBlocker.setBlocking(!isBlocking, on: host)
+                        await contentBlocker.setBlocking(!wantsBlocking, on: host)
                         tab.reload()
                     }
                 }
@@ -664,14 +678,14 @@ struct BrowserWindow: View {
             .menuIndicator(.hidden)
             .buttonStyle(ChromeIconButtonStyle(size: 26))
             .fixedSize()
-            .help(isBlocking ? "Trackers Blocked" : "Tracker Blocking Off for This Site")
-            .accessibilityLabel(isBlocking ? "Trackers blocked" : "Tracker blocking off")
+            .help(statusText)
+            .accessibilityLabel(statusText)
             .browserMenu {
-                [.init(title: isBlocking ? "Trackers are blocked on \(site)" : "Tracker blocking is off for \(site)", icon: nil, isEnabled: false),
-                 .init(title: isBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
+                [.init(title: statusText, icon: nil, isEnabled: false),
+                 .init(title: wantsBlocking ? "Turn Off Blocking for This Site" : "Turn On Blocking for This Site",
                        icon: isBlocking ? .shieldOff : .shield, isEnabled: !browser.isPrivate) {
                      Task {
-                         await contentBlocker.setBlocking(!isBlocking, on: host)
+                         await contentBlocker.setBlocking(!wantsBlocking, on: host)
                          tab.reload()
                      }
                  }]

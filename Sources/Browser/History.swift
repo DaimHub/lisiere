@@ -85,7 +85,9 @@ final class HistoryStore {
     private(set) var visits: [HistoryVisit] = []
     private(set) var revision = 0
     @ObservationIgnored private let file: StoreFile?
+    @ObservationIgnored private var clearsUnreadableData = false
     @ObservationIgnored private var loading: Task<Void, Never>?
+    @ObservationIgnored private var terminationObservation: NotificationObservation?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var cachedPages: [HistoryPage]?
     @ObservationIgnored private var cachedDays: (query: String, calendar: Calendar, locale: Locale, days: [HistoryDay])?
@@ -100,8 +102,7 @@ final class HistoryStore {
             let saved = await Self.loadVisits(from: file)
             self?.merge(saved)
         }
-        _ = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
-                                                   queue: .main) { [weak self] _ in
+        terminationObservation = NotificationObservation(name: NSApplication.willTerminateNotification) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveNow() }
         }
     }
@@ -191,6 +192,10 @@ final class HistoryStore {
     }
 
     func clear(_ range: HistoryClearRange, now: Date = .now, calendar: Calendar = .current) {
+        if range == .all {
+            clearsUnreadableData = true
+            if loading == nil { file?.allowReplacementAfterExplicitClear() }
+        }
         let start = range.start(now: now, calendar: calendar)
         remove { $0.date >= start }
     }
@@ -211,6 +216,7 @@ final class HistoryStore {
     /// Adds the saved history to the visits made while it loaded.
     private func merge(_ saved: [HistoryVisit]) {
         loading = nil
+        if clearsUnreadableData { file?.allowReplacementAfterExplicitClear() }
         let savedCount = saved.count
         var saved = saved
         for shouldRemove in pendingRemovals {
@@ -254,8 +260,7 @@ final class HistoryStore {
 
     @concurrent
     nonisolated private static func loadVisits(from file: StoreFile) async -> [HistoryVisit] {
-        guard let data = await file.read() else { return [] }
-        return (try? PropertyListDecoder().decode([HistoryVisit].self, from: data)) ?? []
+        await file.decode([HistoryVisit].self) ?? []
     }
 }
 

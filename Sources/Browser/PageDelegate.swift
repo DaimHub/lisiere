@@ -18,6 +18,10 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         if navigationAction.targetFrame?.isMainFrame == true, let tab,
            !(await tab.waitForPasswordDecision()) { return .cancel }
+        if navigationAction.targetFrame?.isMainFrame == true {
+            // A fresh profile must finish installing its rules before its first page starts loading.
+            await tab?.browser?.contentBlocker.waitUntilLoaded()
+        }
         if navigationAction.shouldPerformDownload { return .download }
         if navigationAction.navigationType == .linkActivated,
            navigationAction.modifierFlags.contains(.command) || navigationAction.buttonNumber == Self.middleButtonMask,
@@ -143,6 +147,7 @@ final class PageDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// suspended, and loads again when it's selected.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard let tab else { return }
+        BrowserDiagnostics.webKit.error("Web content process terminated; recovering visible page or suspending background page")
         if tab.browser?.isTabVisible(tab.id) == true {
             webView.reload()
         } else {

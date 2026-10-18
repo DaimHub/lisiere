@@ -65,7 +65,9 @@ final class BrowsingData {
         let start = range.start(now: now)
         if options.contains(.history) {
             history.clear(range, now: now)
-            if range == .all { session.forgetClosedWindows() }
+            await history.waitUntilLoaded()
+            history.saveNow()
+            if range == .all { session.forgetClosedWindows(); session.retrySave() }
         }
         let types = options.websiteDataTypes()
         if !types.isEmpty {

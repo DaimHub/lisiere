@@ -10,6 +10,7 @@ struct BrowserApp: App {
     @State private var profiles: ProfileStore
 
     init() {
+        ReleaseValidation.markLaunch()
         // Tests must not read, restore, or overwrite the user's profile registry or sessions.
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         _profiles = State(initialValue: testing
@@ -21,6 +22,7 @@ struct BrowserApp: App {
     var body: some Scene {
         WindowGroup(id: Self.windowID, for: ProfileWindowRequest.self) { $request in
             ProfileBrowserWindow(profiles: profiles, profileID: request.profileID)
+                .modifier(ReleaseValidationAccessibility())
                 .frame(minWidth: 680, minHeight: 440)
                 // SwiftUI selects a scene before forwarding URLs to the app delegate. Without this,
                 // it creates a new window for every URL, even though our router can reuse an existing one.

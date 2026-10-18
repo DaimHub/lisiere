@@ -59,12 +59,17 @@ struct SessionSnapshot: Codable, Equatable, Sendable {
     /// Profile sessions retained behind another profile in the same physical window.
     var parkedWindows: [WindowSession] = []
 
-    private enum CodingKeys: String, CodingKey { case windows, closedWindows, parkedWindows }
+    var version = 1
+    private enum CodingKeys: String, CodingKey { case version, windows, closedWindows, parkedWindows }
     init(windows: [WindowSession] = [], closedWindows: [WindowSession] = [], parkedWindows: [WindowSession] = []) {
         self.windows = windows; self.closedWindows = closedWindows; self.parkedWindows = parkedWindows
     }
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        guard version == 1, values.contains(.windows) || values.contains(.closedWindows) || values.contains(.parkedWindows) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unsupported session format"))
+        }
         windows = try values.decodeIfPresent([WindowSession].self, forKey: .windows) ?? []
         closedWindows = try values.decodeIfPresent([WindowSession].self, forKey: .closedWindows) ?? []
         parkedWindows = try values.decodeIfPresent([WindowSession].self, forKey: .parkedWindows) ?? []
@@ -81,6 +86,7 @@ final class SessionStore {
     /// What History ▸ Reopen All Windows from Last Session opens.
     private(set) var reopenableWindows: [WindowSession]
     @ObservationIgnored private let file: StoreFile?
+    @ObservationIgnored private var terminationObservation: NotificationObservation?
     @ObservationIgnored private var browsers: [WeakBrowser] = []
     /// Saved windows waiting for a window to restore them into.
     @ObservationIgnored private var pendingWindows: [WindowSession]
@@ -107,21 +113,26 @@ final class SessionStore {
     init(file: StoreFile? = .applicationSupport(named: "Session.plist"), restoresWindows: Bool = true) {
         self.file = file
         // Read right away, since the first window restores the session as soon as it appears.
-        let saved = file?.readNow().flatMap { try? PropertyListDecoder().decode(SessionSnapshot.self, from: $0) }
+        let saved = file?.decodeNow(SessionSnapshot.self)
             ?? SessionSnapshot()
         pendingWindows = restoresWindows ? saved.windows : []
         parkedWindows = restoresWindows ? saved.parkedWindows : []
         reopenableWindows = !restoresWindows && !saved.windows.isEmpty ? saved.windows
             : saved.windows.isEmpty ? saved.closedWindows : []
         if !restoresWindows { reopenableWindows += saved.parkedWindows }
-        _ = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
-                                                   queue: .main) { [weak self] _ in
+        terminationObservation = NotificationObservation(name: NSApplication.willTerminateNotification) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveBeforeQuitting() }
         }
     }
 
     private var openBrowsers: [BrowserModel] {
         browsers.compactMap(\.browser)
+    }
+
+    var storageURL: URL? { file?.url }
+
+    func retrySave() {
+        file?.writeNow(try? PropertyListEncoder.binary.encode(snapshot))
     }
 
     var hasPendingWindows: Bool { !pendingWindows.isEmpty }

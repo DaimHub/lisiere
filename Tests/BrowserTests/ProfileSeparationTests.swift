@@ -98,19 +98,20 @@ final class ProfileSeparationTests: XCTestCase {
     }
 
     func testLegacyPasswordWithoutSecurityDomainRemainsReadable() async throws {
+        let namespace = "io.github.daimhub.lisiere.tests.\(UUID())"
         let account = SavedPassword(origin: PasswordOrigin(host: "legacy-\(UUID()).invalid")!, username: "fixture")
         let query: [String: Any] = [kSecClass as String: kSecClassInternetPassword,
             kSecAttrProtocol as String: kSecAttrProtocolHTTPS,
-            kSecAttrDescription as String: "io.github.daimhub.lisiere website password",
+            kSecAttrDescription as String: "\(namespace) website password",
             kSecAttrServer as String: account.origin.host, kSecAttrPort as String: 443,
             kSecAttrAccount as String: account.username]
         var item = query
         item[kSecValueData as String] = Data("synthetic-legacy".utf8)
         XCTAssertEqual(SecItemAdd(item as CFDictionary, nil), errSecSuccess)
         defer { SecItemDelete(query as CFDictionary) }
-        let secret6 = try await KeychainPasswordStorage().password(for: account)
+        let secret6 = try await KeychainPasswordStorage(namespace: namespace, legacyInitialDomain: true).password(for: account)
         XCTAssertEqual(secret6, "synthetic-legacy")
-        let secret7 = try await KeychainPasswordStorage(profileID: UUID()).password(for: account)
+        let secret7 = try await KeychainPasswordStorage(profileID: UUID(), namespace: namespace, legacyInitialDomain: true).password(for: account)
         XCTAssertNil(secret7)
     }
 

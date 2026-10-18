@@ -193,7 +193,7 @@ private struct FavoriteTile: View {
 private struct NewTabBackground: View {
     let accent: Color
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 15, paused: reduceMotion)) { context in

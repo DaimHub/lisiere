@@ -42,6 +42,7 @@ final class PrivacyTests: XCTestCase {
         XCTAssertFalse(browser.downloads === downloads)
         XCTAssertFalse(browser.appearance === appearance)
         XCTAssertEqual(browser.appearance.selection, .dark)
+        await browser.contentBlocker.waitUntilLoaded()
         XCTAssertTrue(browser.contentBlocker.isBlocking(on: site))
         XCTAssertTrue(browser.contentBlocker.exceptions.isEmpty)
         browser.sitePermissions.setDecision(false, for: .camera, on: site)

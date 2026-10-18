@@ -1,0 +1,6 @@
+{
+  "address_query_20000_p95_ms": 100,
+  "profile_switch_p95_ms": 20,
+  "folder_toggle_mean_ms": 2,
+  "resident_growth_bytes": 67108864
+}

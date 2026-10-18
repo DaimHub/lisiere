@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -16,14 +17,29 @@ concurrency:
 jobs:
   macos:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Show toolchain
-        run: xcodebuild -version
-      - name: Test
-        run: make test
-      - name: Build, verify, and launch local Release
-        run: make smoke
+        run: |
+          mkdir -p build/validation
+          { sw_vers; xcodebuild -version; swift --version; xcodegen --version; git rev-parse HEAD; } > build/validation/toolchain.txt
+          cat build/validation/toolchain.txt
+      - name: Validate tests and protected Release
+        run: |
+          set -o pipefail
+          make validate DERIVED_DATA="$RUNNER_TEMP/Lisiere" QA_OUTPUT="$RUNNER_TEMP/Lisiere/Validation" 2>&1 | tee build/validation/validation.log
+      - name: Retain test results, diagnostics, symbols and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ github.sha }}
+          retention-days: 14
+          path: |
+            build/validation/
+            ${{ runner.temp }}/Lisiere/TestResults/
+            ${{ runner.temp }}/Lisiere/Validation/**/*.json
+            ${{ runner.temp }}/Lisiere/Validation/**/*.log
+            ${{ runner.temp }}/Lisiere/Build/Products/Release/*.dSYM

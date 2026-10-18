@@ -6,7 +6,7 @@ struct DownloadsButton: View {
     let downloads: DownloadManager
     var controlSize: CGFloat = 34
     @State private var isShowingList = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.browserReduceMotion) private var reduceMotion
 
     var body: some View {
         Button { isShowingList.toggle() } label: {

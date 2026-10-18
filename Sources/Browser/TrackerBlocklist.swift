@@ -10,7 +10,7 @@ import Foundation
 /// affiliate and app links that a click goes through.
 enum TrackerBlocklist {
     /// Bump when the list or the rules made from it change, so the cached compiled list is replaced.
-    static let version = 1
+    static let version = 2
 
     /// Blocked along with their subdomains.
     static let domains: [String] = [
@@ -203,7 +203,8 @@ enum TrackerBlocklist {
     /// Tracking scripts and pixels served from addresses that also serve things pages need, as `url-filter`
     /// patterns.
     static let urlFilters: [String] = [
-        #"^[^:]+://+([^:/]+\.)?facebook\.com/tr([/?]|$)"#,
+        #"^[^:]+://+([^:/]+\.)?facebook\.com/tr$"#,
+        #"^[^:]+://+([^:/]+\.)?facebook\.com/tr[/?]"#,
         #"^[^:]+://+([^:/]+\.)?facebook\.net/.*/fbevents\.js"#,
         #"^[^:]+://+([^:/]+\.)?facebook\.net/signals/"#,
         #"^[^:]+://+([^:/]+\.)?redditstatic\.com/ads/"#,

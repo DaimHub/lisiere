@@ -76,19 +76,23 @@ enum PasswordStorageError: Error {
 @KeychainActor
 final class KeychainPasswordStorage: PasswordStorage {
     /// Marks the items this app saves, so it never lists or reads another app's.
-    private static let itemDescription = "io.github.daimhub.lisiere website password"
+    private let itemDescription: String
     private let securityDomain: String
 
-    nonisolated init(profileID: UUID? = nil) {
+    nonisolated init(profileID: UUID? = nil,
+                     namespace: String = Bundle.main.bundleIdentifier ?? "io.github.daimhub.lisiere",
+                     legacyInitialDomain: Bool = Bundle.main.bundleIdentifier == "io.github.daimhub.lisiere") {
         // Security domain participates in Keychain's unique key; description alone does not.
-        securityDomain = profileID.map { "io.github.daimhub.lisiere.profile.\($0)" } ?? ""
+        itemDescription = "\(namespace) website password"
+        securityDomain = profileID.map { "\(namespace).profile.\($0)" }
+            ?? (legacyInitialDomain ? "" : "\(namespace).initial")
     }
 
     private func query(for origin: PasswordOrigin? = nil, username: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrProtocol as String: kSecAttrProtocolHTTPS,
-            kSecAttrDescription as String: Self.itemDescription,
+            kSecAttrDescription as String: itemDescription,
             kSecAttrSecurityDomain as String: securityDomain,
         ]
         if let origin {

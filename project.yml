@@ -46,7 +46,8 @@ targetTemplates:
         # Keep the upstream Swift module and source paths to simplify future merges.
         PRODUCT_MODULE_NAME: Browser
         ASSETCATALOG_COMPILER_APPICON_NAME: Lisiere
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere
+        BROWSER_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere
+        PRODUCT_BUNDLE_IDENTIFIER: $(BROWSER_BUNDLE_IDENTIFIER)
         # XcodeGen writes the complete plist below; preserve its Unicode product name.
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_APP_SANDBOX: YES
@@ -134,7 +135,8 @@ targets:
       - target: Lisiere
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere.tests
+        BROWSER_BUNDLE_IDENTIFIER: io.github.daimhub.lisiere
+        PRODUCT_BUNDLE_IDENTIFIER: $(BROWSER_BUNDLE_IDENTIFIER).tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   Lisiere:

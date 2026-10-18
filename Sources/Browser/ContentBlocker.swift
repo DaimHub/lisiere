@@ -13,6 +13,9 @@ final class ContentBlocker {
     private static let signatureKey = "trackerRuleListSignature"
     private let identifier: String
 
+    enum State: Equatable { case unavailable, loading, ready, failed }
+    private(set) var state = State.unavailable
+    @ObservationIgnored private let ruleSource: @Sendable ([String]) -> String
     private(set) var isEnabled: Bool
     /// Sites where blocking is off, along with their subdomains. Stored without "www.".
     private(set) var exceptions: [String]
@@ -21,9 +24,12 @@ final class ContentBlocker {
     @ObservationIgnored private var ruleList: WKContentRuleList?
     @ObservationIgnored private let controllers = NSHashTable<WKUserContentController>.weakObjects()
     @ObservationIgnored private var loading: Task<Void, Never>?
+    @ObservationIgnored private var loadRevision = 0
 
     /// Pass `nil` defaults to keep the settings in memory only, and a `nil` store to never block anything.
-    init(defaults: UserDefaults? = nil, store: WKContentRuleListStore? = nil, identifier: String = "Trackers") {
+    init(defaults: UserDefaults? = nil, store: WKContentRuleListStore? = nil, identifier: String = "Trackers",
+         ruleSource: @escaping @Sendable ([String]) -> String = { TrackerBlocklist.encodedRules(exceptions: $0) }) {
+        self.ruleSource = ruleSource
         self.identifier = identifier
         self.defaults = defaults
         self.store = store
@@ -33,8 +39,11 @@ final class ContentBlocker {
     }
 
     func removeCompiledRules() async {
-        await loading?.value
+        await waitUntilLoaded()
         if let store { try? await store.removeContentRuleList(forIdentifier: identifier) }
+        ruleList = nil
+        state = .unavailable
+        controllers.allObjects.forEach(apply)
     }
 
     /// Blocks trackers in a web view's pages from now on, and whenever the rule list changes.
@@ -51,8 +60,28 @@ final class ContentBlocker {
 
     /// Whether pages from the host have their trackers blocked.
     func isBlocking(on host: String?) -> Bool {
-        isEnabled && exception(covering: host) == nil
+        isEnabled && state == .ready && exception(covering: host) == nil
     }
+
+    func wantsBlocking(on host: String?) -> Bool { isEnabled && exception(covering: host) == nil }
+
+    func statusText(on host: String) -> String {
+        guard wantsBlocking(on: host) else { return "Tracker blocking is off for \(Self.site(host))" }
+        switch state {
+        case .ready: return "Trackers are blocked on \(Self.site(host))"
+        case .loading: return "Tracker protection is loading"
+        case .unavailable, .failed: return "Tracker protection is unavailable"
+        }
+    }
+
+    func waitUntilLoaded() async {
+        while let task = loading {
+            let revision = loadRevision
+            await task.value
+            if revision == loadRevision { return }
+        }
+    }
+    func retry() async { await loadRuleList().value }
 
     func exception(covering host: String?) -> String? {
         guard let host = host.map(Self.site) else { return nil }
@@ -99,39 +128,58 @@ final class ContentBlocker {
     /// Loads one rule list at a time, each for the exceptions as they are when it starts.
     @discardableResult
     private func loadRuleList() -> Task<Void, Never> {
+        loadRevision += 1
+        let revision = loadRevision
+        state = store == nil ? .unavailable : .loading
         let previous = loading
         let task = Task { [weak self] in
             await previous?.value
-            await self?.loadLatestRuleList()
+            await self?.loadLatestRuleList(revision: revision)
         }
         loading = task
         return task
     }
 
-    private func loadLatestRuleList() async {
-        guard let store else { return }
+    private func loadLatestRuleList(revision: Int) async {
+        guard revision == loadRevision, let store else { return }
         let exceptions = exceptions
         let signature = Self.signature(exceptions: exceptions)
-        if ruleList != nil, defaults?.string(forKey: Self.signatureKey) == signature { return }
+        if ruleList != nil, defaults?.string(forKey: Self.signatureKey) == signature { state = .ready; return }
         if defaults?.string(forKey: Self.signatureKey) == signature,
            let list = try? await store.contentRuleList(forIdentifier: identifier) {
+            guard revision == loadRevision else { return }
             install(list)
             return
         }
-        let encoded = await Self.encodedRules(exceptions: exceptions)
-        guard let list = try? await store.compileContentRuleList(forIdentifier: identifier,
-                                                                 encodedContentRuleList: encoded) else { return }
+        let encoded = await Self.encodedRules(exceptions: exceptions, source: ruleSource)
+        let list: WKContentRuleList
+        do {
+            guard let compiled = try await store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: encoded) else {
+                guard revision == loadRevision else { return }
+                state = .failed
+                BrowserDiagnostics.webKit.error("Tracker rules compilation returned no list")
+                return
+            }
+            list = compiled
+        } catch {
+            guard revision == loadRevision else { return }
+            state = .failed
+            BrowserDiagnostics.webKit.error("Tracker rules failed to compile, code \((error as NSError).code)")
+            return
+        }
+        guard revision == loadRevision else { return }
         defaults?.set(signature, forKey: Self.signatureKey)
         install(list)
     }
 
     @concurrent
-    nonisolated private static func encodedRules(exceptions: [String]) async -> String {
-        TrackerBlocklist.encodedRules(exceptions: exceptions)
+    nonisolated private static func encodedRules(exceptions: [String], source: @Sendable ([String]) -> String) async -> String {
+        source(exceptions)
     }
 
     private func install(_ list: WKContentRuleList) {
         ruleList = list
+        state = .ready
         controllers.allObjects.forEach(apply)
     }
 

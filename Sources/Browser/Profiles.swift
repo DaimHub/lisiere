@@ -129,6 +129,16 @@ final class ProfileContext {
                             contentBlocker: contentBlocker, favicons: favicons)
     }
 
+    var persistenceFailure: StoreFile.Failure? {
+        PersistenceStatus.shared.firstFailure(for: files.map(\.url) + [session.storageURL].compactMap { $0 })
+            ?? bookmarks.persistenceFailure
+    }
+
+    func retryPersistence() {
+        history.saveNow()
+        session.retrySave()
+    }
+
     func prepareForDeletion() {
         files.forEach { $0.disableWrites() }
         session.disableWrites()

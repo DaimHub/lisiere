@@ -16,7 +16,10 @@ Build commands use the netrc package authorization provider for public dependenc
 
 Ad hoc signatures have no Apple Team ID. As described in [Sparkle's integration guide](https://sparkle-project.org/documentation/), library validation otherwise rejects its framework at launch. `make build` sets the app-specific `BROWSER_ENTITLEMENTS` setting to `Config/Browser-Local.entitlements` only for the local build, retaining the app sandbox and other hardened-runtime protections. Developer ID archives keep `Config/Browser.entitlements`, with library validation enabled. Do not copy the local override into the release workflow.
 
-`make smoke` starts the local app for five seconds and fails if it exits, then terminates only the process it started. This catches dyld failures; it does not replace visual or browsing checks.
+`make smoke` validates the protected Release through an isolated QA copy, with a separate bundle, container,
+preferences and keychain namespace. It runs loopback browsing and restart journeys with Reduce Motion both off
+and on. It never starts the personal bundle or changes the system accessibility setting. Reports, logs and
+executable provenance stay in `$(DERIVED_DATA)/Validation`. See [industrialisation](INDUSTRIALISATION.md).
 
 The `Browser` Swift module and source directories retain their upstream names. Branding belongs in project.yml and visible strings; wholesale symbol renaming would make upstream merges harder.
 
@@ -25,12 +28,15 @@ Build output defaults to `~/Library/Developer/Xcode/DerivedData/Lisiere`, outsid
 ## Daily workflow
 
 ```sh
-git switch -c feature/short-description
-make test
-make build
+git switch -c codex/short-description
+make validate
 ```
 
 Launch the Release app and verify changed behavior before committing. Generated projects and build output are ignored.
+
+Use `python3 scripts/validate-release.py /absolute/path/Lisiere.app --output /absolute/new/qa-directory --prepare-only`
+for native manual inspection without opening personal data. XcodeGen must match `.xcodegen-version`; toolchain
+upgrades require reviewing regenerated output and rerunning the same gates.
 
 ## Password save prompts
 
