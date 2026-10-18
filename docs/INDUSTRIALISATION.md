@@ -44,7 +44,7 @@ binary SHA-256, source commit, dirty flag, OS and Xcode version. The same compil
 the local library-validation exception already required by ad hoc Sparkle builds. This is not a Developer ID
 distribution validation.
 
-The acceptance driver is gated by both that QA namespace and an explicit command-line flag. Normal bundles
+The acceptance driver is gated by both that QA namespace and explicit process environment variables. Normal bundles
 ignore it. Its server binds only to loopback. Downloaded fixtures stay inside the QA container. App defaults,
 Keychain descriptions and security domains are isolated; production keeps its legacy Keychain domain.
 QA bundles and synthetic containers are retained for inspection and are never installed over `/Applications`.

@@ -19,7 +19,7 @@ struct ReleaseValidationAccessibility: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     func body(content: Content) -> some View {
         content.environment(\.browserReduceMotion, ReleaseValidation.isQA
-                            ? ProcessInfo.processInfo.arguments.contains("--qa-reduce-motion") : systemReduceMotion)
+                            ? ProcessInfo.processInfo.environment["LISIERE_QA_REDUCE_MOTION"] == "1" : systemReduceMotion)
     }
 }
 
@@ -43,11 +43,11 @@ enum ReleaseValidation {
     private static var root: URL { StoreFile.applicationSupport(named: "Validation").url }
 
     static func start(profiles: ProfileStore, owner: ProfileWindowController, reduceMotion: Bool) {
-        let args = ProcessInfo.processInfo.arguments
-        guard isQA, !started, let flag = args.firstIndex(of: "--release-validation"), args.count > flag + 2 else { return }
+        let environment = ProcessInfo.processInfo.environment
+        guard isQA, !started, let phase = environment["LISIERE_QA_VALIDATION"],
+              let baseString = environment["LISIERE_QA_BASE_URL"] else { return }
         started = true
-        let phase = args[flag + 1]
-        guard let base = URL(string: args[flag + 2]), base.host() == "127.0.0.1", base.scheme == "http" else { exit(2) }
+        guard let base = URL(string: baseString), base.host() == "127.0.0.1", base.scheme == "http" else { exit(2) }
         Task {
             do {
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -55,7 +55,7 @@ enum ReleaseValidation {
                 metrics["native_window_ms"] = (CFAbsoluteTimeGetCurrent() - launchTime) * 1000
                 owner.window?.makeKeyAndOrderFront(nil)
                 NSApp.activate()
-                try check(reduceMotion == args.contains("--qa-reduce-motion"), "reduce-motion-environment")
+                try check(reduceMotion == (environment["LISIERE_QA_REDUCE_MOTION"] == "1"), "reduce-motion-environment")
                 if phase == "journey" { try await journey(profiles, owner, base) }
                 else if phase == "restore" { try await restore(profiles, owner, base) }
                 else { throw Failure(check: "unknown-phase") }
@@ -298,7 +298,7 @@ enum ReleaseValidation {
 
     private static func report(phase: String, success: Bool, failure: String? = nil) throws {
         var report: [String: Any] = ["phase": phase, "success": success, "checks": checks, "metrics": metrics,
-                                   "reduce_motion": ProcessInfo.processInfo.arguments.contains("--qa-reduce-motion"),
+                                   "reduce_motion": ProcessInfo.processInfo.environment["LISIERE_QA_REDUCE_MOTION"] == "1",
                                    "bundle": Bundle.main.bundleIdentifier!, "os": ProcessInfo.processInfo.operatingSystemVersionString]
         if let failure { report["failure"] = failure }
         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])

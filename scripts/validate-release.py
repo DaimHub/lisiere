@@ -166,13 +166,13 @@ def main():
         for phase in ["journey", "restore"]:
             start = time.monotonic()
             with (args.output / f"{phase}.log").open("w") as log:
-                # Launch Services delivers the initial open event that creates SwiftUI's first window.
-                # A raw executable can remain idle indefinitely without that event.
-                command = ["open", "-n", "-W", "--stdout", str((args.output / f"{phase}.log").resolve()),
-                           "--stderr", str((args.output / f"{phase}.log").resolve()), "-a", str(app), "--args", "--release-validation", phase,
-                           f"http://127.0.0.1:{server.server_port}"]
+                # Launch without positional arguments: AppKit can treat them as document requests
+                # and suppress SwiftUI's first untitled window. QA receives its inputs in the environment.
+                command = ["open", "-W", "--stdout", str((args.output / f"{phase}.log").resolve()),
+                           "--stderr", str((args.output / f"{phase}.log").resolve()), "-a", str(app), "--env", f"LISIERE_QA_VALIDATION={phase}",
+                           "--env", f"LISIERE_QA_BASE_URL=http://127.0.0.1:{server.server_port}"]
                 if args.reduce_motion:
-                    command.append("--qa-reduce-motion")
+                    command.extend(["--env", "LISIERE_QA_REDUCE_MOTION=1"])
                 process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
                 try:
                     code = process.wait(timeout=180)
