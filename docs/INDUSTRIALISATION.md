@@ -55,6 +55,12 @@ and repeated tab creation/destruction. A separate process checks tabs, folders, 
 cookies, local storage, profile isolation, deletion and durable history clearing. The entire journey repeats
 with an app-local Reduce Motion environment, leaving the user's system preference unchanged.
 
+Before the restart, QA checks that its synthetic cookie is non-session, unexpired and present in WebKit's
+cookie store, then waits up to 45 seconds for its marker in that QA container's macOS cookie file. This replaces
+a fixed one-second sleep with an observed persistence precondition. It does not force a flush, copy cookies or
+recreate them after restart. The new process must still read the original cookie through the page. The check is
+specific to macOS CFNetwork's current binary cookie format and fails closed if that format changes.
+
 XCTest additionally covers deliberate WebKit process termination and recovery, permissions, password decisions,
 private state, profile deletion, and native geometry. Its test host deliberately disables sandbox/hardening for
 XCTest injection and enables testability, in both configurations. Only the subsequent `make build` and acceptance

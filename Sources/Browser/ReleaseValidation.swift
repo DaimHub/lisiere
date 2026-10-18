@@ -74,8 +74,8 @@ enum ReleaseValidation {
         BrowserDiagnostics.lifecycle.info("Release validation passed: \(name, privacy: .public)")
         FileHandle.standardError.write(Data("QA passed: \(name)\n".utf8))
     }
-    private static func wait(_ name: String, _ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(15)
+    private static func wait(_ name: String, timeout: Duration = .seconds(15), _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + timeout
         while !condition() {
             guard ContinuousClock.now < deadline else { throw Failure(check: name + "-timeout") }
             try await Task.sleep(for: .milliseconds(25))
@@ -195,8 +195,23 @@ enum ReleaseValidation {
         }
         UserDefaults.standard.set(second.id.uuidString, forKey: "qaSecondProfile")
         UserDefaults.standard.synchronize()
-        // Let WebKit commit its own databases before the separate process verifies them.
-        try await Task.sleep(for: .seconds(1))
+        // A fixed sleep does not establish that WebKit committed its asynchronous cookie writes.
+        // Observe only this fresh QA container's synthetic cookie; never flush, copy or reseed it.
+        let cookies = await context.browsingData.dataStore.httpCookieStore.allCookies()
+        try check(cookies.contains { $0.name == "qa" && $0.value == "first"
+            && $0.domain == "127.0.0.1" && !$0.isSessionOnly && ($0.expiresDate ?? .distantPast) > .now },
+                  "persistent-cookie-created")
+        let cookieFile = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appending(path: "Cookies/Cookies.binarycookies")
+        // macOS CFNetwork stores the fixture's domain/name/path/value as NUL-terminated strings.
+        // An unknown storage format fails this precondition instead of passing an unverified restart.
+        let marker = Data("127.0.0.1\0qa\0/\0first\0".utf8)
+        let cookieStart = CFAbsoluteTimeGetCurrent()
+        try await wait("persistent-cookie-durable", timeout: .seconds(45)) {
+            (try? Data(contentsOf: cookieFile).range(of: marker)) != nil
+        }
+        metrics["cookie_persistence_wait_ms"] = (CFAbsoluteTimeGetCurrent() - cookieStart) * 1000
+        try check(true, "persistent-cookie-durable")
     }
 
     private static func restore(_ profiles: ProfileStore, _ owner: ProfileWindowController, _ base: URL) async throws {
