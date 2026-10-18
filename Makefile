@@ -26,6 +26,7 @@ test: generate
 		ENABLE_APP_SANDBOX=NO ENABLE_HARDENED_RUNTIME=NO ENABLE_TESTABILITY=YES \
 		BROWSER_BUNDLE_IDENTIFIER=io.github.daimhub.lisiere.testhost \
 		-resultBundlePath "$(RESULT_BUNDLE)" $(TEST_ARGUMENTS) test
+	python3 scripts/check-test-results.py "$(RESULT_BUNDLE)"
 
 verify: build
 	codesign --verify --deep --strict "$(DERIVED_DATA)/Build/Products/Release/Lisiere.app"

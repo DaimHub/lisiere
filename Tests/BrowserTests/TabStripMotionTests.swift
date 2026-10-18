@@ -55,7 +55,6 @@ final class TabStripMotionTests: XCTestCase {
     }
 
     func testRapidDisclosureReversalsKeepIntermediateGeometryAndTabIdentity() async throws {
-        try XCTSkipIf(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "Motion is disabled by the system")
         for layout in [TabLayout.vertical, .horizontal] {
             for pinned in [false, true] {
                 let fixture = try MotionFixture(layout: layout, pinned: pinned)
@@ -97,7 +96,6 @@ final class TabStripMotionTests: XCTestCase {
     }
 
     func testSpringLoadedDragUsesAnimatedBoundsAcrossExitReentryAndDrop() async throws {
-        try XCTSkipIf(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "Motion is disabled by the system")
         for layout in [TabLayout.vertical, .horizontal] {
             for pinned in [false, true] {
                 let fixture = try MotionFixture(layout: layout, pinned: pinned)
@@ -203,7 +201,10 @@ private final class MotionFixture {
         // the newly opened window must not schedule a competing delayed preview.
         window.ignoresMouseEvents = true
         window.setFrameOrigin(CGPoint(x: -4000, y: -4000))
-        window.contentView = NSHostingView(rootView: strip)
+        // Exercise intermediate geometry even when the runner has Reduce Motion enabled.
+        // Scope the app's motion override to this fixture; leave macOS preferences unchanged.
+        window.contentView = NSHostingView(rootView: strip
+            .environment(\.browserReduceMotion, false))
         window.orderFront(nil)
     }
 

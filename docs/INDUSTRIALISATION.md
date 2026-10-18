@@ -60,6 +60,13 @@ private state, profile deletion, and native geometry. Its test host deliberately
 XCTest injection and enables testability, in both configurations. Only the subsequent `make build` and acceptance
 copies are production-protected. Hosted Release tests must never be mistaken for the shipping app validation.
 
+The native animation fixtures explicitly enable motion in their own SwiftUI environment, even if the CI runner
+has Reduce Motion enabled. Their intermediate-position, reversal, drag-target and tab-identity assertions still
+run in both Debug and Release. The protected Release journey separately exercises reduced motion. No test changes
+the user's system accessibility preference. After every `make test`, the xcresult summary must report a nonempty
+run with every test passed: skipped tests, expected failures, missing counts or inconsistent results fail the gate.
+The machine-readable summary is retained alongside its xcresult bundle.
+
 ## Performance protocol
 
 `journey.json` records time to the first native window, 20,000-page address-index construction, the 95th percentile
