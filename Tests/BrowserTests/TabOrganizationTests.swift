@@ -88,6 +88,50 @@ final class TabOrganizationTests: XCTestCase {
         XCTAssertEqual(browser.tabs.count, 1)
     }
 
+    func testFolderInsertionPreservesMixedPinsSplitPagesMetadataAndSessionOrder() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        for _ in 0..<5 { browser.addTab() }
+        let tabs = browser.tabs
+        let views = tabs.map(\.webView)
+        let first = browser.createGroup(name: "First", color: .purple, tabID: tabs[0].id)
+        let second = browser.createGroup(name: "Second", color: .green, tabID: tabs[1].id)
+        let empty = browser.createGroup(name: "Empty", color: .orange)
+        browser.assignTab(tabs[2].id, to: first)
+        browser.assignTab(tabs[3].id, to: first)
+        browser.assignTab(tabs[4].id, to: second)
+        browser.setPinned(true, for: tabs[0].id)
+        browser.setPinned(true, for: tabs[1].id)
+        browser.activeTabID = tabs[2].id
+        browser.startSplitView(with: tabs[3].id)
+        browser.toggleGroupCollapsed(first)
+        let active = browser.activeTabID
+        let split = browser.splitTabIDs
+        let metadata = Dictionary(uniqueKeysWithValues: browser.groups.map { ($0.id, $0) })
+        let memberships = tabs.map(\.groupID)
+        browser.moveGroup(first, beside: empty, after: true)
+        XCTAssertEqual(browser.groups.map(\.id), [second, empty, first])
+        XCTAssertEqual(browser.tabs.map(\.id), [tabs[1].id, tabs[0].id, tabs[4].id, tabs[2].id, tabs[3].id, tabs[5].id])
+        XCTAssertEqual(browser.tabSections.filter(\.isPinned).compactMap { $0.group?.id }, [second, first])
+        XCTAssertEqual(browser.tabSections.filter { !$0.isPinned }.compactMap { $0.group?.id }, [second, empty, first])
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: browser.groups.map { ($0.id, $0) }), metadata)
+        XCTAssertEqual(tabs.map(\.groupID), memberships)
+        XCTAssertEqual(tabs.map(\.webView), views)
+        XCTAssertEqual(browser.activeTabID, active)
+        XCTAssertEqual(browser.splitTabIDs, split)
+        XCTAssertTrue(browser.isSplitView)
+        let session = browser.windowSession()
+        let restored = try PropertyListDecoder().decode(WindowSession.self, from: PropertyListEncoder().encode(session))
+        XCTAssertEqual(restored.groups, browser.groups)
+        XCTAssertEqual(restored.tabs.map(\.groupID), browser.tabs.map(\.groupID))
+        browser.moveGroup(first, beside: second, after: false)
+        XCTAssertEqual(browser.groups.map(\.id), [first, second, empty])
+        browser.moveGroup(first, beside: first, after: true)
+        browser.moveGroup(UUID(), beside: second, after: true)
+        browser.moveGroup(first, beside: UUID(), after: true)
+        XCTAssertEqual(browser.groups.map(\.id), [first, second, empty])
+    }
+
     func testGroupsPartitionPinsWithoutReplacingViewsOrSelection() throws {
         let browser = BrowserModel.makePrivate()
         defer { browser.releaseClosedWindow() }

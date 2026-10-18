@@ -5,6 +5,12 @@ import SwiftUI
 enum TabDropTarget: Equatable {
     case tab(UUID)
     case group(UUID?)
+    case groupOrder(UUID)
+}
+
+private enum TabDragSource: Equatable {
+    case tab(UUID)
+    case group(UUID)
 }
 
 struct TabDropRegion: Equatable {
@@ -41,7 +47,16 @@ struct TabDragScrollRequest: Equatable {
 @MainActor @Observable
 final class TabDragController {
     static let coordinateSpace = "browser-tab-strip-drag"
-    private(set) var sourceID: UUID?
+    private var source: TabDragSource?
+    var sourceID: UUID? {
+        if case let .tab(id) = source { return id }
+        return nil
+    }
+    var sourceGroupID: UUID? {
+        if case let .group(id) = source { return id }
+        return nil
+    }
+    var isDragging: Bool { source != nil }
     private(set) var location: CGPoint?
     private(set) var selection: TabDropSelection?
     private(set) var scrollRequest: TabDragScrollRequest?
@@ -52,13 +67,25 @@ final class TabDragController {
 
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
-        if let sourceID, let location { update(id: sourceID, location: location, browser: browser) }
+        if let source, let location { update(source: source, location: location, browser: browser) }
     }
 
     func update(id: UUID, location: CGPoint, browser: BrowserModel) {
-        guard !cancelled, browser.tab(withID: id) != nil else { return }
-        if sourceID == nil {
-            sourceID = id
+        update(source: .tab(id), location: location, browser: browser)
+    }
+
+    func updateGroup(id: UUID, location: CGPoint, browser: BrowserModel) {
+        update(source: .group(id), location: location, browser: browser)
+    }
+
+    private func update(source: TabDragSource, location: CGPoint, browser: BrowserModel) {
+        guard !cancelled else { return }
+        switch source {
+        case let .tab(id): guard browser.tab(withID: id) != nil else { return }
+        case let .group(id): guard browser.groups.contains(where: { $0.id == id }) else { return }
+        }
+        if self.source == nil {
+            self.source = source
             origin = browser
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak browser] event in
                 guard event.keyCode == 53, event.window === browser?.window else { return event }
@@ -66,16 +93,21 @@ final class TabDragController {
                 return nil
             }
         }
-        guard sourceID == id, origin === browser else { return }
+        guard self.source == source, origin === browser else { return }
         self.location = location
-        selection = destination(at: location, sourceID: id, browser: browser)
+        selection = destination(at: location, source: source, browser: browser)
         scrollRequest = scrolling(at: location)
     }
 
     /// Pick the most specific visible target first, then validate it. An invalid tab must not fall through
     /// to the ungrouped background, and clipped rows must not receive a drop in another scroll area.
-    private func destination(at point: CGPoint, sourceID: UUID, browser: BrowserModel) -> TabDropSelection? {
+    private func destination(at point: CGPoint, source: TabDragSource, browser: BrowserModel) -> TabDropSelection? {
         let region = frames.regions.filter { region in
+            // Folder moves target whole sections; tab moves still target cards and membership headers.
+            switch (source, region.target) {
+            case (.group, .groupOrder), (.tab, .tab), (.tab, .group): break
+            default: return false
+            }
             let visible = region.viewport.flatMap { frames.viewports[$0] }.map { region.frame.intersection($0) } ?? region.frame
             return visible.contains(point)
         }.max { a, b in
@@ -83,22 +115,37 @@ final class TabDragController {
             return a.frame.width * a.frame.height > b.frame.width * b.frame.height
         }
         guard let region else { return nil }
-        switch region.target {
-        case let .tab(id): guard browser.canDropTab(sourceID, beside: id) else { return nil }
-        case let .group(id): guard id == nil || browser.groups.contains(where: { $0.id == id }) else { return nil }
+        switch (source, region.target) {
+        case let (.tab(sourceID), .tab(id)):
+            guard browser.canDropTab(sourceID, beside: id) else { return nil }
+        case let (.tab, .group(id)):
+            guard id == nil || browser.groups.contains(where: { $0.id == id }) else { return nil }
+        case let (.group(sourceID), .groupOrder(id)):
+            guard sourceID != id, browser.groups.contains(where: { $0.id == id }) else { return nil }
+        default: return nil
         }
         return TabDropSelection(region: region,
                                 after: region.horizontal ? point.x > region.frame.midX : point.y > region.frame.midY)
     }
 
     func finish(id: UUID, location: CGPoint, browser: BrowserModel) {
+        finish(source: .tab(id), location: location, browser: browser)
+    }
+
+    func finishGroup(id: UUID, location: CGPoint, browser: BrowserModel) {
+        finish(source: .group(id), location: location, browser: browser)
+    }
+
+    private func finish(source: TabDragSource, location: CGPoint, browser: BrowserModel) {
         defer { reset() }
-        guard !cancelled, origin === browser, sourceID == id else { return }
-        update(id: id, location: location, browser: browser)
+        guard !cancelled, origin === browser, self.source == source else { return }
+        update(source: source, location: location, browser: browser)
         guard let selection else { return }
-        switch selection.region.target {
-        case let .tab(target): browser.dropTab(id, beside: target, after: selection.after)
-        case let .group(group): browser.dropTab(id, into: group)
+        switch (source, selection.region.target) {
+        case let (.tab(id), .tab(target)): browser.dropTab(id, beside: target, after: selection.after)
+        case let (.tab(id), .group(group)): browser.dropTab(id, into: group)
+        case let (.group(id), .groupOrder(target)): browser.moveGroup(id, beside: target, after: selection.after)
+        default: break
         }
     }
 
@@ -111,7 +158,7 @@ final class TabDragController {
     func reset() {
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
-        sourceID = nil
+        source = nil
         location = nil
         selection = nil
         scrollRequest = nil
@@ -137,7 +184,10 @@ final class TabDragController {
         let edge = request.horizontal
             ? (request.forward ? viewport.maxX : viewport.minX)
             : (request.forward ? viewport.maxY : viewport.minY)
-        let candidates = frames.regions.filter { $0.viewport == request.viewport && $0.priority > 0 }
+        let candidates = frames.regions.filter {
+            if case .groupOrder = $0.target { return false }
+            return $0.viewport == request.viewport && $0.priority > 0
+        }
         let next = candidates.filter { region in
             let value = request.horizontal
                 ? (request.forward ? region.frame.maxX : region.frame.minX)
@@ -203,7 +253,7 @@ extension View {
                 switch target {
                 case .group:
                     RoundedRectangle(cornerRadius: 7).strokeBorder(accent, lineWidth: 2).allowsHitTesting(false)
-                case .tab:
+                case .tab, .groupOrder:
                     Rectangle().fill(accent)
                         .frame(width: horizontal ? 2 : nil, height: horizontal ? nil : 2)
                         .frame(maxWidth: .infinity, maxHeight: .infinity,
@@ -211,6 +261,18 @@ extension View {
                         .allowsHitTesting(false)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    func tabGroupDropRegion(_ sectionID: String, groupID: UUID?, horizontal: Bool, viewport: String,
+                            drag: TabDragController, accent: Color) -> some View {
+        if let groupID {
+            self.opacity(drag.sourceGroupID == groupID ? 0.4 : 1)
+                .tabDropRegion("group-order-" + sectionID, target: .groupOrder(groupID), horizontal: horizontal,
+                               viewport: viewport, drag: drag, accent: accent)
+        } else {
+            self
         }
     }
 

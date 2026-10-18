@@ -3,6 +3,88 @@ import XCTest
 
 @MainActor
 final class TabDragTests: XCTestCase {
+    func testFolderDragUsesSectionBoundsAndLayoutAxisAndCommitsOnlyOnRelease() throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let first = browser.createGroup(name: "First", color: .blue)
+            let second = browser.createGroup(name: "Second", color: .green)
+            let third = browser.createGroup(name: "Third", color: .purple)
+            browser.toggleGroupCollapsed(first)
+            let tab = try XCTUnwrap(browser.activeTab)
+            browser.assignTab(tab.id, to: third)
+            let frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+            // A child card must not turn a folder move into a membership edit.
+            drag.updateFrames(.init(regions: [
+                .init(id: "section", target: .groupOrder(third), frame: frame, horizontal: horizontal),
+                .init(id: "card", target: .tab(tab.id), frame: frame, horizontal: horizontal, priority: 2)
+            ]), browser: browser)
+            let point = horizontal ? CGPoint(x: 190, y: 10) : CGPoint(x: 10, y: 90)
+            drag.updateGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(drag.selection?.region.target, .groupOrder(third))
+            XCTAssertEqual(drag.selection?.after, true)
+            XCTAssertEqual(browser.groups.map(\.id), [first, second, third])
+            drag.finishGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [second, third, first])
+            XCTAssertTrue(browser.groups[2].isCollapsed)
+            XCTAssertEqual(tab.groupID, third)
+            XCTAssertFalse(drag.isDragging)
+            let before = CGPoint(x: 10, y: 10)
+            drag.updateGroup(id: first, location: before, browser: browser)
+            drag.finishGroup(id: first, location: before, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [second, first, third])
+        }
+    }
+
+    func testFolderCancellationOutsideAndSelfDropsDoNotReorderOrUngroup() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let first = browser.createGroup(name: "First", color: .blue, tabID: tab.id)
+        let second = browser.createGroup(name: "Second", color: .green)
+        let frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let point = CGPoint(x: 100, y: 90)
+        for target in [TabDropTarget.group(nil), .groupOrder(first)] {
+            drag.updateFrames(.init(regions: [.init(id: "target", target: target, frame: frame, horizontal: false)]), browser: browser)
+            drag.updateGroup(id: first, location: point, browser: browser)
+            XCTAssertNil(drag.selection)
+            drag.finishGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [first, second])
+        }
+        drag.updateFrames(.init(regions: [.init(id: "target", target: .groupOrder(second), frame: frame, horizontal: false)]), browser: browser)
+        drag.updateGroup(id: first, location: point, browser: browser)
+        drag.cancel()
+        drag.updateGroup(id: first, location: point, browser: browser)
+        drag.finishGroup(id: first, location: point, browser: browser)
+        XCTAssertEqual(browser.groups.map(\.id), [first, second])
+        drag.updateGroup(id: first, location: point, browser: browser)
+        drag.finishGroup(id: first, location: CGPoint(x: 500, y: 500), browser: browser)
+        XCTAssertEqual(browser.groups.map(\.id), [first, second])
+        XCTAssertEqual(tab.groupID, first)
+    }
+
+    func testClippedFolderSectionCannotInterceptAnotherViewport() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let first = browser.createGroup(name: "First", color: .blue)
+        let second = browser.createGroup(name: "Second", color: .green)
+        let third = browser.createGroup(name: "Third", color: .purple)
+        let frame = CGRect(x: 0, y: 100, width: 220, height: 28)
+        drag.updateFrames(.init(regions: [
+            .init(id: "hidden", target: .groupOrder(second), frame: frame, horizontal: false, viewport: "pins", priority: 2),
+            .init(id: "visible", target: .groupOrder(third), frame: frame, horizontal: false, viewport: "tabs")
+        ], viewports: ["pins": CGRect(x: 0, y: 0, width: 220, height: 50),
+                      "tabs": CGRect(x: 0, y: 80, width: 220, height: 200)]), browser: browser)
+        let point = CGPoint(x: 100, y: 125)
+        drag.updateGroup(id: first, location: point, browser: browser)
+        XCTAssertEqual(drag.selection?.region.id, "visible")
+        drag.finishGroup(id: first, location: point, browser: browser)
+        XCTAssertEqual(browser.groups.map(\.id), [second, third, first])
+    }
+
     func testPointerDropIntoFolderCommitsOnlyOnRelease() throws {
         let browser = BrowserModel.makePrivate()
         let drag = TabDragController()
@@ -12,6 +94,7 @@ final class TabDragTests: XCTestCase {
         let second = browser.createGroup(name: "Second", color: .green)
         browser.toggleGroupCollapsed(second)
         drag.updateFrames(.init(regions: [
+            .init(id: "section", target: .groupOrder(second), frame: CGRect(x: 0, y: 60, width: 220, height: 60), horizontal: false, priority: 3),
             .init(id: "folder", target: .group(second), frame: CGRect(x: 0, y: 60, width: 220, height: 28), horizontal: false)
         ]), browser: browser)
         drag.update(id: tab.id, location: CGPoint(x: 100, y: 70), browser: browser)

@@ -119,12 +119,22 @@ struct TabStrip: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                     .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
                     .position(x: point.x + 20, y: point.y + 20)
+                } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
+                          let point = drag.location {
+                    Label(group.name, browserIcon: .tabGroup)
+                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                        .foregroundStyle(group.color.tint)
+                        .padding(.horizontal, 10)
+                        .frame(width: 160, height: 32)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                        .position(x: point.x + 20, y: point.y + 20)
                 }
             }.allowsHitTesting(false)
         }
         .onChange(of: dragGestureActive) { _, active in if !active { drag.reset() } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
-            if notification.object as? NSWindow === browser.window, drag.sourceID != nil { drag.cancel() }
+            if notification.object as? NSWindow === browser.window, drag.isDragging { drag.cancel() }
         }
         .onDisappear { drag.reset() }
         .task(id: hoveredTabID) { await updateHoverCard() }
@@ -190,6 +200,8 @@ struct TabStrip: View {
                                 tabGroup(card, width: width)
                             }
                         }
+                        .tabGroupDropRegion(section.id, groupID: section.group?.id, horizontal: true,
+                                            viewport: viewport, drag: drag, accent: accent)
                     }
                 }
                 .frame(height: BrowserChrome.tabRowHeight)
@@ -265,6 +277,8 @@ struct TabStrip: View {
                                 ForEach(section.visibleCards) { card in tabGroup(card, width: nil) }
                             }
                         }
+                        .tabGroupDropRegion(section.id, groupID: section.group?.id, horizontal: false,
+                                            viewport: viewport, drag: drag, accent: accent)
                     }
                     if showsNewTab {
                         newTabButton
@@ -312,6 +326,17 @@ struct TabStrip: View {
         .accessibilityValue("\(group.isCollapsed ? "Collapsed" : "Expanded"), \(group.color.title)")
         .accessibilityIdentifier("tab-group-\(section.id)")
         .browserContextMenu { groupMenuActions(group) }
+        .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(TabDragController.coordinateSpace))
+            .updating($dragGestureActive) { _, active, _ in active = true }
+            .onChanged { value in
+                hoverCardTabID = nil
+                drag.updateGroup(id: group.id, location: value.location, browser: browser)
+            }
+            .onEnded { value in
+                withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                    drag.finishGroup(id: group.id, location: value.location, browser: browser)
+                }
+            })
         .id(section.id)
         .tabDropRegion(section.id, target: .group(group.id), horizontal: false,
                        viewport: section.isPinned ? "pins" : "tabs", drag: drag, accent: group.color.tint)
@@ -473,13 +498,13 @@ struct TabStrip: View {
             suppressedHoverCardTabID = nil
             return
         }
-        guard drag.sourceID == nil, hoveredTabID != suppressedHoverCardTabID else { return }
+        guard !drag.isDragging, hoveredTabID != suppressedHoverCardTabID else { return }
         if hoverCardTabID != nil {
             hoverCardTabID = hoveredTabID
             return
         }
         try? await Task.sleep(for: .milliseconds(550))
-        guard !Task.isCancelled, drag.sourceID == nil else { return }
+        guard !Task.isCancelled, !drag.isDragging else { return }
         hoverCardTabID = hoveredTabID
     }
 

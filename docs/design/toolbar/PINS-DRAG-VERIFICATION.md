@@ -6,10 +6,21 @@ Drop on a folder header to join it, including an empty or collapsed folder. Drop
 
 Window controls retain the previous AppKit repair: inner titlebar and outer container share the row height, frame changes schedule a coalesced repair, and full-screen windows keep AppKit's layout.
 
+## Folder ordering
+
+Drag a folder header to move the whole folder before or after another section. The insertion marker
+uses the layout axis: above/below in the sidebar, left/right in the horizontal strip. Expanded folders
+include their child cards in the target bounds. Tab membership drops and folder order drops use separate
+targets, so dragging a folder over a child never reparents its sites. The same global order applies to
+both pinned and regular sections. Empty folders remain movable; collapse, colors, names, page objects,
+selection, pin state and split pairs are preserved. Clicks still toggle collapse and the native menu
+retains its keyboard-accessible Move Group Earlier/Later commands.
+
 ## Verified
 
-- `make test`: 267 tests pass. Six controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
+- `make test`: 271 tests pass. Controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
 - Pointer gestures in the isolated signed Release actually changed the UI: horizontal pin reordering; horizontal folder entry and exit; sidebar pin reordering across rows; regular tabs entering, leaving and moving between folders; insertion before another folder's tab; dropping into a collapsed folder; moving a pin into and out of a folder while keeping it pinned. Folder counts and tab order were checked after release.
+- Folder gestures were verified in both directions and layouts, with empty, expanded and collapsed folders. The sidebar also reordered pinned folders, including one with a matching regular section. Clicking headers still toggles collapse. The shared order survives layout switches and relaunch. Four new regressions cover both axes, section/child target separation, cancellation, clipped targets, mixed pins, split pairs, stable insertion and session encoding.
 - Releasing over web content leaves the original folder unchanged. Ordinary tab selection, the Close button and native context menus remain usable.
 - The QA bundle retains sandbox and hardened runtime. Full Release signing, startup and installation checks are performed against exact bundle paths.
 - Native AppKit regressions continue to check traffic-light positioning after titlebar/button resets, alternating row heights and resizing. The automation's screen-sharing badge covers the traffic lights in screenshots, so screenshot evidence does not establish their exact position.

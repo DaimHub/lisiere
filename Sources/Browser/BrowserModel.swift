@@ -517,6 +517,18 @@ final class BrowserModel {
         normalizeTabOrder()
     }
 
+    /// Reorder a folder as one unit without changing membership, collapse state or page identity.
+    func moveGroup(_ id: UUID, beside targetID: UUID, after: Bool) {
+        guard id != targetID, let group = groups.first(where: { $0.id == id }),
+              groups.contains(where: { $0.id == targetID }) else { return }
+        var ordered = groups.filter { $0.id != id }
+        guard let target = ordered.firstIndex(where: { $0.id == targetID }) else { return }
+        ordered.insert(group, at: target + (after ? 1 : 0))
+        guard ordered != groups else { return }
+        groups = ordered
+        normalizeTabOrder()
+    }
+
     private func validGroupID(_ id: UUID?) -> UUID? {
         id.flatMap { id in groups.contains { $0.id == id } ? id : nil }
     }

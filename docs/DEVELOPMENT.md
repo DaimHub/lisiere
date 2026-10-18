@@ -208,3 +208,11 @@ restoration including cached icons. The installed application was not replaced.
 
 Automated native drag attempts did not confirm header drops; moving between groups by menu was
 verified. Physical drag-and-drop and full VoiceOver traversal remain manual validation paths.
+
+
+Follow-up validation on 2026-10-18: tab and folder moves use the window-local gesture described in
+[the drag verification notes](design/toolbar/PINS-DRAG-VERIFICATION.md). Drag a folder header before or
+after another folder to reorder its entire section in either layout; dropping over an expanded folder's
+children also positions the folder as a unit. Both pinned and ordinary sections share the persisted group
+order. Tab drops can insert into another group without changing pin state. The previous OS payload path
+and its automated-drag limitation no longer apply. Release pointer gestures are verified; 271 tests pass.
