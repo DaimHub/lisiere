@@ -232,3 +232,9 @@ Native motion regressions now host the real TabStrip and its drag controller in 
 They inspect intermediate bounds during rapid reversals and timed hover/exit/re-entry/drop sequences
 in both layouts with pinned and ordinary sites. See the motion stress section in the drag verification
 notes for the distinction between animated-layout checks and display frame pacing.
+
+The rendering follow-up separates drag feedback from changing hit-test bounds and the floating preview
+from geometry resolution. It also defers closed context menus, collects only the requested hover-card
+anchor, and reuses immutable SwiftUI icon templates without sharing mutable AppKit images. Continuous
+pointer/disclosure tests measured 13.5–21.0% lower process CPU in the local native host; this does not
+establish a display frame rate. See the verification notes for the workload and measurement limits.

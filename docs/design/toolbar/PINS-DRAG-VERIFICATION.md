@@ -132,3 +132,49 @@ Screenshot capture waits for a stable window; a
 burst attempted during a 240 ms transition returned its first image after about 1 second, so those
 images cannot establish frame-by-frame visual smoothness. The native-host tests are skipped when
 system Reduce Motion is enabled rather than changing the user's accessibility preference.
+
+## Rendering optimization follow-up
+
+Folder timing, easing, layout and spring-loading behavior remain unchanged. The rendering path now
+separates the continuously updated hit-test selection from the visual indicator (target identity and
+insertion side). Moving a target's bounds no longer invalidates every consumer of selection while its
+visual state stays the same. Crossing an animated child midpoint still changes the insertion marker,
+and release always uses the latest geometry. Unchanged pointer and scrolling values are not republished.
+Hit testing filters lazily, avoiding an intermediate candidate array for every pointer sample.
+
+The floating preview has its own SwiftUI view, separate from anchor resolution. Hover-card anchors are
+collected only for the requested preview rather than for every tab during every layout pass. Context
+menu actions are built on demand in a separate view; the native AppKit menu still reads its live factory
+when opened. SwiftUI icon templates reuse a bounded, evictable cache keyed by icon and size, preserving
+their image identity across updates. AppKit callers continue to receive independent mutable images.
+
+The continuous-motion regression hosts the real strip, moves a pointer 120 times with 8 ms pauses and
+reverses disclosure every 20 samples, then checks cancellation, tab identity, membership and selection.
+The same test was run against baseline `6ab98a5` and the optimization, in the same Debug host/configuration:
+
+| Native scenario | Baseline process CPU | Optimized process CPU | Reduction |
+| --- | ---: | ---: | ---: |
+| Sidebar, ordinary tabs | 908 ms | 785 ms | 13.5% |
+| Sidebar, pins | 912 ms | 788 ms | 13.6% |
+| Horizontal, ordinary tabs | 1053 ms | 836 ms | 20.6% |
+| Horizontal, pins | 1032 ms | 815 ms | 21.0% |
+
+These are local, single-pass process CPU measurements, including framework/background work, not a GPU
+frame-rate or hitch-duration benchmark. They show less work in the combined drag/disclosure workload;
+they do not prove elimination of the display hitches recorded above. The simpler stationary-header
+hover test did not show a consistent CPU improvement, so its timings are not presented as a gain.
+
+Additional regressions verify that 240 animated header frames leave visual observers quiet while
+hit testing stays current, child midpoints still update insertion feedback, closed menus do not build
+actions during native layout changes, hover geometry appears and disappears with the requested preview,
+and cached SwiftUI icons remain independent of mutable AppKit images. The full 290-test suite passed,
+followed by the added continuous-motion regression in all four configurations.
+
+The signed Release was checked in both layouts with 24 consecutive folder-header clicks, pin exit and
+re-entry into a collapsed folder. Folder counts, pin state and the active page remained correct. The
+folder's context menu changed from Collapse Group to Expand Group after use, confirming live action
+state. The same 24-click bursts used 2.85 s versus 2.27 s of process CPU in the sidebar and 2.98 s versus
+2.59 s horizontally. These coarse `ps` measurements include the surrounding idle/capture interval;
+automation cadence also differed (sidebar 4.55/3.78 s, horizontal 3.99/4.57 s). They support reduced
+rendering work but are not controlled frame-pacing measurements. No new Instruments hitch-count
+comparison was made, and the held physical hover cycle remains outside this automation's capabilities.

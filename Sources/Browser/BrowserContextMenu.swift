@@ -16,9 +16,8 @@ struct BrowserContextAction {
 extension View {
     @MainActor
     func browserContextMenu(excludingTop: CGFloat = 0, _ actions: @escaping () -> [BrowserContextAction]) -> some View {
-        let items = actions()
         return contextMenu {
-            BrowserMenuContent(actions: items)
+            DeferredBrowserMenuContent(actions: actions)
         }
         .overlay { BrowserContextMenuOverlay(actions: actions, excludingTop: excludingTop, primaryClick: false) }
     }
@@ -27,6 +26,13 @@ extension View {
         overlay { BrowserContextMenuOverlay(actions: actions, excludingTop: 0, primaryClick: true) }
     }
 
+}
+
+/// Build action lists when SwiftUI needs the menu, not during every tab/layout update.
+/// The AppKit overlay also calls the same factory at opening, so both paths see live state.
+private struct DeferredBrowserMenuContent: View {
+    let actions: () -> [BrowserContextAction]
+    var body: some View { BrowserMenuContent(actions: actions()) }
 }
 
 private struct BrowserContextMenuOverlay: NSViewRepresentable {

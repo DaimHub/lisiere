@@ -1,9 +1,22 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Browser
 
 @MainActor
 final class BrowserIconTests: XCTestCase {
+    func testSwiftUIIconIdentityIsStableWithoutSharingMutableAppKitImages() {
+        let small = Image(browserIcon: .tabGroup, size: 13)
+        XCTAssertEqual(small, Image(browserIcon: .tabGroup, size: 13))
+        XCTAssertNotEqual(small, Image(browserIcon: .tabGroup, size: 24))
+        XCTAssertNotEqual(small, Image(browserIcon: .forward, size: 13))
+        let mutable = BrowserIcon.tabGroup.nsImage(size: 13)
+        mutable.size = NSSize(width: 40, height: 40)
+        mutable.isTemplate = false
+        XCTAssertEqual(small, Image(browserIcon: .tabGroup, size: 13))
+        XCTAssertTrue(BrowserIcon.tabGroup.nsImage(size: 13).isTemplate)
+    }
+
     func testEveryInterfaceIconIsBundledAndRendersPixels() throws {
         for icon in BrowserIcon.allCases {
             let original = try XCTUnwrap(icon.asset.nsImage(), "Missing \(icon.asset.resourceName)")

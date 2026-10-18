@@ -126,33 +126,9 @@ struct TabStrip: View {
         .animation(folderAnimation, value: Dictionary(uniqueKeysWithValues: browser.groups.map { ($0.id, $0.isCollapsed) }))
         .coordinateSpace(name: TabDragController.coordinateSpace)
         .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
-            GeometryReader { geometry in
-                let frames = bounds.resolve(in: geometry)
-                Color.clear
-                    .onChange(of: frames, initial: true) { _, frames in drag.updateFrames(frames, browser: browser) }
-                if let id = drag.sourceID, let tab = browser.tab(withID: id), let point = drag.location {
-                    HStack(spacing: 6) {
-                        TabIcon(tab: tab, isActive: false)
-                        if !tab.isPinned { Text(tab.title).font(.system(size: 12)).lineLimit(1) }
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(width: tab.isPinned ? 44 : 160, height: 32)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-                    .position(x: point.x + 20, y: point.y + 20)
-                } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
-                          let point = drag.location {
-                    Label(group.name, browserIcon: .tabGroup)
-                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
-                        .foregroundStyle(group.color.tint)
-                        .padding(.horizontal, 10)
-                        .frame(width: 160, height: 32)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-                        .position(x: point.x + 20, y: point.y + 20)
-                }
-            }.allowsHitTesting(false)
+            TabDragGeometryObserver(bounds: bounds, drag: drag, browser: browser)
         }
+        .overlay { TabDragPreview(drag: drag, browser: browser) }
         .onChange(of: dragGestureActive) { _, active in if !active { drag.reset() } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if notification.object as? NSWindow === browser.window, drag.isDragging { drag.cancel() }
@@ -345,7 +321,7 @@ struct TabStrip: View {
         .buttonStyle(TabGroupButtonStyle(tint: group.color.tint, isSelected: isSelected,
                                         isFocused: focusedGroupSection == section.id,
                                         isDragging: drag.isDragging,
-                                        isDropTarget: drag.selection?.region.id == section.id))
+                                        isDropTarget: drag.indicator?.id == section.id))
         .focused($focusedGroupSection, equals: section.id)
         .help("\(group.name) · \(group.color.title)")
         .accessibilityLabel("\(group.name), \(section.tabCount) tabs")
@@ -415,7 +391,7 @@ struct TabStrip: View {
         }
         .foregroundStyle(accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(accent.opacity(drag.selection?.region.target == .group(nil) ? 0.16 : 0.07),
+        .background(accent.opacity(drag.indicator?.target == .group(nil) ? 0.16 : 0.07),
                     in: RoundedRectangle(cornerRadius: 7))
         .allowsHitTesting(false)
     }
@@ -493,7 +469,11 @@ struct TabStrip: View {
                     .offset(x: (spacing + 1) / 2)
                     .opacity(showsSeparator ? 1 : 0)
             }
-            .anchorPreference(key: TabFrameKey.self, value: .bounds) { [tab.id: $0] }
+            // Only the displayed hover preview consumes this anchor. Collecting a second
+            // full strip of anchors during every folder animation duplicates the drag geometry.
+            .anchorPreference(key: TabFrameKey.self, value: .bounds) {
+                hoverCardTabID == tab.id ? [tab.id: $0] : [:]
+            }
             .onHover { isHovering in
                 if isHovering {
                     hoveredTabID = tab.id
@@ -607,6 +587,53 @@ struct TabStrip: View {
         return actions
     }
 
+}
+
+/// Pointer motion redraws only the floating preview. Resolving every anchor belongs to layout
+/// updates, and must not run again for each pointer sample over an otherwise stationary strip.
+private struct TabDragGeometryObserver: View {
+    let bounds: TabDragBounds
+    let drag: TabDragController
+    let browser: BrowserModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            let frames = bounds.resolve(in: geometry)
+            Color.clear
+                .onChange(of: frames, initial: true) { _, frames in drag.updateFrames(frames, browser: browser) }
+        }.allowsHitTesting(false)
+    }
+}
+
+private struct TabDragPreview: View {
+    let drag: TabDragController
+    let browser: BrowserModel
+
+    var body: some View {
+        GeometryReader { _ in
+            if let id = drag.sourceID, let tab = browser.tab(withID: id), let point = drag.location {
+                HStack(spacing: 6) {
+                    TabIcon(tab: tab, isActive: false)
+                    if !tab.isPinned { Text(tab.title).font(.system(size: 12)).lineLimit(1) }
+                }
+                .padding(.horizontal, 10)
+                .frame(width: tab.isPinned ? 44 : 160, height: 32)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                .position(x: point.x + 20, y: point.y + 20)
+            } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
+                      let point = drag.location {
+                Label(group.name, browserIcon: .tabGroup)
+                    .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    .foregroundStyle(group.color.tint)
+                    .padding(.horizontal, 10)
+                    .frame(width: 160, height: 32)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                    .position(x: point.x + 20, y: point.y + 20)
+            }
+        }.allowsHitTesting(false)
+    }
 }
 
 private struct TabItem: View {

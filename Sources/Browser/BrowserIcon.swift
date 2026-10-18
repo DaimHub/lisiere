@@ -190,12 +190,28 @@ enum BrowserIcon: CaseIterable {
         image.accessibilityDescription = accessibilityDescription
         return image
     }
+
+    @MainActor private static let viewImages: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    /// SwiftUI images are immutable consumers. Reuse their template identity across layout and
+    /// animation updates; AppKit callers still receive independent mutable copies from nsImage.
+    @MainActor fileprivate func viewImage(size: CGFloat) -> NSImage {
+        let key = "\(self)-\(size)" as NSString
+        if let image = Self.viewImages.object(forKey: key) { return image }
+        let image = nsImage(size: size)
+        Self.viewImages.setObject(image, forKey: key)
+        return image
+    }
 }
 
 extension Image {
     @MainActor
     init(browserIcon: BrowserIcon, size: CGFloat = 14) {
-        self = Image(nsImage: browserIcon.nsImage(size: size)).renderingMode(.template)
+        self = Image(nsImage: browserIcon.viewImage(size: size)).renderingMode(.template)
     }
 }
 

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Observation
 import XCTest
 @testable import Browser
 
@@ -7,6 +8,52 @@ import XCTest
 /// These are geometry/interaction regressions, not display-refresh or GPU benchmarks.
 @MainActor
 final class TabStripMotionTests: XCTestCase {
+    func testContinuousPointerMovementDuringDisclosurePreservesTargetsAndSelection() async throws {
+        for layout in [TabLayout.vertical, .horizontal] {
+            for pinned in [false, true] {
+                let fixture = try MotionFixture(layout: layout, pinned: pinned)
+                defer { fixture.close() }
+                try await fixture.settle()
+                fixture.recording.begin()
+                let childID = fixture.children[0].id
+                for sample in 0..<120 {
+                    if sample % 20 == 0 { fixture.browser.toggleGroupCollapsed(fixture.folder) }
+                    let region = try fixture.recording.latest.regions.first { $0.target == .tab(childID) }
+                        ?? fixture.region(fixture.folderRegion)
+                    let point = CGPoint(x: region.frame.midX + CGFloat(sample % 3), y: region.frame.midY)
+                    fixture.drag.update(id: fixture.source.id, location: point, browser: fixture.browser)
+                    XCTAssertEqual(fixture.drag.location, point)
+                    XCTAssertNil(fixture.source.groupID, "Pointer motion must not commit a move before release")
+                    try await Task.sleep(for: .milliseconds(8))
+                }
+                fixture.drag.cancel()
+                try await fixture.settle()
+                fixture.assertIdentity()
+                XCTAssertNil(fixture.drag.selection)
+                fixture.recording.report("continuous-\(layout)-pins-\(pinned)")
+            }
+        }
+    }
+
+    func testHoverGeometryTracksOnlyTheRequestedPreviewAcrossDisclosure() async throws {
+        for layout in [TabLayout.vertical, .horizontal] {
+            let fixture = try MotionFixture(layout: layout, pinned: true)
+            defer { fixture.close() }
+            try await fixture.settle()
+            XCTAssertTrue(fixture.recording.hoverTabIDs.isEmpty)
+            let id = fixture.children[0].id
+            fixture.hoverPreview.tabID = id
+            try await fixture.waitUntil { fixture.recording.hoverTabIDs == [id] }
+            fixture.browser.collapseGroup(fixture.folder)
+            try await fixture.waitUntil { fixture.recording.hoverTabIDs.isEmpty }
+            fixture.browser.expandGroup(fixture.folder)
+            try await fixture.waitUntil { fixture.recording.hoverTabIDs == [id] }
+            fixture.hoverPreview.tabID = nil
+            try await fixture.waitUntil { fixture.recording.hoverTabIDs.isEmpty }
+            fixture.assertIdentity()
+        }
+    }
+
     func testRapidDisclosureReversalsKeepIntermediateGeometryAndTabIdentity() async throws {
         try XCTSkipIf(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "Motion is disabled by the system")
         for layout in [TabLayout.vertical, .horizontal] {
@@ -19,7 +66,7 @@ final class TabStripMotionTests: XCTestCase {
                 try await fixture.settle()
                 let collapsed = try fixture.neighborPosition()
                 XCTAssertGreaterThan(abs(expanded - collapsed), 20)
-                fixture.recording.entries.removeAll()
+                fixture.recording.begin()
 
                 // Retarget while moving, rather than sleeping until the previous transition ends.
                 for _ in 0..<3 {
@@ -61,7 +108,7 @@ final class TabStripMotionTests: XCTestCase {
                 let header = try fixture.region(fixture.folderRegion).frame
                 let inside = CGPoint(x: header.midX, y: header.midY)
                 fixture.drag.update(id: fixture.source.id, location: inside, browser: fixture.browser)
-                fixture.recording.entries.removeAll()
+                fixture.recording.begin()
                 try await fixture.waitUntil { !fixture.browser.groups[0].isCollapsed }
                 try await fixture.waitUntil { ((try? fixture.neighborPosition()) ?? collapsed) > collapsed + 2 }
                 XCTAssertEqual(fixture.drag.selection?.region.target, .group(fixture.folder))
@@ -109,6 +156,7 @@ private final class MotionFixture {
     let browser = BrowserModel.makePrivate()
     let drag = TabDragController()
     let recording = MotionRecording()
+    let hoverPreview = HoverPreviewProbe()
     let layout: TabLayout
     let folder: UUID
     let neighbor: UUID
@@ -139,13 +187,17 @@ private final class MotionFixture {
         window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let recording = recording
+        let hoverPreview = hoverPreview
         let strip = TabStrip(browser: browser, layout: layout, isFullScreen: true, accent: .blue,
-                             hoverCardTabID: .constant(nil), drag: drag)
+                             hoverCardTabID: Binding(get: { hoverPreview.tabID }, set: { hoverPreview.tabID = $0 }), drag: drag)
             .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
                 GeometryReader { geometry in
                     let frames = bounds.resolve(in: geometry)
                     Color.clear.onChange(of: frames, initial: true) { _, value in recording.append(value) }
                 }
+            }
+            .overlayPreferenceValue(TabFrameKey.self) { anchors in
+                Color.clear.onChange(of: Set(anchors.keys), initial: true) { _, ids in recording.hoverTabIDs = ids }
             }
         window.contentView = NSHostingView(rootView: strip)
         window.orderFront(nil)
@@ -184,6 +236,12 @@ private final class MotionRecording {
     struct Entry { var time: TimeInterval; var frames: TabDragFrames }
     var entries: [Entry] = []
     var latest = TabDragFrames()
+    var hoverTabIDs: Set<UUID> = []
+    private var startCPU = clock()
+    func begin() {
+        entries.removeAll()
+        startCPU = clock()
+    }
     func append(_ frames: TabDragFrames) {
         latest = frames
         entries.append(Entry(time: ProcessInfo.processInfo.systemUptime, frames: frames))
@@ -193,7 +251,13 @@ private final class MotionRecording {
             entry.frames.regions.first { $0.id == id }.map { layout == .horizontal ? $0.frame.minX : $0.frame.minY }
         }
     }
-    func report(_ label: String) { print("MOTION \(label): \(entries.count) native geometry updates") }
+    func report(_ label: String) {
+        let cpuMilliseconds = Double(clock() - startCPU) * 1_000 / Double(CLOCKS_PER_SEC)
+        print("MOTION \(label): \(entries.count) native geometry updates, \(Int(cpuMilliseconds)) ms process CPU")
+    }
 }
+
+@MainActor @Observable
+private final class HoverPreviewProbe { var tabID: UUID? }
 
 private struct MotionTimeout: Error {}

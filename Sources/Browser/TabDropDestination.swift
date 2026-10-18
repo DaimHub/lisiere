@@ -36,6 +36,21 @@ struct TabDragFrames: Equatable {
 struct TabDropSelection: Equatable {
     var region: TabDropRegion
     var after: Bool
+
+    var indicator: TabDropIndicator {
+        // Header drops have no before/after distinction. Their animated midpoint must not
+        // invalidate every header and card while the pointer stays in the same folder.
+        let showsInsertion: Bool
+        if case .group = region.target { showsInsertion = false } else { showsInsertion = true }
+        return TabDropIndicator(id: region.id, target: region.target, after: showsInsertion && after)
+    }
+}
+
+/// Visual state excludes the continuously moving bounds used by hit testing.
+struct TabDropIndicator: Equatable {
+    var id: String
+    var target: TabDropTarget
+    var after: Bool
 }
 
 struct TabDragScrollRequest: Equatable {
@@ -58,7 +73,8 @@ final class TabDragController {
     }
     var isDragging: Bool { source != nil }
     private(set) var location: CGPoint?
-    private(set) var selection: TabDropSelection?
+    @ObservationIgnored private(set) var selection: TabDropSelection?
+    private(set) var indicator: TabDropIndicator?
     private(set) var scrollRequest: TabDragScrollRequest?
     @ObservationIgnored private var frames = TabDragFrames()
     @ObservationIgnored private var cancelled = false
@@ -98,10 +114,13 @@ final class TabDragController {
             }
         }
         guard self.source == source, origin === browser else { return }
-        self.location = location
+        if self.location != location { self.location = location }
         scheduleGroupCollapse(browser: browser)
         selection = destination(at: location, source: source, browser: browser)
-        scrollRequest = scrolling(at: location)
+        let indicator = selection?.indicator
+        if self.indicator != indicator { self.indicator = indicator }
+        let scrollRequest = scrolling(at: location)
+        if self.scrollRequest != scrollRequest { self.scrollRequest = scrollRequest }
         scheduleGroupExpansion(browser: browser)
     }
 
@@ -200,13 +219,13 @@ final class TabDragController {
     /// Pick the most specific visible target first, then validate it. An invalid tab must not fall through
     /// to the ungrouped background, and clipped rows must not receive a drop in another scroll area.
     private func destination(at point: CGPoint, source: TabDragSource, browser: BrowserModel) -> TabDropSelection? {
-        let region = frames.regions.filter { region in
+        let region = frames.regions.lazy.filter { region in
             // Keep occupied regions as blockers so a folder cannot fall through a loose tab to the background.
             switch (source, region.target) {
             case (.group, _), (.tab, .tab), (.tab, .group): break
             default: return false
             }
-            return visibleFrame(of: region).contains(point)
+            return self.visibleFrame(of: region).contains(point)
         }.max { a, b in
             if case .group = source {
                 // A folder section owns its children while reordering whole folders.
@@ -278,6 +297,7 @@ final class TabDragController {
         source = nil
         location = nil
         selection = nil
+        indicator = nil
         scrollRequest = nil
         origin = nil
         cancelled = false
@@ -366,7 +386,7 @@ extension View {
                                               horizontal: horizontal, viewport: viewport, priority: priority))
         }
         .overlay {
-            if priority > 0, let selected = drag.selection, selected.region.id == id {
+            if priority > 0, let selected = drag.indicator, selected.id == id {
                 switch target {
                 case .group:
                     RoundedRectangle(cornerRadius: 7).strokeBorder(accent, lineWidth: 2).allowsHitTesting(false)

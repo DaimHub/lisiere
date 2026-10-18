@@ -1,8 +1,66 @@
 import XCTest
+import Observation
 @testable import Browser
 
 @MainActor
 final class TabDragTests: XCTestCase {
+    func testAnimatedHeaderBoundsKeepVisualObserversQuietWithoutFreezingHitTesting() throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            let folder = browser.createGroup(name: "Target", color: .green)
+            var header = TabDropRegion(id: "header", target: .group(folder),
+                                       frame: CGRect(x: 0, y: 0, width: 20, height: 20), horizontal: horizontal)
+            let point = CGPoint(x: 14, y: 14)
+            drag.updateFrames(.init(regions: [header]), browser: browser)
+            drag.update(id: source.id, location: point, browser: browser)
+            let changes = DragObservationCounter()
+            withObservationTracking {
+                _ = drag.indicator
+                _ = drag.location
+                _ = drag.scrollRequest
+            } onChange: { MainActor.assumeIsolated { changes.count += 1 } }
+            // The header expands past the pointer's midpoint repeatedly, but its visual target
+            // stays the same. Still retain every latest frame for release and hover validation.
+            for sample in 0..<240 {
+                header.frame.size = CGSize(width: 20 + sample % 20, height: 20 + sample % 20)
+                drag.updateFrames(.init(regions: [header]), browser: browser)
+                XCTAssertEqual(drag.selection?.region.frame, header.frame)
+            }
+            XCTAssertEqual(changes.count, 0, "Geometry-only changes must not invalidate the strip's visual observers")
+            XCTAssertEqual(drag.indicator?.id, "header")
+            XCTAssertEqual(drag.indicator?.after, false)
+            drag.finish(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(source.groupID, folder)
+            XCTAssertNil(drag.indicator)
+            XCTAssertEqual(changes.count, 1, "Ending the drag must clear visual feedback")
+        }
+    }
+
+    func testMovingChildMidpointUpdatesInsertionFeedbackInBothLayouts() throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            browser.addTab()
+            let target = try XCTUnwrap(browser.activeTab)
+            var region = TabDropRegion(id: "child", target: .tab(target.id),
+                                       frame: CGRect(x: 0, y: 0, width: 100, height: 100), horizontal: horizontal)
+            let point = CGPoint(x: 30, y: 30)
+            drag.updateFrames(.init(regions: [region]), browser: browser)
+            drag.update(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(drag.indicator?.after, false)
+            region.frame.size = CGSize(width: 40, height: 40)
+            drag.updateFrames(.init(regions: [region]), browser: browser)
+            XCTAssertEqual(drag.indicator?.after, true, "Animated geometry crossing the pointer changes the insertion side")
+            drag.finish(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(browser.tabs.map(\.id), [target.id, source.id])
+        }
+    }
+
     func testCollapsingChildBlocksStaleDropsUntilItsAnimatedFrameDisappears() throws {
         for horizontal in [false, true] {
             let browser = BrowserModel.makePrivate()
@@ -661,4 +719,9 @@ final class TabDragTests: XCTestCase {
         drag.finish(id: first, location: CGPoint(x: 100, y: 98), browser: browser)
         XCTAssertEqual(browser.tabs.map(\.id), [second, first])
     }
+}
+
+@MainActor
+private final class DragObservationCounter {
+    var count = 0
 }
