@@ -73,7 +73,7 @@ background, so a self-drop or a drop on an ungrouped site cannot accidentally se
 
 ## Verified
 
-- `make test`: 283 tests pass. Controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Empty-space regressions cover both layouts, moving a folder to the end, already-last drops, preserved folder metadata and pin membership, and occupied regions blocking background drops. Three asynchronous hover tests exercise the real 500 ms task, stable deadlines, retargeting, cancellation, stale source/target removal, folder-drag exclusion, and precise child insertion after expansion with page identity and pin state preserved. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
+- `make test`: 285 tests pass. Controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Empty-space regressions cover both layouts, moving a folder to the end, already-last drops, preserved folder metadata and pin membership, and occupied regions blocking background drops. Three asynchronous hover tests exercise the real 500 ms task, stable deadlines, retargeting, cancellation, stale source/target removal, folder-drag exclusion, and precise child insertion after expansion with page identity and pin state preserved. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
 - Four further asynchronous regressions cover re-collapse in both layouts, child cards and gaps, invalid pin insertion, re-entry, cancellation/reset, clipped targets, source/target deletion, successful header and child drops, and preservation of independently opened folders.
 - Two additional asynchronous regressions cover the 300 ms grace period, header/child/gap re-entry in both layouts, a fresh deadline on the next exit, stable deadlines during outside movement and geometry updates, and pending-task cleanup after a successful drop, cancellation, reset or release before a later gesture.
 - An additional regression covers stale child bounds during collapse in both layouts: invalid drops preserve membership, reversing collapse restores the child destination, and the background becomes available after the old frame disappears.
@@ -92,3 +92,28 @@ background, so a self-drop or a drop on an ungrouped site cannot accidentally se
 ## Coverage boundary
 
 The controller tests cover Escape, timed hover expansion and re-collapse, and continuous edge-scroll decisions. The native automation exposes a complete drag between two points, without a hold-at-target step. A held physical mouse/trackpad gesture for the 500 ms expansion, 300 ms re-collapse and re-entry cancellation cycle, Escape or prolonged edge scrolling has not been exercised. Pointer-based membership and reorder behavior above was exercised end to end, rather than inferred from the model tests.
+
+## Motion stress verification
+
+`TabStripMotionTests` hosts the actual `TabStrip` in an AppKit window, with its real window-local drag
+controller. It records the animated geometry preferences that production hit testing consumes, including
+intermediate positions. The matrix covers both layouts and pinned/ordinary folders:
+
+1. Reverse disclosure three times while the neighboring header is still moving. Require intermediate
+   positions, no endpoint overshoot or direct jump between endpoints, the correct final position, and
+   stable tab instances and selection.
+2. Hover until the real 500 ms task opens a folder, leave and return during the 300 ms close grace,
+   leave long enough to animate the close, hover again, then drop onto a child's current bounds before
+   the opening settles. Require correct hit testing, membership, pin state, selection and cleanup.
+
+The signed Release was also exercised with six consecutive sidebar clicks, seven horizontal clicks,
+four clicks on the active ordinary folder, and subsequent pin entry/exit in each layout. Counts,
+disclosure state and the active page stayed correct. No disclosure or drop correctness defect was
+reproduced; the production initializer only permits the native tests to share the strip's existing
+drag controller. Display profiling results are assessed separately from these layout assertions.
+
+These checks establish animated-layout continuity and live target synchronization. They do not measure
+GPU/display frame pacing or a held physical gesture. Screenshot capture waits for a stable window; a
+burst attempted during a 240 ms transition returned its first image after about 1 second, so those
+images cannot establish frame-by-frame visual smoothness. The native-host tests are skipped when
+system Reduce Motion is enabled rather than changing the user's accessibility preference.

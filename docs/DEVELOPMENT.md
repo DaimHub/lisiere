@@ -224,6 +224,11 @@ original deadline; cancellation or an invalid release restores immediately, whil
 keeps the target open. Their whole visible section counts as inside, and previously open folders remain
 open. Release pointer drops are verified;
 the timed opening/re-collapse cycle is covered by asynchronous controller tests rather than physical automation.
-283 tests pass. Folder disclosure now uses a shared 240 ms smooth transition for content, neighboring
+285 tests pass. Folder disclosure now uses a shared 240 ms smooth transition for content, neighboring
 sections and pinned viewport sizing in both layouts; Reduce Motion disables it. Transient outgoing
 child bounds cannot accept a drop into a collapsed folder.
+
+Native motion regressions now host the real TabStrip and its drag controller in an AppKit window.
+They inspect intermediate bounds during rapid reversals and timed hover/exit/re-entry/drop sequences
+in both layouts with pinned and ordinary sites. See the motion stress section in the drag verification
+notes for the distinction between animated-layout checks and display frame pacing.

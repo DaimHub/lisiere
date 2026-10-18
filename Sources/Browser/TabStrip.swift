@@ -87,12 +87,23 @@ struct TabStrip: View {
 
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
-    @State private var drag = TabDragController()
+    @State private var drag: TabDragController
     @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
     @FocusState private var focusedGroupSection: String?
+
+    init(browser: BrowserModel, layout: TabLayout, isFullScreen: Bool, accent: Color,
+         hoverCardTabID: Binding<UUID?>, drag: TabDragController = TabDragController()) {
+        self.browser = browser
+        self.layout = layout
+        self.isFullScreen = isFullScreen
+        self.accent = accent
+        _hoverCardTabID = hoverCardTabID
+        // Native host tests inject the same gesture state used by the rendered strip.
+        _drag = State(initialValue: drag)
+    }
 
     private let spacing = HorizontalTabStripMetrics.spacing
     private let addButtonID = "new-tab-button"
