@@ -46,7 +46,7 @@ final class TabDragTests: XCTestCase {
         let second = browser.createGroup(name: "Second", color: .green)
         let frame = CGRect(x: 0, y: 0, width: 200, height: 100)
         let point = CGPoint(x: 100, y: 90)
-        for target in [TabDropTarget.group(nil), .groupOrder(first)] {
+        for target in [TabDropTarget.group(first), .groupOrder(first)] {
             drag.updateFrames(.init(regions: [.init(id: "target", target: target, frame: frame, horizontal: false)]), browser: browser)
             drag.updateGroup(id: first, location: point, browser: browser)
             XCTAssertNil(drag.selection)
@@ -83,6 +83,73 @@ final class TabDragTests: XCTestCase {
         XCTAssertEqual(drag.selection?.region.id, "visible")
         drag.finishGroup(id: first, location: point, browser: browser)
         XCTAssertEqual(browser.groups.map(\.id), [second, third, first])
+    }
+
+    func testEmptySpaceMovesFolderToEndInBothLayoutsOnlyOnRelease() throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let pin = try XCTUnwrap(browser.activeTab)
+            let first = browser.createGroup(name: "First", color: .blue, tabID: pin.id)
+            browser.setPinned(true, for: pin.id)
+            browser.toggleGroupCollapsed(first)
+            let second = browser.createGroup(name: "Second", color: .green)
+            let third = browser.createGroup(name: "Third", color: .purple)
+            let original = browser.groups[0]
+            let frame = horizontal ? CGRect(x: 600, y: 0, width: 200, height: 44)
+                                   : CGRect(x: 0, y: 200, width: 220, height: 400)
+            let point = CGPoint(x: frame.midX, y: frame.midY)
+            drag.updateFrames(.init(regions: [
+                .init(id: "background", target: .group(nil), frame: frame, horizontal: horizontal, priority: 0)
+            ]), browser: browser)
+            drag.updateGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(drag.selection?.region.target, .group(nil))
+            XCTAssertEqual(browser.groups.map(\.id), [first, second, third])
+            drag.finishGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [second, third, first])
+            XCTAssertEqual(browser.groups.last, original)
+            XCTAssertEqual(pin.groupID, first)
+            XCTAssertTrue(pin.isPinned)
+            XCTAssertEqual(browser.activeTabID, pin.id)
+            // Already last remains a no-op, and cancellation must not commit an otherwise valid drop.
+            drag.updateGroup(id: first, location: point, browser: browser)
+            drag.finishGroup(id: first, location: point, browser: browser)
+            drag.updateGroup(id: second, location: point, browser: browser)
+            drag.cancel()
+            drag.finishGroup(id: second, location: point, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [second, third, first])
+        }
+    }
+
+    func testOccupiedRegionsBlockFolderDropThroughToEmptySpace() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let first = browser.createGroup(name: "First", color: .blue)
+        let second = browser.createGroup(name: "Second", color: .green)
+        let frame = CGRect(x: 0, y: 100, width: 220, height: 40)
+        let point = CGPoint(x: 100, y: 120)
+        let background = TabDropRegion(id: "background", target: .group(nil), frame: frame, horizontal: false, priority: 0)
+        for target in [TabDropTarget.tab(tab.id), .groupOrder(first), .group(first)] {
+            drag.updateFrames(.init(regions: [background,
+                .init(id: "occupied", target: target, frame: frame, horizontal: false, priority: 2)
+            ]), browser: browser)
+            drag.updateGroup(id: first, location: point, browser: browser)
+            XCTAssertNil(drag.selection)
+            drag.finishGroup(id: first, location: point, browser: browser)
+            XCTAssertEqual(browser.groups.map(\.id), [first, second])
+        }
+        // Offscreen content no longer occupies the blank area in the other scroll section.
+        drag.updateFrames(.init(regions: [background,
+            .init(id: "clipped", target: .groupOrder(first), frame: frame, horizontal: false, viewport: "pins")
+        ], viewports: ["pins": CGRect(x: 0, y: 0, width: 220, height: 50)]), browser: browser)
+        drag.updateGroup(id: first, location: point, browser: browser)
+        XCTAssertEqual(drag.selection?.region.id, "background")
+        drag.finishGroup(id: first, location: point, browser: browser)
+        XCTAssertEqual(browser.groups.map(\.id), [second, first])
+        XCTAssertNil(tab.groupID)
     }
 
     func testPointerDropIntoFolderCommitsOnlyOnRelease() throws {

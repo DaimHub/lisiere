@@ -215,4 +215,6 @@ Follow-up validation on 2026-10-18: tab and folder moves use the window-local ge
 after another folder to reorder its entire section in either layout; dropping over an expanded folder's
 children also positions the folder as a unit. Both pinned and ordinary sections share the persisted group
 order. Tab drops can insert into another group without changing pin state. The previous OS payload path
-and its automated-drag limitation no longer apply. Release pointer gestures are verified; 271 tests pass.
+and its automated-drag limitation no longer apply. Dropping a folder in the empty sidebar or horizontal
+space after the add button moves it to the end, preserving its contents and metadata; occupied targets
+take precedence over the background. Release pointer gestures are verified; 273 tests pass.

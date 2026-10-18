@@ -529,6 +529,11 @@ final class BrowserModel {
         normalizeTabOrder()
     }
 
+    func moveGroupToEnd(_ id: UUID) {
+        guard let lastID = groups.last?.id else { return }
+        moveGroup(id, beside: lastID, after: true)
+    }
+
     private func validGroupID(_ id: UUID?) -> UUID? {
         id.flatMap { id in groups.contains { $0.id == id } ? id : nil }
     }

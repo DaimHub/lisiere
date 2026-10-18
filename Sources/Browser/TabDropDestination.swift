@@ -103,14 +103,23 @@ final class TabDragController {
     /// to the ungrouped background, and clipped rows must not receive a drop in another scroll area.
     private func destination(at point: CGPoint, source: TabDragSource, browser: BrowserModel) -> TabDropSelection? {
         let region = frames.regions.filter { region in
-            // Folder moves target whole sections; tab moves still target cards and membership headers.
+            // Keep occupied regions as blockers so a folder cannot fall through a loose tab to the background.
             switch (source, region.target) {
-            case (.group, .groupOrder), (.tab, .tab), (.tab, .group): break
+            case (.group, _), (.tab, .tab), (.tab, .group): break
             default: return false
             }
             let visible = region.viewport.flatMap { frames.viewports[$0] }.map { region.frame.intersection($0) } ?? region.frame
             return visible.contains(point)
         }.max { a, b in
+            if case .group = source {
+                // A folder section owns its children while reordering whole folders.
+                switch (a.target, b.target) {
+                case (.groupOrder, .groupOrder): break
+                case (.groupOrder, _): return false
+                case (_, .groupOrder): return true
+                default: break
+                }
+            }
             if a.priority != b.priority { return a.priority < b.priority }
             return a.frame.width * a.frame.height > b.frame.width * b.frame.height
         }
@@ -122,6 +131,7 @@ final class TabDragController {
             guard id == nil || browser.groups.contains(where: { $0.id == id }) else { return nil }
         case let (.group(sourceID), .groupOrder(id)):
             guard sourceID != id, browser.groups.contains(where: { $0.id == id }) else { return nil }
+        case (.group, .group(nil)): break
         default: return nil
         }
         return TabDropSelection(region: region,
@@ -145,6 +155,7 @@ final class TabDragController {
         case let (.tab(id), .tab(target)): browser.dropTab(id, beside: target, after: selection.after)
         case let (.tab(id), .group(group)): browser.dropTab(id, into: group)
         case let (.group(id), .groupOrder(target)): browser.moveGroup(id, beside: target, after: selection.after)
+        case let (.group(id), .group(nil)): browser.moveGroupToEnd(id)
         default: break
         }
     }

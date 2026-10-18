@@ -176,7 +176,7 @@ struct TabStrip: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
-                    .overlay { if drag.sourceID != nil { outsideGroupHint(compact: true) } }
+                    .overlay { if drag.isDragging { outsideGroupHint(compact: true) } }
                     .tabDropRegion("outside-horizontal", target: .group(nil), horizontal: false, drag: drag, accent: accent)
                     .browserContextMenu { stripMenuActions }
             }
@@ -245,7 +245,7 @@ struct TabStrip: View {
                         Divider().padding(.horizontal, BrowserChrome.edgeInset).padding(.vertical, 4)
                     }
                     sidebarSections(sections.filter { !$0.isPinned }, showsNewTab: true)
-                    if drag.sourceID != nil {
+                    if drag.isDragging {
                         outsideGroupHint(compact: false)
                             .frame(height: 32)
                             .padding(.horizontal, BrowserChrome.edgeInset)
@@ -378,10 +378,14 @@ struct TabStrip: View {
     }
 
     private func outsideGroupHint(compact: Bool) -> some View {
+        let movingGroup = drag.sourceGroupID != nil
         let grouped = browser.tab(withID: drag.sourceID)?.groupID != nil
         return HStack(spacing: 6) {
-            Image(browserIcon: .ungroup, size: 14)
-            if !compact { Text(grouped ? "Move out of group" : "Move to end").font(.system(size: 11.5)) }
+            Image(browserIcon: movingGroup ? .tabGroup : .ungroup, size: 14)
+            if !compact {
+                Text(movingGroup ? "Move group to end" : grouped ? "Move out of group" : "Move to end")
+                    .font(.system(size: 11.5))
+            }
         }
         .foregroundStyle(accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
