@@ -85,6 +85,8 @@ final class TabDragTests: XCTestCase {
             XCTAssertNil(drag.selection, "Pin cannot insert beside an ordinary child")
             XCTAssertFalse(browser.groups[0].isCollapsed, "Invalid child insertion is still inside the folder")
             drag.update(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+            XCTAssertFalse(browser.groups[0].isCollapsed, "Leaving starts a grace period")
+            try await Task.sleep(for: .milliseconds(400))
             XCTAssertTrue(browser.groups[0].isCollapsed)
             XCTAssertNil(source.groupID)
             XCTAssertEqual(child.groupID, target)
@@ -130,6 +132,8 @@ final class TabDragTests: XCTestCase {
             case "clip":
                 frames.viewports["tabs"] = CGRect(x: 200, y: 200, width: 120, height: 100)
                 drag.updateFrames(frames, browser: browser)
+                XCTAssertFalse(browser.groups[0].isCollapsed, "Clipping also allows time to return")
+                try await Task.sleep(for: .milliseconds(400))
             case "remove-folder": browser.ungroup(target); drag.reset()
             case "close-source":
                 browser.setPinned(false, for: source.id)
@@ -160,13 +164,98 @@ final class TabDragTests: XCTestCase {
         XCTAssertFalse(browser.groups[0].isCollapsed)
         let destination = CGPoint(x: 30, y: 54)
         drag.update(id: source.id, location: destination, browser: browser)
-        XCTAssertTrue(browser.groups[0].isCollapsed)
+        XCTAssertFalse(browser.groups[0].isCollapsed)
         try await Task.sleep(for: .milliseconds(600))
+        XCTAssertTrue(browser.groups[0].isCollapsed)
         XCTAssertFalse(browser.groups[1].isCollapsed)
         drag.finish(id: source.id, location: destination, browser: browser)
         XCTAssertEqual(source.groupID, second)
         XCTAssertTrue(browser.groups[0].isCollapsed)
         XCTAssertFalse(browser.groups[1].isCollapsed)
+    }
+
+    func testReentryCancelsCollapseAndNextExitKeepsItsDeadlineInBothLayouts() async throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            browser.addTab()
+            let child = try XCTUnwrap(browser.activeTab)
+            let group = browser.createGroup(name: "Target", color: .green, tabID: child.id)
+            browser.toggleGroupCollapsed(group)
+            let header = CGRect(x: 0, y: 0, width: 120, height: 28)
+            let childFrame = horizontal ? CGRect(x: 124, y: 0, width: 100, height: 28)
+                                        : CGRect(x: 0, y: 32, width: 120, height: 32)
+            let frames = TabDragFrames(regions: [
+                .init(id: "header", target: .group(group), frame: header, horizontal: horizontal),
+                .init(id: "section", target: .groupOrder(group), frame: header.union(childFrame), horizontal: horizontal),
+                .init(id: "child", target: .tab(child.id), frame: childFrame, horizontal: horizontal, priority: 2)
+            ])
+            drag.updateFrames(frames, browser: browser)
+            drag.update(id: source.id, location: CGPoint(x: 30, y: 14), browser: browser)
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertFalse(browser.groups[0].isCollapsed)
+            let gap = horizontal ? CGPoint(x: 122, y: 14) : CGPoint(x: 30, y: 30)
+            // Every part of the section cancels an already-sleeping close task.
+            for inside in [CGPoint(x: 30, y: 14), gap, CGPoint(x: childFrame.midX, y: childFrame.midY)] {
+                drag.update(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertFalse(browser.groups[0].isCollapsed)
+                drag.update(id: source.id, location: inside, browser: browser)
+                try await Task.sleep(for: .milliseconds(400))
+                XCTAssertFalse(browser.groups[0].isCollapsed, "Returning cancels the old deadline")
+            }
+            drag.update(id: source.id, location: CGPoint(x: 500, y: 500), browser: browser)
+            try await Task.sleep(for: .milliseconds(150))
+            XCTAssertFalse(browser.groups[0].isCollapsed, "A fresh exit receives a full grace period")
+            drag.update(id: source.id, location: CGPoint(x: 501, y: 500), browser: browser)
+            drag.updateFrames(frames, browser: browser)
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertTrue(browser.groups[0].isCollapsed, "Outside updates must not postpone closure")
+            XCTAssertNil(source.groupID)
+            XCTAssertEqual(child.groupID, group)
+        }
+    }
+
+    func testPendingCollapseCannotAffectAcceptedDropOrLaterGesture() async throws {
+        for ending in ["drop", "cancel", "reset", "outside-release"] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            let group = browser.createGroup(name: "Target", color: .green)
+            browser.toggleGroupCollapsed(group)
+            let inside = CGPoint(x: 30, y: 14)
+            let outside = CGPoint(x: 500, y: 500)
+            drag.updateFrames(.init(regions: [
+                .init(id: "header", target: .group(group), frame: CGRect(x: 0, y: 0, width: 120, height: 28), horizontal: false)
+            ]), browser: browser)
+            drag.update(id: source.id, location: inside, browser: browser)
+            try await Task.sleep(for: .milliseconds(600))
+            drag.update(id: source.id, location: outside, browser: browser)
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertFalse(browser.groups[0].isCollapsed)
+            switch ending {
+            case "drop": drag.finish(id: source.id, location: inside, browser: browser)
+            case "cancel": drag.cancel()
+            case "reset": drag.reset()
+            case "outside-release": drag.finish(id: source.id, location: outside, browser: browser)
+            default: XCTFail("Unknown ending")
+            }
+            XCTAssertFalse(drag.isDragging)
+            XCTAssertEqual(browser.groups[0].isCollapsed, ending != "drop")
+            XCTAssertEqual(source.groupID, ending == "drop" ? group : nil)
+            // A new gesture over a manually opened folder must not inherit the old close task.
+            drag.reset()
+            browser.expandGroup(group)
+            drag.update(id: source.id, location: inside, browser: browser)
+            try await Task.sleep(for: .milliseconds(400))
+            XCTAssertFalse(browser.groups[0].isCollapsed, ending)
+            drag.update(id: source.id, location: outside, browser: browser)
+            drag.cancel()
+            XCTAssertFalse(browser.groups[0].isCollapsed, ending)
+        }
     }
 
     func testAlreadyOpenOrIndependentlyOpenedFoldersAreNeverAutoCollapsed() async throws {

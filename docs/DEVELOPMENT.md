@@ -219,7 +219,9 @@ and its automated-drag limitation no longer apply. Dropping a folder in the empt
 space after the add button moves it to the end, preserving its contents and metadata; occupied targets
 take precedence over the background. Collapsed folders open after a 500 ms site-drag hover in both
 layouts, with a cancellable delay and no membership change before release. Folders opened by hovering
-close again on exit or cancellation, while a successful drop keeps the target open. Their whole visible
-section counts as inside, and previously open folders remain open. Release pointer drops are verified;
+close 300 ms after exit, with the pending close cancelled on re-entry. Outside movement keeps the
+original deadline; cancellation or an invalid release restores immediately, while a successful drop
+keeps the target open. Their whole visible section counts as inside, and previously open folders remain
+open. Release pointer drops are verified;
 the timed opening/re-collapse cycle is covered by asynchronous controller tests rather than physical automation.
-280 tests pass.
+282 tests pass.

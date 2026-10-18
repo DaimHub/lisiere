@@ -67,6 +67,7 @@ final class TabDragController {
     @ObservationIgnored private var hoveredGroupID: UUID?
     @ObservationIgnored private var groupExpansionTask: Task<Void, Never>?
     @ObservationIgnored private var springLoadedGroupID: UUID?
+    @ObservationIgnored private var groupCollapseTask: Task<Void, Never>?
 
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
@@ -98,9 +99,7 @@ final class TabDragController {
         }
         guard self.source == source, origin === browser else { return }
         self.location = location
-        if let groupID = springLoadedGroupID, !contains(location, inGroup: groupID, browser: browser) {
-            restoreSpringLoadedGroup()
-        }
+        scheduleGroupCollapse(browser: browser)
         selection = destination(at: location, source: source, browser: browser)
         scrollRequest = scrolling(at: location)
         scheduleGroupExpansion(browser: browser)
@@ -130,6 +129,8 @@ final class TabDragController {
                   self.destination(at: point, source: .tab(tabID), browser: browser)?.region.target == .group(groupID),
                   browser.groups.contains(where: { $0.id == groupID && $0.isCollapsed })
             else { return }
+            // Restore any previous folder before transferring ownership to this one.
+            self.restoreSpringLoadedGroup()
             self.springLoadedGroupID = groupID
             browser.expandGroup(groupID)
         }
@@ -139,6 +140,31 @@ final class TabDragController {
         groupExpansionTask?.cancel()
         groupExpansionTask = nil
         hoveredGroupID = nil
+    }
+
+    /// Allow a brief excursion outside an auto-opened folder. Re-entry cancels the close;
+    /// movement and geometry updates outside keep the original deadline.
+    private func scheduleGroupCollapse(browser: BrowserModel) {
+        guard let groupID = springLoadedGroupID, let point = location,
+              !contains(point, inGroup: groupID, browser: browser) else {
+            cancelGroupCollapse()
+            return
+        }
+        guard groupCollapseTask == nil else { return }
+        groupCollapseTask = Task { [weak self, weak browser] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard !Task.isCancelled, let self, let browser else { return }
+            self.groupCollapseTask = nil
+            guard self.origin === browser, self.springLoadedGroupID == groupID,
+                  self.sourceID != nil, let point = self.location,
+                  !self.contains(point, inGroup: groupID, browser: browser) else { return }
+            self.restoreSpringLoadedGroup()
+        }
+    }
+
+    private func cancelGroupCollapse() {
+        groupCollapseTask?.cancel()
+        groupCollapseTask = nil
     }
 
     private func visibleFrame(of region: TabDropRegion) -> CGRect {
@@ -159,6 +185,7 @@ final class TabDragController {
     }
 
     private func restoreSpringLoadedGroup() {
+        cancelGroupCollapse()
         guard let groupID = springLoadedGroupID else { return }
         springLoadedGroupID = nil
         origin?.collapseGroup(groupID)
@@ -166,6 +193,7 @@ final class TabDragController {
 
     private func keepSpringLoadedGroup(afterDropping tabID: UUID, into groupID: UUID?, browser: BrowserModel) {
         guard let groupID, groupID == springLoadedGroupID, browser.tab(withID: tabID)?.groupID == groupID else { return }
+        cancelGroupCollapse()
         springLoadedGroupID = nil
     }
 
