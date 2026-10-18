@@ -3,6 +3,121 @@ import XCTest
 
 @MainActor
 final class TabDragTests: XCTestCase {
+    func testTabHoverOpensFolderBeforeReleaseAndAllowsPreciseChildInsertion() async throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            let original = browser.createGroup(name: "Source", color: .blue, tabID: source.id)
+            browser.addTab()
+            let child = try XCTUnwrap(browser.activeTab)
+            let target = browser.createGroup(name: "Target", color: .green, tabID: child.id)
+            browser.setPinned(horizontal, for: source.id)
+            browser.setPinned(horizontal, for: child.id)
+            browser.activeTabID = source.id
+            browser.toggleGroupCollapsed(target)
+            let views = browser.tabs.map(\.webView)
+            let ids = browser.tabs.map(\.id)
+            let frame = CGRect(x: 0, y: 0, width: 120, height: 28)
+            let frames = TabDragFrames(regions: [
+                .init(id: "header", target: .group(target), frame: frame, horizontal: horizontal)
+            ])
+            drag.updateFrames(frames, browser: browser)
+            drag.update(id: source.id, location: CGPoint(x: 30, y: 14), browser: browser)
+            XCTAssertTrue(browser.groups[1].isCollapsed)
+            try await Task.sleep(for: .milliseconds(300))
+            // Pointer jitter and geometry refreshes inside this header must not restart the delay.
+            drag.update(id: source.id, location: CGPoint(x: 31, y: 14), browser: browser)
+            drag.updateFrames(frames, browser: browser)
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertFalse(browser.groups[1].isCollapsed)
+            XCTAssertEqual(source.groupID, original)
+            XCTAssertEqual(browser.activeTabID, source.id)
+            XCTAssertEqual(browser.tabs.map(\.id), ids)
+            XCTAssertEqual(browser.tabs.map(\.webView), views)
+            XCTAssertTrue(drag.isDragging)
+            let childFrame = horizontal ? CGRect(x: 124, y: 0, width: 100, height: 28)
+                                        : CGRect(x: 0, y: 32, width: 120, height: 32)
+            drag.updateFrames(.init(regions: frames.regions + [
+                .init(id: "child", target: .tab(child.id), frame: childFrame, horizontal: horizontal, priority: 2)
+            ]), browser: browser)
+            let point = CGPoint(x: childFrame.minX + 5, y: childFrame.minY + 5)
+            drag.finish(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(source.groupID, target)
+            XCTAssertEqual(source.isPinned, horizontal)
+            XCTAssertEqual(browser.tabs.map(\.id), [source.id, child.id])
+        }
+    }
+
+    func testHoverExpansionCancelsWhenLeavingClippingResettingOrEndingDrag() async throws {
+        for interruption in ["leave", "clip", "cancel", "reset", "release", "close-source", "remove-folder"] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let tab = try XCTUnwrap(browser.activeTab)
+            let target = browser.createGroup(name: "Target", color: .green)
+            browser.toggleGroupCollapsed(target)
+            let frame = CGRect(x: 0, y: 0, width: 120, height: 28)
+            var frames = TabDragFrames(regions: [
+                .init(id: "header", target: .group(target), frame: frame, horizontal: false, viewport: "tabs")
+            ], viewports: ["tabs": frame])
+            drag.updateFrames(frames, browser: browser)
+            drag.update(id: tab.id, location: CGPoint(x: 30, y: 14), browser: browser)
+            // Let the task start before interrupting it, exercising cancellation of a sleeping task.
+            await Task.yield()
+            switch interruption {
+            case "leave": drag.update(id: tab.id, location: CGPoint(x: 300, y: 300), browser: browser)
+            case "clip":
+                frames.viewports["tabs"] = CGRect(x: 200, y: 200, width: 120, height: 28)
+                drag.updateFrames(frames, browser: browser)
+            case "cancel": drag.cancel()
+            case "reset": drag.reset()
+            case "release": drag.finish(id: tab.id, location: CGPoint(x: 300, y: 300), browser: browser)
+            case "close-source": browser.closeTab(tab.id)
+            case "remove-folder": browser.ungroup(target)
+            default: XCTFail("Unknown interruption")
+            }
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertTrue(browser.groups.allSatisfy(\.isCollapsed), interruption)
+            XCTAssertNil(tab.groupID, interruption)
+        }
+    }
+
+    func testRetargetedHoverOpensOnlyLatestFolderAndFolderDragsNeverExpand() async throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let first = browser.createGroup(name: "First", color: .blue)
+        let second = browser.createGroup(name: "Second", color: .green)
+        browser.toggleGroupCollapsed(first)
+        browser.toggleGroupCollapsed(second)
+        let firstPoint = CGPoint(x: 30, y: 14)
+        let secondPoint = CGPoint(x: 30, y: 50)
+        drag.updateFrames(.init(regions: [
+            .init(id: "first", target: .group(first), frame: CGRect(x: 0, y: 0, width: 120, height: 28), horizontal: false),
+            .init(id: "second", target: .group(second), frame: CGRect(x: 0, y: 36, width: 120, height: 28), horizontal: false),
+            .init(id: "section", target: .groupOrder(second), frame: CGRect(x: 0, y: 36, width: 120, height: 28), horizontal: false)
+        ]), browser: browser)
+        drag.update(id: tab.id, location: firstPoint, browser: browser)
+        await Task.yield()
+        drag.update(id: tab.id, location: secondPoint, browser: browser)
+        await Task.yield()
+        drag.update(id: tab.id, location: firstPoint, browser: browser)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertFalse(browser.groups[0].isCollapsed)
+        XCTAssertTrue(browser.groups[1].isCollapsed)
+        drag.cancel()
+        drag.reset()
+        drag.updateGroup(id: first, location: secondPoint, browser: browser)
+        XCTAssertEqual(drag.selection?.region.target, .groupOrder(second))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertTrue(browser.groups[1].isCollapsed)
+        XCTAssertEqual(browser.groups.map(\.id), [first, second])
+        XCTAssertNil(tab.groupID)
+    }
+
     func testFolderDragUsesSectionBoundsAndLayoutAxisAndCommitsOnlyOnRelease() throws {
         for horizontal in [false, true] {
             let browser = BrowserModel.makePrivate()

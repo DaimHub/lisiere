@@ -64,6 +64,8 @@ final class TabDragController {
     @ObservationIgnored private var cancelled = false
     @ObservationIgnored private weak var origin: BrowserModel?
     @ObservationIgnored private var escapeMonitor: Any?
+    @ObservationIgnored private var hoveredGroupID: UUID?
+    @ObservationIgnored private var groupExpansionTask: Task<Void, Never>?
 
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
@@ -97,6 +99,40 @@ final class TabDragController {
         self.location = location
         selection = destination(at: location, source: source, browser: browser)
         scrollRequest = scrolling(at: location)
+        scheduleGroupExpansion(browser: browser)
+    }
+
+    /// Spring-load a collapsed folder after a deliberate hover. Movement inside the same header
+    /// keeps the deadline; leaving, scrolling it away or ending the gesture cancels the pending work.
+    private func scheduleGroupExpansion(browser: BrowserModel) {
+        let groupID: UUID?
+        if sourceID != nil, case let .group(id?) = selection?.region.target,
+           browser.groups.contains(where: { $0.id == id && $0.isCollapsed }) {
+            groupID = id
+        } else {
+            groupID = nil
+        }
+        guard groupID != hoveredGroupID else { return }
+        cancelGroupExpansion()
+        guard let groupID, let tabID = sourceID else { return }
+        hoveredGroupID = groupID
+        groupExpansionTask = Task { [weak self, weak browser] in
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            guard !Task.isCancelled, let self, let browser, self.hoveredGroupID == groupID else { return }
+            self.hoveredGroupID = nil
+            self.groupExpansionTask = nil
+            guard self.origin === browser, self.sourceID == tabID, browser.tab(withID: tabID) != nil,
+                  let point = self.location,
+                  self.destination(at: point, source: .tab(tabID), browser: browser)?.region.target == .group(groupID)
+            else { return }
+            browser.expandGroup(groupID)
+        }
+    }
+
+    private func cancelGroupExpansion() {
+        groupExpansionTask?.cancel()
+        groupExpansionTask = nil
+        hoveredGroupID = nil
     }
 
     /// Pick the most specific visible target first, then validate it. An invalid tab must not fall through
@@ -167,6 +203,7 @@ final class TabDragController {
     }
 
     func reset() {
+        cancelGroupExpansion()
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
         source = nil

@@ -538,7 +538,7 @@ final class BrowserModel {
         id.flatMap { id in groups.contains { $0.id == id } ? id : nil }
     }
 
-    private func expandGroup(_ id: UUID?) {
+    func expandGroup(_ id: UUID?) {
         guard let id, let index = groups.firstIndex(where: { $0.id == id }), groups[index].isCollapsed else { return }
         groups[index].isCollapsed = false
     }
