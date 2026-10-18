@@ -1,18 +1,19 @@
-# Pins, group drops and window controls — 2026-10-17
+# Pins, group drops and window controls — 2026-10-18
 
-Drops now commit on release, with an insertion marker. Dropping beside a tab can change its group while preserving its pinned state. Group headers accept empty or collapsed groups; dropping on New Tab removes group membership. Joined split cards move together. Typed, process-local payloads replace the stale view-local drag ID, and ordinary text or another window's tabs are rejected. Hovering alone does not modify the session.
+Tab moves use a window-local SwiftUI drag gesture. The previous NSItemProvider path did not reliably reach a drop, so passing model tests was insufficient. The gesture now tracks visible tab and folder bounds directly, displays an insertion marker or folder outline, and commits only on release. It keeps the existing BrowserModel operations, tab objects, selection, pin state and split pairs.
 
-Window controls are laid out after AppKit's titlebar pass. The inner titlebar and outer container use the same row height, and frame changes on either titlebar view or the standard controls schedule a coalesced repair. Full-screen windows keep AppKit's layout.
+Drop on a folder header to join it, including an empty or collapsed folder. Drop before/after a tab to join its group at that position. Drop in the empty sidebar or its temporary “Move out of group” footer to remove membership. The horizontal strip has the same destination after the add button. Escape, switching windows, or releasing outside the strip cancels the move. Clipped rows cannot intercept another scroll area's drops; edge scrolling follows the actual layout axis. Hover previews are suppressed during dragging.
+
+Window controls retain the previous AppKit repair: inner titlebar and outer container share the row height, frame changes schedule a coalesced repair, and full-screen windows keep AppKit's layout.
 
 ## Verified
 
-- `make test`: 262 tests pass. Coverage includes pin ordering in both directions, cross-group insertion, empty/collapsed groups, removal from a group, split pairs, invalid IDs, typed payload loading, suspended pages and unchanged selection.
-- Native AppKit regression: resetting the inner titlebar and standard controls reproduces a control center 35 pt from the top before the fix; the corrected vertical row centers it at 23 pt. Tests also reset only the buttons, alternate 40/46 pt rows, and resize the window.
-- Release build, strict code signing and startup smoke pass in the dedicated `LisierePinnedGroups` build directory. The isolated `Lisiere Pins QA.app` retains sandbox and hardened runtime.
-- In that Release, horizontal/vertical switching and switching between two profiles with different layouts preserve the browser window, pinned tabs, group and selection. Pin menus omit Close Tab. Clicks and native context menus remain usable.
+- `make test`: 267 tests pass. Six controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
+- Pointer gestures in the isolated signed Release actually changed the UI: horizontal pin reordering; horizontal folder entry and exit; sidebar pin reordering across rows; regular tabs entering, leaving and moving between folders; insertion before another folder's tab; dropping into a collapsed folder; moving a pin into and out of a folder while keeping it pinned. Folder counts and tab order were checked after release.
+- Releasing over web content leaves the original folder unchanged. Ordinary tab selection, the Close button and native context menus remain usable.
+- The QA bundle retains sandbox and hardened runtime. Full Release signing, startup and installation checks are performed against exact bundle paths.
+- Native AppKit regressions continue to check traffic-light positioning after titlebar/button resets, alternating row heights and resizing. The automation's screen-sharing badge covers the traffic lights in screenshots, so screenshot evidence does not establish their exact position.
 
-## Manual acceptance remaining
+## Coverage boundary
 
-The computer-control drag starts the native drag but never reaches a drop callback, both in Lisière and in an independent minimal SwiftUI drag/drop application (one start, zero drops). This prevents an automated end-to-end claim for the pointer gesture. Model and payload tests pass; a physical mouse/trackpad test must still check pin reordering, dropping into a collapsed group, dropping beside a tab in another group, and cancelling a drag.
-
-The automation's screen-sharing badge covers the traffic lights in screenshots; exact control positioning is checked by native AppKit geometry assertions instead.
+The controller tests cover Escape and continuous edge-scroll decisions. A held physical mouse/trackpad gesture with Escape or prolonged edge scrolling has not been exercised. Pointer-based membership and reorder behavior above was exercised end to end, rather than inferred from the model tests.

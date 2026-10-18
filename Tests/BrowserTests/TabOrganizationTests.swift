@@ -62,20 +62,6 @@ final class TabOrganizationTests: XCTestCase {
         XCTAssertTrue(pair.allSatisfy { $0.groupID == nil })
     }
 
-    func testTabDragProviderKeepsItsIdentityInThePayloadAndRejectsPlainText() async throws {
-        let id = UUID()
-        let provider = TabDragPayload.provider(for: id)
-        XCTAssertEqual(TabDragPayload.id(from: provider), id)
-        XCTAssertNil(TabDragPayload.id(from: NSItemProvider(object: id.uuidString as NSString)))
-        let data: Data = try await withCheckedThrowingContinuation { continuation in
-            provider.loadDataRepresentation(forTypeIdentifier: TabDragPayload.type.identifier) { data, error in
-                if let data { continuation.resume(returning: data) }
-                else { continuation.resume(throwing: error ?? CocoaError(.fileReadCorruptFile)) }
-            }
-        }
-        XCTAssertEqual(String(data: data, encoding: .utf8), id.uuidString)
-    }
-
     func testPinsLeadAndSurviveEveryTabClosurePath() throws {
         let browser = BrowserModel.makePrivate()
         defer { browser.releaseClosedWindow() }

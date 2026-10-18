@@ -1,0 +1,128 @@
+import XCTest
+@testable import Browser
+
+@MainActor
+final class TabDragTests: XCTestCase {
+    func testPointerDropIntoFolderCommitsOnlyOnRelease() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let first = browser.createGroup(name: "First", color: .blue, tabID: tab.id)
+        let second = browser.createGroup(name: "Second", color: .green)
+        browser.toggleGroupCollapsed(second)
+        drag.updateFrames(.init(regions: [
+            .init(id: "folder", target: .group(second), frame: CGRect(x: 0, y: 60, width: 220, height: 28), horizontal: false)
+        ]), browser: browser)
+        drag.update(id: tab.id, location: CGPoint(x: 100, y: 70), browser: browser)
+        XCTAssertEqual(drag.selection?.region.target, .group(second))
+        XCTAssertEqual(tab.groupID, first)
+        let view = tab.webView
+        drag.finish(id: tab.id, location: CGPoint(x: 100, y: 70), browser: browser)
+        XCTAssertEqual(tab.groupID, second)
+        XCTAssertFalse(browser.groups[1].isCollapsed)
+        XCTAssertTrue(tab.webView === view)
+        XCTAssertEqual(browser.activeTabID, tab.id)
+        XCTAssertNil(drag.sourceID)
+    }
+
+    func testDroppingPinOnEmptySidebarRemovesOnlyMembership() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        browser.createGroup(name: "Work", color: .blue, tabID: tab.id)
+        browser.setPinned(true, for: tab.id)
+        drag.updateFrames(.init(regions: [
+            .init(id: "background", target: .group(nil), frame: CGRect(x: 0, y: 46, width: 236, height: 500), horizontal: false, priority: 0)
+        ]), browser: browser)
+        drag.update(id: tab.id, location: CGPoint(x: 100, y: 300), browser: browser)
+        drag.finish(id: tab.id, location: CGPoint(x: 100, y: 300), browser: browser)
+        XCTAssertNil(tab.groupID)
+        XCTAssertTrue(tab.isPinned)
+        XCTAssertEqual(browser.tabs.count, 1)
+    }
+
+    func testEscapeAndOutsideDropLeaveMembershipUnchanged() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let id = try XCTUnwrap(browser.activeTabID)
+        let group = browser.createGroup(name: "Work", color: .blue, tabID: id)
+        let point = CGPoint(x: 50, y: 50)
+        drag.updateFrames(.init(regions: [
+            .init(id: "outside", target: .group(nil), frame: CGRect(x: 0, y: 0, width: 100, height: 100), horizontal: false)
+        ]), browser: browser)
+        drag.update(id: id, location: point, browser: browser)
+        drag.cancel()
+        drag.update(id: id, location: point, browser: browser)
+        drag.finish(id: id, location: point, browser: browser)
+        XCTAssertEqual(browser.activeTab?.groupID, group)
+        drag.update(id: id, location: point, browser: browser)
+        drag.finish(id: id, location: CGPoint(x: 500, y: 500), browser: browser)
+        XCTAssertEqual(browser.activeTab?.groupID, group)
+        XCTAssertNil(drag.selection)
+    }
+
+    func testClippedTabsDoNotStealFolderDropsAndInvalidTabsDoNotUngroup() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let pin = try XCTUnwrap(browser.activeTab)
+        let group = browser.createGroup(name: "Work", color: .blue, tabID: pin.id)
+        browser.setPinned(true, for: pin.id)
+        browser.addTab()
+        let regular = try XCTUnwrap(browser.activeTabID)
+        let frame = CGRect(x: 0, y: 100, width: 220, height: 32)
+        drag.updateFrames(.init(regions: [
+            .init(id: "hidden", target: .tab(regular), frame: frame, horizontal: false, viewport: "pins", priority: 2),
+            .init(id: "folder", target: .group(group), frame: frame, horizontal: false),
+            .init(id: "background", target: .group(nil), frame: frame, horizontal: false, priority: 0)
+        ], viewports: ["pins": CGRect(x: 0, y: 0, width: 220, height: 50)]), browser: browser)
+        let point = CGPoint(x: 100, y: 110)
+        drag.update(id: pin.id, location: point, browser: browser)
+        XCTAssertEqual(drag.selection?.region.id, "folder")
+        drag.updateFrames(.init(regions: [
+            .init(id: "regular", target: .tab(regular), frame: frame, horizontal: false, priority: 2),
+            .init(id: "background", target: .group(nil), frame: frame, horizontal: false, priority: 0)
+        ]), browser: browser)
+        XCTAssertNil(drag.selection)
+        drag.finish(id: pin.id, location: point, browser: browser)
+        XCTAssertEqual(pin.groupID, group)
+    }
+
+    func testScrollDirectionUsesLayoutRatherThanViewportSize() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let id = try XCTUnwrap(browser.activeTabID)
+        let frame = CGRect(x: 0, y: 0, width: 220, height: 36)
+        let point = CGPoint(x: 110, y: 35)
+        drag.updateFrames(.init(viewports: ["pins": frame]), browser: browser)
+        drag.update(id: id, location: point, browser: browser)
+        XCTAssertEqual(drag.scrollRequest, .init(viewport: "pins", forward: true, horizontal: false))
+        drag.updateFrames(.init(viewports: ["pins": frame], horizontalViewports: ["pins"]), browser: browser)
+        XCTAssertNil(drag.scrollRequest)
+        drag.update(id: id, location: CGPoint(x: 219, y: 18), browser: browser)
+        XCTAssertEqual(drag.scrollRequest, .init(viewport: "pins", forward: true, horizontal: true))
+    }
+
+    func testGeometrySelectsInsertionSideAndNextOffscreenTabForScrolling() throws {
+        let browser = BrowserModel.makePrivate()
+        let drag = TabDragController()
+        defer { drag.reset(); browser.releaseClosedWindow() }
+        let first = try XCTUnwrap(browser.activeTabID)
+        browser.addTab()
+        let second = try XCTUnwrap(browser.activeTabID)
+        drag.updateFrames(.init(regions: [
+            .init(id: "second", target: .tab(second), frame: CGRect(x: 0, y: 80, width: 220, height: 32), horizontal: false, viewport: "tabs", priority: 2)
+        ], viewports: ["tabs": CGRect(x: 0, y: 0, width: 220, height: 100)]), browser: browser)
+        drag.update(id: first, location: CGPoint(x: 100, y: 98), browser: browser)
+        XCTAssertEqual(drag.selection?.after, true)
+        let request = try XCTUnwrap(drag.scrollRequest)
+        XCTAssertTrue(request.forward)
+        XCTAssertEqual(drag.nextScrollTarget(request), AnyHashable(second))
+        drag.finish(id: first, location: CGPoint(x: 100, y: 98), browser: browser)
+        XCTAssertEqual(browser.tabs.map(\.id), [second, first])
+    }
+}

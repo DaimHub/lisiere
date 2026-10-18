@@ -87,6 +87,8 @@ struct TabStrip: View {
 
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
+    @State private var drag = TabDragController()
+    @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var addButtonIsFocused: Bool
@@ -101,6 +103,30 @@ struct TabStrip: View {
             case .vertical: sidebar
             }
         }
+        .coordinateSpace(name: TabDragController.coordinateSpace)
+        .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
+            GeometryReader { geometry in
+                let frames = bounds.resolve(in: geometry)
+                Color.clear
+                    .onChange(of: frames, initial: true) { _, frames in drag.updateFrames(frames, browser: browser) }
+                if let id = drag.sourceID, let tab = browser.tab(withID: id), let point = drag.location {
+                    HStack(spacing: 6) {
+                        TabIcon(tab: tab, isActive: false)
+                        if !tab.isPinned { Text(tab.title).font(.system(size: 12)).lineLimit(1) }
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(width: tab.isPinned ? 44 : 160, height: 32)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                    .position(x: point.x + 20, y: point.y + 20)
+                }
+            }.allowsHitTesting(false)
+        }
+        .onChange(of: dragGestureActive) { _, active in if !active { drag.reset() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+            if notification.object as? NSWindow === browser.window, drag.sourceID != nil { drag.cancel() }
+        }
+        .onDisappear { drag.reset() }
         .task(id: hoveredTabID) { await updateHoverCard() }
         .sheet(item: $groupEditor) { request in
             TabGroupEditor(browser: browser, request: request)
@@ -140,6 +166,8 @@ struct TabStrip: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
+                    .overlay { if drag.sourceID != nil { outsideGroupHint(compact: true) } }
+                    .tabDropRegion("outside-horizontal", target: .group(nil), horizontal: false, drag: drag, accent: accent)
                     .browserContextMenu { stripMenuActions }
             }
             .padding(.leading, leading)
@@ -151,7 +179,8 @@ struct TabStrip: View {
     }
 
     private func horizontalSections(_ sections: [BrowserModel.TabSection], width: CGFloat) -> some View {
-        ScrollViewReader { proxy in
+        let viewport = sections.first?.isPinned == true ? "pins" : "tabs"
+        return ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: spacing) {
                     ForEach(sections) { section in
@@ -166,6 +195,8 @@ struct TabStrip: View {
                 .frame(height: BrowserChrome.tabRowHeight)
             }
             .scrollIndicators(.never)
+            .tabDragViewport(viewport, horizontal: true)
+            .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
             .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: width) { _, _ in revealActiveTab(in: sections, using: proxy) }
@@ -202,14 +233,23 @@ struct TabStrip: View {
                         Divider().padding(.horizontal, BrowserChrome.edgeInset).padding(.vertical, 4)
                     }
                     sidebarSections(sections.filter { !$0.isPinned }, showsNewTab: true)
+                    if drag.sourceID != nil {
+                        outsideGroupHint(compact: false)
+                            .frame(height: 32)
+                            .padding(.horizontal, BrowserChrome.edgeInset)
+                            .padding(.bottom, 4)
+                            .tabDropRegion("outside-footer", target: .group(nil), horizontal: false, drag: drag, accent: accent)
+                    }
                 }
+                .tabDropRegion("outside-sidebar", target: .group(nil), horizontal: false, priority: 0, drag: drag, accent: accent)
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: browser.tabs.map(\.id))
         }
     }
 
     private func sidebarSections(_ sections: [BrowserModel.TabSection], showsNewTab: Bool) -> some View {
-        ScrollViewReader { proxy in
+        let viewport = showsNewTab ? "tabs" : "pins"
+        return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 4) {
                     ForEach(sections) { section in
@@ -237,6 +277,8 @@ struct TabStrip: View {
                 .padding(.bottom, BrowserChrome.edgeInset)
             }
             .scrollIndicators(.never)
+            .tabDragViewport(viewport, horizontal: false)
+            .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
             .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
@@ -270,7 +312,9 @@ struct TabStrip: View {
         .accessibilityValue("\(group.isCollapsed ? "Collapsed" : "Expanded"), \(group.color.title)")
         .accessibilityIdentifier("tab-group-\(section.id)")
         .browserContextMenu { groupMenuActions(group) }
-        .tabDropDestination(browser: browser, target: .group(group.id), horizontal: false, accent: group.color.tint)
+        .id(section.id)
+        .tabDropRegion(section.id, target: .group(group.id), horizontal: false,
+                       viewport: section.isPinned ? "pins" : "tabs", drag: drag, accent: group.color.tint)
     }
 
     private var newTabButton: some View {
@@ -304,7 +348,21 @@ struct TabStrip: View {
         .help("New Tab (⌘T)")
         .accessibilityLabel("New Tab")
         .accessibilityIdentifier(addButtonID)
-        .tabDropDestination(browser: browser, target: .group(nil), horizontal: false, accent: accent)
+        .tabDropRegion("outside-new-tab", target: .group(nil), horizontal: false,
+                       viewport: layout == .vertical ? "tabs" : nil, drag: drag, accent: accent)
+    }
+
+    private func outsideGroupHint(compact: Bool) -> some View {
+        let grouped = browser.tab(withID: drag.sourceID)?.groupID != nil
+        return HStack(spacing: 6) {
+            Image(browserIcon: .ungroup, size: 14)
+            if !compact { Text(grouped ? "Move out of group" : "Move to end").font(.system(size: 11.5)) }
+        }
+        .foregroundStyle(accent)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(accent.opacity(drag.selection?.region.target == .group(nil) ? 0.16 : 0.07),
+                    in: RoundedRectangle(cornerRadius: 7))
+        .allowsHitTesting(false)
     }
 
     private func addTab() {
@@ -388,13 +446,21 @@ struct TabStrip: View {
                     hoveredTabID = nil
                 }
             }
-            .onDrag {
-                hoverCardTabID = nil
-                suppressedHoverCardTabID = tab.id
-                return TabDragPayload.provider(for: tab.id)
-            }
-            .tabDropDestination(browser: browser, target: .tab(tab.id),
-                                horizontal: layout == .horizontal || tab.isPinned, accent: accent)
+            .opacity(drag.sourceID == tab.id ? 0.4 : 1)
+            .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(TabDragController.coordinateSpace))
+                .updating($dragGestureActive) { _, active, _ in active = true }
+                .onChanged { value in
+                    hoverCardTabID = nil
+                    suppressedHoverCardTabID = tab.id
+                    drag.update(id: tab.id, location: value.location, browser: browser)
+                }
+                .onEnded { value in
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                        drag.finish(id: tab.id, location: value.location, browser: browser)
+                    }
+                })
+            .tabDropRegion(tab.id.uuidString, target: .tab(tab.id), horizontal: layout == .horizontal || tab.isPinned,
+                           viewport: tab.isPinned ? "pins" : "tabs", priority: 2, drag: drag, accent: accent)
             .browserContextMenu { tabMenuActions(for: tab) }
     }
 
@@ -407,13 +473,13 @@ struct TabStrip: View {
             suppressedHoverCardTabID = nil
             return
         }
-        guard hoveredTabID != suppressedHoverCardTabID else { return }
+        guard drag.sourceID == nil, hoveredTabID != suppressedHoverCardTabID else { return }
         if hoverCardTabID != nil {
             hoverCardTabID = hoveredTabID
             return
         }
         try? await Task.sleep(for: .milliseconds(550))
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, drag.sourceID == nil else { return }
         hoverCardTabID = hoveredTabID
     }
 
