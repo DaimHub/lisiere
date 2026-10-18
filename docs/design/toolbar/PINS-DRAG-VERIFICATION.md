@@ -110,10 +110,25 @@ The signed Release was also exercised with six consecutive sidebar clicks, seven
 four clicks on the active ordinary folder, and subsequent pin entry/exit in each layout. Counts,
 disclosure state and the active page stayed correct. No disclosure or drop correctness defect was
 reproduced; the production initializer only permits the native tests to share the strip's existing
-drag controller. Display profiling results are assessed separately from these layout assertions.
+drag controller. The animation implementation is unchanged.
 
-These checks establish animated-layout continuity and live target synchronization. They do not measure
-GPU/display frame pacing or a held physical gesture. Screenshot capture waits for a stable window; a
+Instruments' Animation Hitches template was attached to the exact isolated QA Release process. During
+the timed horizontal burst (18 header clicks in 4.496 s), it recorded 15 hitch events, each 8.33–12.50 ms.
+During the sidebar burst (16 header clicks and a pin dragged out, 5.040 s), it recorded 69 events, each
+8.33–16.67 ms. These measurements establish small rendering delays under profiling; they do not establish
+perfect frame pacing or an uninstrumented frame rate. The complete mixed-action recordings also include
+captures, menus and layout changes: 194 events in the 61.012 s horizontal recording (maximum 95.83 ms),
+and 95 in the 30.928 s sidebar recording (maximum 33.33 ms). Only events within the recording window and
+belonging to the QA process are counted. Exported event totals outside that window are excluded.
+
+No specific animation or hit-testing fault was isolated from these traces. The native-host tests cover
+the timed hover/re-entry path; the sidebar collapsed-folder drop occurred after profiling stopped and
+is functional evidence only. The local trace exports and phase summary are retained under the ignored
+`.build/folder-motion/` directory.
+
+The native-host checks establish animated-layout continuity and live target synchronization; display
+profiling is a separate measurement with the limits above. Neither exercises a held physical gesture.
+Screenshot capture waits for a stable window; a
 burst attempted during a 240 ms transition returned its first image after about 1 second, so those
 images cannot establish frame-by-frame visual smoothness. The native-host tests are skipped when
 system Reduce Motion is enabled rather than changing the user's accessibility preference.
