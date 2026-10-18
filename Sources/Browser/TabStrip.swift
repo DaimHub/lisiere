@@ -618,7 +618,7 @@ private struct TabDragPreview: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(width: tab.isPinned ? 44 : 160, height: 32)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
                 .position(x: point.x + 20, y: point.y + 20)
             } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
@@ -628,11 +628,15 @@ private struct TabDragPreview: View {
                     .foregroundStyle(group.color.tint)
                     .padding(.horizontal, 10)
                     .frame(width: 160, height: 32)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                     .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
                     .position(x: point.x + 20, y: point.y + 20)
             }
-        }.allowsHitTesting(false)
+        }
+        // A native material here creates/removes a backdrop view for every drag. Keep the
+        // transient preview lightweight, and never animate its cleanup with the committed move.
+        .transaction { $0.animation = nil }
+        .allowsHitTesting(false)
     }
 }
 
