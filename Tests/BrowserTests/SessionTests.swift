@@ -133,6 +133,7 @@ final class SessionTests: XCTestCase {
     func testLegacySessionsDecodeWithoutParkedWindowsOrWindowIdentity() throws {
         let bytes = try PropertyListEncoder.binary.encode(SessionSnapshot(windows: [window(["Legacy"])]))
         var legacy = try XCTUnwrap(PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any])
+        legacy.removeValue(forKey: "version")
         legacy.removeValue(forKey: "parkedWindows")
         let data = try PropertyListSerialization.data(fromPropertyList: legacy, format: .binary, options: 0)
         let restored = try PropertyListDecoder().decode(SessionSnapshot.self, from: data)
