@@ -223,7 +223,10 @@ final class TabDragController {
         guard let region else { return nil }
         switch (source, region.target) {
         case let (.tab(sourceID), .tab(id)):
-            guard browser.canDropTab(sourceID, beside: id) else { return nil }
+            // SwiftUI can retain an outgoing card's anchor during its collapse transition.
+            // Keep it a blocker until its frame disappears, but never drop into the hidden child.
+            guard browser.canDropTab(sourceID, beside: id), let tab = browser.tab(withID: id),
+                  !browser.groups.contains(where: { $0.id == tab.groupID && $0.isCollapsed }) else { return nil }
         case let (.tab, .group(id)):
             guard id == nil || browser.groups.contains(where: { $0.id == id }) else { return nil }
         case let (.group(sourceID), .groupOrder(id)):

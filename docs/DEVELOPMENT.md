@@ -224,4 +224,6 @@ original deadline; cancellation or an invalid release restores immediately, whil
 keeps the target open. Their whole visible section counts as inside, and previously open folders remain
 open. Release pointer drops are verified;
 the timed opening/re-collapse cycle is covered by asynchronous controller tests rather than physical automation.
-282 tests pass.
+283 tests pass. Folder disclosure now uses a shared 240 ms smooth transition for content, neighboring
+sections and pinned viewport sizing in both layouts; Reduce Motion disables it. Transient outgoing
+child bounds cannot accept a drop into a collapsed folder.

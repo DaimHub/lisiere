@@ -34,13 +34,27 @@ Pinned and ordinary folder headers share the same native button style in both la
 light tint and quiet border identify the folder; a folder containing a visible page keeps a stronger
 resting tint. Hover strengthens the fill and border. Pressing darkens the surface and slightly insets
 the label, while the outer header and drop bounds keep their existing dimensions. The disclosure
-chevron rotates over 160 ms; hover and release use 140 ms transitions and pressing uses 80 ms.
+chevron follows the 240 ms folder transition; hover and release use 140 ms transitions and pressing uses 80 ms.
 
 Each visible section owns its hover state, so hovering a pinned header does not highlight the same
 group's ordinary header. Dragging suppresses mouse hover/press decoration and uses the existing drop
 outline with a tinted target surface. Keyboard focus receives a distinct ring. Dark appearance adjusts
 the fill, increased contrast strengthens borders, and Reduce Motion disables transitions and label
 movement while retaining color feedback. Group state, persistence and drag timing are unchanged.
+
+## Opening and closing animation
+
+A shared 240 ms smooth transition animates folder disclosure in both layouts, including header clicks,
+context-menu commands, accepted drops and spring-loaded hover changes. Children use a short directional
+fade (6 pt vertically, 8 pt horizontally), while adjacent sections and the pinned viewport resize in the
+same transaction. The existing tab/page identities and model collapse state remain authoritative; there
+is no second delayed copy of the state. Rapid reversals retarget SwiftUI's ongoing transition.
+
+The collapse-state animation excludes the pointer-following drag overlay, so the drag preview remains
+responsive. A card fading out cannot accept a stale child drop or accidentally route it to the ungrouped
+background before its geometry disappears. The next rendered empty area becomes droppable normally.
+Reduce Motion removes the disclosure animation and directional fade. The existing 500 ms hover-open
+and 300 ms exit grace periods remain unchanged.
 
 ## Folder ordering
 
@@ -59,9 +73,10 @@ background, so a self-drop or a drop on an ungrouped site cannot accidentally se
 
 ## Verified
 
-- `make test`: 282 tests pass. Controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Empty-space regressions cover both layouts, moving a folder to the end, already-last drops, preserved folder metadata and pin membership, and occupied regions blocking background drops. Three asynchronous hover tests exercise the real 500 ms task, stable deadlines, retargeting, cancellation, stale source/target removal, folder-drag exclusion, and precise child insertion after expansion with page identity and pin state preserved. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
+- `make test`: 283 tests pass. Controller tests cover release-only commits, group removal without unpinning, cancellation, clipped and invalid targets, insertion position and edge-scroll geometry. Empty-space regressions cover both layouts, moving a folder to the end, already-last drops, preserved folder metadata and pin membership, and occupied regions blocking background drops. Three asynchronous hover tests exercise the real 500 ms task, stable deadlines, retargeting, cancellation, stale source/target removal, folder-drag exclusion, and precise child insertion after expansion with page identity and pin state preserved. Existing model tests cover pins in both directions, cross-group insertion, empty/collapsed groups, split pairs, suspended pages and selection preservation.
 - Four further asynchronous regressions cover re-collapse in both layouts, child cards and gaps, invalid pin insertion, re-entry, cancellation/reset, clipped targets, source/target deletion, successful header and child drops, and preservation of independently opened folders.
 - Two additional asynchronous regressions cover the 300 ms grace period, header/child/gap re-entry in both layouts, a fresh deadline on the next exit, stable deadlines during outside movement and geometry updates, and pending-task cleanup after a successful drop, cancellation, reset or release before a later gesture.
+- An additional regression covers stale child bounds during collapse in both layouts: invalid drops preserve membership, reversing collapse restores the child destination, and the background becomes available after the old frame disappears.
 - Pointer gestures in the isolated signed Release actually changed the UI: horizontal pin reordering; horizontal folder entry and exit; sidebar pin reordering across rows; regular tabs entering, leaving and moving between folders; insertion before another folder's tab; dropping into a collapsed folder; moving a pin into and out of a folder while keeping it pinned. Folder counts and tab order were checked after release.
 - Folder gestures were verified in both directions and layouts, with empty, expanded and collapsed folders. The sidebar also reordered pinned folders, including one with a matching regular section. Clicking headers still toggles collapse. The shared order survives layout switches and relaunch. Four new regressions cover both axes, section/child target separation, cancellation, clipped targets, mixed pins, split pairs, stable insertion and session encoding.
 - Empty-space folder drops were exercised in the signed Release: Recherche moved after Travail in the blank sidebar; dragging Travail's regular header into the horizontal trailing space updated the shared order of its pinned section too. Site counts, colors and active page stayed intact. Repeating the last-folder drop did nothing, and dropping a folder over a loose pin left the order unchanged. The final order survived relaunch.
@@ -69,6 +84,7 @@ background, so a self-drop or a drop on an ungrouped site cannot accidentally se
 - With re-collapse installed, dragging pins past already-expanded folders and releasing in empty space preserves those folders in both layouts. A sidebar drop into a collapsed folder still leaves the receiving folder open, with the active page intact.
 - With the 300 ms grace period installed, Release checks confirmed horizontal and sidebar pin entry/exit, preservation of already-open folders, and a sidebar drop into a collapsed folder remaining open. Folder counts, pin state and the active page stayed correct. The timed re-entry path remains controller-tested as noted below.
 - Folder button styling was checked in the signed Release in light/dark appearance and both layouts. Header clicks still collapse/expand pinned and ordinary sections; sidebar site drops and whole-folder moves in both layouts preserve membership and active content. Resting tints and disclosure states were inspected. The automation did not capture a reliable held-press or hover-only frame, so transient feedback, keyboard focus and system Reduce Motion/contrast remain direct manual checks.
+- With disclosure animation enabled, signed Release pointer checks confirmed opening and closing in both layouts, consecutive reversals on pinned headers, and synchronized pinned/ordinary sections of the active folder. Collapsed children disappear without leftover cards; expanding restores them and preserves the active page. A sidebar pin dropped into a collapsed folder opened it and updated the count correctly. Screenshots verify the resulting layout, not frame-by-frame smoothness; transient motion and the system Reduce Motion path remain manual checks.
 - Releasing over web content leaves the original folder unchanged. Ordinary tab selection, the Close button and native context menus remain usable.
 - The QA bundle retains sandbox and hardened runtime. Full Release signing, startup and installation checks are performed against exact bundle paths.
 - Native AppKit regressions continue to check traffic-light positioning after titlebar/button resets, alternating row heights and resizing. The automation's screen-sharing badge covers the traffic lights in screenshots, so screenshot evidence does not establish their exact position.

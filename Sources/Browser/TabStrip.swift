@@ -96,6 +96,11 @@ struct TabStrip: View {
 
     private let spacing = HorizontalTabStripMetrics.spacing
     private let addButtonID = "new-tab-button"
+    private var folderAnimation: Animation? { reduceMotion ? nil : .smooth(duration: 0.24) }
+    private var folderContentTransition: AnyTransition {
+        reduceMotion ? .identity : .opacity.combined(with: .offset(
+            x: layout == .horizontal ? -8 : 0, y: layout == .vertical ? -6 : 0))
+    }
 
     var body: some View {
         Group {
@@ -104,6 +109,10 @@ struct TabStrip: View {
             case .vertical: sidebar
             }
         }
+        // One transaction coordinates the children, neighboring sections and pin viewport size,
+        // regardless of whether the change came from a click, menu, or spring-loaded drag.
+        // Keep the pointer-following drag overlay outside this animation scope.
+        .animation(folderAnimation, value: Dictionary(uniqueKeysWithValues: browser.groups.map { ($0.id, $0.isCollapsed) }))
         .coordinateSpace(name: TabDragController.coordinateSpace)
         .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
             GeometryReader { geometry in
@@ -199,6 +208,7 @@ struct TabStrip: View {
                             if let group = section.group { groupHeader(group, section: section) }
                             ForEach(section.visibleCards) { card in
                                 tabGroup(card, width: width)
+                                    .transition(section.group == nil ? .opacity : folderContentTransition)
                             }
                         }
                         .tabGroupDropRegion(section.id, groupID: section.group?.id, horizontal: true,
@@ -274,8 +284,12 @@ struct TabStrip: View {
                                         tabItem(for: tab, width: nil).id(tab.id)
                                     }
                                 }
+                                .transition(section.group == nil ? .opacity : folderContentTransition)
                             } else if !section.isPinned {
-                                ForEach(section.visibleCards) { card in tabGroup(card, width: nil) }
+                                ForEach(section.visibleCards) { card in
+                                    tabGroup(card, width: nil)
+                                        .transition(section.group == nil ? .opacity : folderContentTransition)
+                                }
                             }
                         }
                         .tabGroupDropRegion(section.id, groupID: section.group?.id, horizontal: false,
@@ -307,7 +321,7 @@ struct TabStrip: View {
             HStack(spacing: 6) {
                 Image(browserIcon: .forward, size: 10)
                     .rotationEffect(.degrees(group.isCollapsed ? 0 : 90))
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: group.isCollapsed)
+                    .animation(folderAnimation, value: group.isCollapsed)
                 Image(browserIcon: .tabGroup, size: 13).foregroundStyle(group.color.tint)
                 Text(group.name).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)

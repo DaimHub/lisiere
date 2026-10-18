@@ -3,6 +3,48 @@ import XCTest
 
 @MainActor
 final class TabDragTests: XCTestCase {
+    func testCollapsingChildBlocksStaleDropsUntilItsAnimatedFrameDisappears() throws {
+        for horizontal in [false, true] {
+            let browser = BrowserModel.makePrivate()
+            let drag = TabDragController()
+            defer { drag.reset(); browser.releaseClosedWindow() }
+            let source = try XCTUnwrap(browser.activeTab)
+            let original = browser.createGroup(name: "Source", color: .blue, tabID: source.id)
+            browser.addTab()
+            let child = try XCTUnwrap(browser.activeTab)
+            let target = browser.createGroup(name: "Target", color: .green, tabID: child.id)
+            browser.setPinned(horizontal, for: source.id)
+            browser.setPinned(horizontal, for: child.id)
+            let frame = CGRect(x: 0, y: 32, width: 120, height: 32)
+            var frames = TabDragFrames(regions: [
+                .init(id: "outside", target: .group(nil), frame: frame, horizontal: horizontal, priority: 0),
+                .init(id: "child", target: .tab(child.id), frame: frame, horizontal: horizontal, priority: 2)
+            ])
+            let point = CGPoint(x: 30, y: 48)
+            drag.updateFrames(frames, browser: browser)
+            drag.update(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(drag.selection?.region.target, .tab(child.id))
+            browser.collapseGroup(target)
+            // The rendered exit transition may still publish the old card frame.
+            drag.updateFrames(frames, browser: browser)
+            XCTAssertNil(drag.selection)
+            drag.finish(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(source.groupID, original)
+            XCTAssertTrue(browser.groups[1].isCollapsed)
+
+            browser.expandGroup(target)
+            drag.update(id: source.id, location: point, browser: browser)
+            XCTAssertEqual(drag.selection?.region.target, .tab(child.id), "Reversing collapse restores the target immediately")
+            browser.collapseGroup(target)
+            frames.regions.removeLast()
+            drag.updateFrames(frames, browser: browser)
+            XCTAssertEqual(drag.selection?.region.target, .group(nil), "Only the actual empty area accepts an outside drop")
+            drag.finish(id: source.id, location: point, browser: browser)
+            XCTAssertNil(source.groupID)
+            XCTAssertEqual(source.isPinned, horizontal)
+        }
+    }
+
     func testTabHoverOpensFolderBeforeReleaseAndAllowsPreciseChildInsertion() async throws {
         for horizontal in [false, true] {
             let browser = BrowserModel.makePrivate()
