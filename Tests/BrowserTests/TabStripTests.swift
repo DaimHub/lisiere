@@ -42,6 +42,7 @@ final class TabStripTests: XCTestCase {
         XCTAssertEqual(metrics.tabWidth, 220)
         XCTAssertEqual(metrics.viewportWidth, metrics.tabWidth)
         XCTAssertFalse(metrics.scrolls)
+        XCTAssertFalse(metrics.showsOverflowMenu)
     }
 
     func testResizingReservesAddButtonAndDragAreaBeforeScrolling() {
@@ -49,12 +50,35 @@ final class TabStripTests: XCTestCase {
         let narrow = HorizontalTabStripMetrics(tabCount: 8, width: 680, leading: 85)
         let overflow = HorizontalTabStripMetrics(tabCount: 30, width: 680, leading: 85)
         XCTAssertGreaterThan(wide.tabWidth, narrow.tabWidth)
-        XCTAssertFalse(narrow.scrolls)
+        XCTAssertFalse(wide.scrolls)
+        XCTAssertTrue(narrow.scrolls)
+        XCTAssertTrue(narrow.showsOverflowMenu)
         XCTAssertTrue(overflow.scrolls)
-        XCTAssertEqual(overflow.tabWidth, 56)
+        XCTAssertEqual(overflow.tabWidth, 120)
         XCTAssertEqual(overflow.viewportWidth, 680 - 85 - BrowserChrome.edgeInset
                        - HorizontalTabStripMetrics.addButtonSize - HorizontalTabStripMetrics.dragAreaWidth
-                       - HorizontalTabStripMetrics.spacing * 2)
+                       - HorizontalTabStripMetrics.overflowButtonSize - HorizontalTabStripMetrics.spacing * 3)
+    }
+
+    func testOverflowAppearsOnlyWhenReadableTabsNoLongerFit() {
+        let controls = CGFloat(85) + BrowserChrome.edgeInset + HorizontalTabStripMetrics.addButtonSize
+            + HorizontalTabStripMetrics.dragAreaWidth + HorizontalTabStripMetrics.spacing * 2
+        let content = CGFloat(4 * 120) + HorizontalTabStripMetrics.spacing * 3 + 124
+        let fits = HorizontalTabStripMetrics(tabCount: 4, width: controls + content, leading: 85, supplementaryWidth: 124)
+        let overflows = HorizontalTabStripMetrics(tabCount: 4, width: controls + content - 1, leading: 85, supplementaryWidth: 124)
+        XCTAssertFalse(fits.showsOverflowMenu)
+        XCTAssertFalse(fits.scrolls)
+        XCTAssertTrue(overflows.showsOverflowMenu)
+        XCTAssertTrue(overflows.scrolls)
+        XCTAssertEqual(fits.contentWidth, overflows.contentWidth, "Overflow must preserve readable tab widths")
+        XCTAssertGreaterThanOrEqual(overflows.tabWidth, 120)
+    }
+
+    func testPinnedOverflowKeepsTheTabListAvailableWithoutRegularTabs() {
+        let metrics = HorizontalTabStripMetrics(tabCount: 0, width: 680, leading: 85, pinnedTabsOverflow: true)
+        XCTAssertTrue(metrics.showsOverflowMenu)
+        XCTAssertEqual(metrics.viewportWidth, 0)
+        XCTAssertFalse(metrics.scrolls)
     }
 
     func testFullScreenUsesSpaceFreedByTheWindowControls() {

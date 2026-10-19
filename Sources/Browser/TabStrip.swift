@@ -13,18 +13,24 @@ struct TabFrameKey: PreferenceKey {
 struct HorizontalTabStripMetrics {
     static let spacing: CGFloat = 4
     static let addButtonSize: CGFloat = 32
+    static let minimumTabWidth: CGFloat = 120
+    static let overflowButtonSize: CGFloat = 32
     static let dragAreaWidth: CGFloat = 40
     let tabWidth: CGFloat
     let contentWidth: CGFloat
     let viewportWidth: CGFloat
+    let showsOverflowMenu: Bool
     var scrolls: Bool { contentWidth > viewportWidth }
 
-    init(tabCount: Int, width: CGFloat, leading: CGFloat, supplementaryWidth: CGFloat = 0) {
+    init(tabCount: Int, width: CGFloat, leading: CGFloat, supplementaryWidth: CGFloat = 0,
+         pinnedTabsOverflow: Bool = false) {
         let count = CGFloat(max(0, tabCount))
         let gaps = Self.spacing * max(0, count - 1)
-        let available = max(0, width - leading - BrowserChrome.edgeInset
+        var available = max(0, width - leading - BrowserChrome.edgeInset
                             - Self.addButtonSize - Self.dragAreaWidth - Self.spacing * 2)
-        tabWidth = count == 0 ? 0 : min(220, max(56, ((available - gaps - supplementaryWidth) / count).rounded(.down)))
+        showsOverflowMenu = pinnedTabsOverflow || count * Self.minimumTabWidth + gaps + supplementaryWidth > available
+        if showsOverflowMenu { available = max(0, available - Self.overflowButtonSize - Self.spacing) }
+        tabWidth = count == 0 ? 0 : min(220, max(Self.minimumTabWidth, ((available - gaps - supplementaryWidth) / count).rounded(.down)))
         contentWidth = tabWidth * count + gaps + supplementaryWidth
         viewportWidth = min(contentWidth, available)
     }
@@ -87,6 +93,7 @@ struct TabStrip: View {
 
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
+    @State private var tabRevealRequest = 0
     @State private var drag: TabDragController
     @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
@@ -154,22 +161,27 @@ struct TabStrip: View {
                     + CGFloat(section.visibleCards.filter { $0.tabs.count == 2 }.count) * 4
             }
             let available = max(0, geometry.size.width - leading - 100)
-            let pinWidth = min(pinContentWidth, available * (regular.isEmpty ? 1 : 0.4))
+            let pinLimit = regular.isEmpty && pinContentWidth > available
+                ? max(0, available - HorizontalTabStripMetrics.overflowButtonSize - spacing)
+                : available * (regular.isEmpty ? 1 : 0.4)
+            let pinWidth = min(pinContentWidth, pinLimit)
             let metrics = HorizontalTabStripMetrics(
                 tabCount: regular.reduce(0) { $0 + $1.visibleCards.reduce(0) { $0 + $1.tabs.count } },
                 width: geometry.size.width - pinWidth - (pinned.isEmpty ? 0 : 8), leading: leading,
                 supplementaryWidth: CGFloat(regular.filter { $0.group != nil }.count) * 124
-                    + CGFloat(regular.flatMap(\.visibleCards).filter { $0.tabs.count == 2 }.count) * 4)
+                    + CGFloat(regular.flatMap(\.visibleCards).filter { $0.tabs.count == 2 }.count) * 4,
+                pinnedTabsOverflow: pinContentWidth > pinWidth)
 
             HStack(spacing: spacing) {
                 if !pinned.isEmpty {
-                    horizontalSections(pinned, width: PinnedTabGridMetrics.horizontalTileWidth)
+                    horizontalSections(pinned, width: PinnedTabGridMetrics.horizontalTileWidth, viewportWidth: pinWidth)
                         .frame(width: pinWidth)
-                    Divider().frame(height: 18).padding(.horizontal, 2)
+                        .padding(.trailing, 4)
                 }
-                horizontalSections(regular, width: metrics.tabWidth)
+                horizontalSections(regular, width: metrics.tabWidth, viewportWidth: metrics.viewportWidth)
                     .frame(width: metrics.viewportWidth)
                 newTabButton
+                if metrics.showsOverflowMenu { allTabsMenu }
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
@@ -185,7 +197,7 @@ struct TabStrip: View {
         .frame(height: BrowserChrome.tabRowHeight)
     }
 
-    private func horizontalSections(_ sections: [BrowserModel.TabSection], width: CGFloat) -> some View {
+    private func horizontalSections(_ sections: [BrowserModel.TabSection], width: CGFloat, viewportWidth: CGFloat) -> some View {
         let viewport = sections.first?.isPinned == true ? "pins" : "tabs"
         return ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -209,7 +221,9 @@ struct TabStrip: View {
             .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
             .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: tabRevealRequest) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: width) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: viewportWidth) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
         }
     }
@@ -401,6 +415,36 @@ struct TabStrip: View {
         browser.addTab()
     }
 
+    private func selectTab(_ tab: BrowserTab) {
+        suppressedHoverCardTabID = tab.id
+        hoverCardTabID = nil
+        browser.expandGroup(tab.groupID)
+        browser.activeTabID = tab.id
+    }
+
+    private var allTabsMenu: some View {
+        Menu {
+            ForEach(browser.tabs) { tab in
+                Button {
+                    selectTab(tab)
+                    // Selecting the current tab from the list must reveal it even if its ID is unchanged.
+                    tabRevealRequest += 1
+                } label: {
+                    BrowserMenuLabel(title: tab.title, icon: browser.activeTabID == tab.id ? .checkmark : tab.isPinned ? .pin : .globe)
+                }
+            }
+        } label: {
+            Image(browserIcon: .chevronDown, size: 12)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(ChromeIconButtonStyle(size: HorizontalTabStripMetrics.overflowButtonSize))
+        .help("All Tabs (\(browser.tabs.count))")
+        .accessibilityLabel("All Tabs")
+        .accessibilityValue("\(browser.tabs.count) tabs")
+        .accessibilityIdentifier("all-tabs-menu")
+    }
+
     @ViewBuilder
     private func tabGroup(_ group: BrowserModel.TabStripGroup, width: CGFloat?) -> some View {
         if group.tabs.count == 2 {
@@ -430,12 +474,6 @@ struct TabStrip: View {
     private func tabItem(for tab: BrowserTab, width: CGFloat?, joined: Bool = false) -> some View {
         let isActive = browser.activeTabID == tab.id
         let isHovered = hoveredTabID == tab.id
-        let index = browser.tabs.firstIndex { $0.id == tab.id } ?? 0
-        let nextTab = browser.tabs.indices.contains(index + 1) ? browser.tabs[index + 1] : nil
-        let showsSeparator = !tab.isPinned && !joined && layout == .horizontal && nextTab.map { next in
-            !browser.splitTabIDs.contains(next.id) && !isActive && !isHovered
-                && browser.activeTabID != next.id && hoveredTabID != next.id
-        } ?? false
 
         return TabItem(tab: tab,
                        isActive: isActive,
@@ -446,11 +484,7 @@ struct TabStrip: View {
                            : BrowserChrome.tabHeight,
                        splitPosition: joined ? browser.splitTabIDs.firstIndex(of: tab.id) : nil,
                        accent: accent,
-                       select: {
-                           suppressedHoverCardTabID = tab.id
-                           hoverCardTabID = nil
-                           browser.activeTabID = tab.id
-                       },
+                       select: { selectTab(tab) },
                        close: {
                            hoverCardTabID = nil
                            browser.closeTab(tab.id)
@@ -462,13 +496,6 @@ struct TabStrip: View {
                 }
             }
             .help(tab.isPinned ? "\(tab.title) · Pinned" : tab.title)
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(width: 1, height: 14)
-                    .offset(x: (spacing + 1) / 2)
-                    .opacity(showsSeparator ? 1 : 0)
-            }
             // Only the displayed hover preview consumes this anchor. Collecting a second
             // full strip of anchors during every folder animation duplicates the drag geometry.
             .anchorPreference(key: TabFrameKey.self, value: .bounds) {
@@ -652,31 +679,30 @@ private struct TabItem: View {
     let select: () -> Void
     let close: () -> Void
 
-    private var isCompact: Bool { tab.isPinned || (width ?? .infinity) < 100 }
+    private var isCompact: Bool { tab.isPinned }
     private var isJoined: Bool { splitPosition != nil }
-    /// Narrow tabs keep their icon visible and only swap in the close button while hovered.
-    private var showsCloseButton: Bool { !tab.isPinned && (isHovered || (isActive && !isCompact)) }
+    /// Reserve a trailing close target; hovering must never replace the selection target.
+    private var showsCloseButton: Bool { !tab.isPinned && (isHovered || isActive) }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
         HStack(spacing: 7) {
-            if !(isCompact && showsCloseButton) {
-                TabIcon(tab: tab, isActive: isActive)
-                    .opacity(tab.isSuspended ? 0.5 : 1)
-                    .accessibilityLabel(tab.title)
-                    .accessibilityIdentifier("tab-icon-\(tab.id)")
-                    .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction(.default, select)
-                    .accessibilityHidden(!isCompact)
-            }
+            TabIcon(tab: tab, isActive: isActive)
+                .opacity(tab.isSuspended ? 0.5 : 1)
+                .accessibilityLabel(tab.title)
+                .accessibilityIdentifier("tab-icon-\(tab.id)")
+                .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction(.default, select)
+                .accessibilityHidden(!isCompact)
             if !isCompact {
                 title
             }
-            if showsCloseButton || !isCompact {
+            if !tab.isPinned {
                 closeButton
                     .opacity(showsCloseButton ? 1 : 0)
                     .allowsHitTesting(showsCloseButton)
+                    .accessibilityHidden(!showsCloseButton)
             }
         }
         .padding(.leading, isCompact ? 0 : 10)

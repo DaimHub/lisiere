@@ -13,6 +13,7 @@
 - Use `BrowserIcon` (Hugeicons Free Stroke Rounded) for interface icons in SwiftUI and AppKit. Keep persisted `ProfileIcon` raw values stable; use `browserIcon` for rendering. Use `BrowserMenuLabel` or the icon-aware `Button` initializer in menus, `browserContextMenu` for native context-menu tint, and `Label(_:settingsIcon:)` for Settings tabs.
 - Use `BrowserIconPicker` for dropdowns containing icons so AppKit applies light, dark, selected and disabled template colors for mouse, keyboard and accessibility interactions. Keep text-only pickers native SwiftUI controls.
 - Preserve native SwiftUI/AppKit/WebKit patterns and BrowserChrome layout values unless a redesign is requested.
+- Horizontal regular tabs keep a readable minimum width and scroll when crowded, with an All Tabs menu for overflow. Reserve the close button at the trailing edge; never replace a tab's icon with a close target on hover. Keep the horizontal strip free of inter-tab separators.
 - Always use the transparent `Mascot-*` artwork on the new-tab page, in both palettes and appearances. Do not add a background behind it or use the `Dock-*` icon variants there.
 - Keep navigation and tab state in BrowserModel/BrowserTab, page callbacks in PageDelegate, and persistence in existing stores.
 - Use Product Design for UI work and inspect the built native app. Do not substitute web prototypes for native screens.
