@@ -70,7 +70,7 @@ struct NewTabView: View {
                 .font(.system(size: 28, weight: .medium))
                 .tracking(-0.7)
                 .foregroundStyle(.primary.opacity(0.85))
-            Text("A fresh session, separate from every profile. History, cookies and website data disappear when you close this window. Files you download remain on your Mac.")
+            Text("A fresh session, separate from every profile. History is not saved. Cookies and website data disappear when all windows in this session close. Files you download remain on your Mac.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

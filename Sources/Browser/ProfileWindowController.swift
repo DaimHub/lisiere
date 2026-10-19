@@ -2,7 +2,7 @@ import AppKit
 import Observation
 
 /// One physical window, with a distinct, retained BrowserModel for each visited profile.
-/// Web views and their data stores never migrate between profiles or other windows.
+/// Web views never migrate between profiles. Explicit tab detachment keeps its original data store.
 @MainActor
 @Observable
 final class ProfileWindowController {
@@ -13,17 +13,20 @@ final class ProfileWindowController {
     private(set) var isClosed = false
     let additionalWindows: Int
     @ObservationIgnored weak var window: NSWindow?
+    @ObservationIgnored private var pendingTabTransfer: TabWindowTransfer?
     @ObservationIgnored private var browsers: [UUID: BrowserModel] = [:]
     @ObservationIgnored var onActivate: ((BrowserModel) -> Void)?
     let privateBookmarks = BookmarkStore(defaults: nil)
     private(set) var privateBrowsingData: BrowsingData?
 
-    init(profiles: ProfileStore, profileID: UUID, isPrivate: Bool = false) throws {
+    init(profiles: ProfileStore, profileID: UUID, isPrivate: Bool = false, tabTransferID: UUID? = nil) throws {
         self.profiles = profiles
         self.isPrivate = isPrivate
+        let transfer = TabWindowTransfer.take(tabTransferID, profileID: profileID, isPrivate: isPrivate)
+        pendingTabTransfer = transfer
         if isPrivate {
             id = UUID()
-            browser = .makePrivate()
+            browser = transfer.map { BrowserModel(websiteDataStore: $0.source.websiteDataStore) } ?? .makePrivate()
             additionalWindows = 0
             browsers[id] = browser
             privateBrowsingData = BrowsingData(history: HistoryStore(file: nil), session: SessionStore(file: nil),
@@ -32,11 +35,11 @@ final class ProfileWindowController {
             return
         }
         guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
-        let ownerID = isPrivate ? UUID() : context.session.nextWindowID ?? UUID()
+        let ownerID = transfer == nil ? (context.session.nextWindowID ?? UUID()) : UUID()
         let model = context.makeBrowser(isPrivate: isPrivate)
         id = ownerID
         browser = model
-        additionalWindows = isPrivate ? 0 : context.session.attach(model, ownerID: ownerID)
+        additionalWindows = isPrivate ? 0 : context.session.attach(model, ownerID: ownerID, restoringSession: transfer == nil)
         browsers[profileID] = browser
         browser.profileWindow = self
         profiles.register(browser)
@@ -47,6 +50,14 @@ final class ProfileWindowController {
         self.window = window
         browser.window = window
         if let window { browser.appearance.attach(window) }
+        if let window, let transfer = pendingTabTransfer {
+            pendingTabTransfer = nil
+            if transfer.source.moveTab(transfer.tabID, to: browser) {
+                window.setFrame(TabWindowTransfer.frame(for: window.frame.size, at: transfer.screenPoint,
+                                                       screens: NSScreen.screens.map(\.visibleFrame)), display: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
         if window?.isKeyWindow == true { becameKey() }
     }
 
@@ -114,6 +125,7 @@ final class ProfileWindowController {
                 profiles.session(for: profile.id)?.closeParkedWindow(ownerID: id)
             }
         }
+        pendingTabTransfer = nil
         browsers = [:]
         privateBrowsingData?.releaseDataStore()
         privateBrowsingData = nil

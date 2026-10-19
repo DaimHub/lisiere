@@ -218,7 +218,8 @@ final class TabDragTests: XCTestCase {
             drag.updateFrames(frames, browser: browser)
             let point = CGPoint(x: 30, y: 14)
             drag.update(id: source.id, location: point, browser: browser)
-            try await Task.sleep(for: .milliseconds(600))
+            // WebKit teardown elsewhere in the suite can delay the main actor past a fixed sleep.
+            try await waitUntil(timeout: .seconds(2)) { !browser.groups[0].isCollapsed }
             XCTAssertFalse(browser.groups[0].isCollapsed, interruption)
             switch interruption {
             case "cancel": drag.cancel()

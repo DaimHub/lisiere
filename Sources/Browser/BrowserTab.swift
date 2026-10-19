@@ -244,6 +244,11 @@ final class BrowserTab: Identifiable {
         }
     }
 
+    /// Keep a pending native decision attached to its original window until it completes.
+    var canMoveBetweenWindows: Bool {
+        (acceptsPageRequests || isSuspended) && passwordPrompts.isEmpty && presentedSheets.isEmpty && selectionWaiters.isEmpty
+    }
+
     func beginPasswordPrompt() -> UUID {
         let token = UUID()
         passwordPrompts.insert(token)
@@ -570,13 +575,15 @@ final class BrowserTab: Identifiable {
 /// Swapping the subview never reloads the page, and AppKit guarantees a view has only one superview.
 struct PageHost: NSViewRepresentable {
     let content: NSView
+    var tab: BrowserTab? = nil
+    var browser: BrowserModel? = nil
 
     func makeNSView(context: Context) -> PageHostView {
         PageHostView()
     }
 
     func updateNSView(_ view: PageHostView, context: Context) {
-        view.show(content)
+        view.show(content, tab: tab, browser: browser)
     }
 
     static func dismantleNSView(_ view: PageHostView, coordinator: ()) { view.releaseContent() }
@@ -584,9 +591,15 @@ struct PageHost: NSViewRepresentable {
 
 final class PageHostView: NSView {
     private var content: NSView?
+    private weak var tab: BrowserTab?
+    private weak var browser: BrowserModel?
+    private var checksOwnership = false
 
-    func show(_ content: NSView) {
+    func show(_ content: NSView, tab: BrowserTab? = nil, browser: BrowserModel? = nil) {
         self.content = content
+        self.tab = tab
+        self.browser = browser
+        checksOwnership = tab != nil
         attachContent()
         // SwiftUI may update the departing host after its replacement. Reconcile ownership once
         // that transaction has dismantled the old host, without rebuilding/reloading the page.
@@ -599,6 +612,11 @@ final class PageHostView: NSView {
     }
 
     private func attachContent() {
+        // A departing SwiftUI host can update again during the last-tab transition.
+        // Only the tab's current model may reattach its live page after a window transfer.
+        if checksOwnership {
+            guard let tab, let browser, tab.browser === browser else { return }
+        }
         guard window != nil, let content, content.superview !== self else { return }
         subviews.forEach { $0.removeFromSuperview() }
         content.frame = bounds

@@ -153,7 +153,7 @@ final class SessionStore {
 
     /// Remembers a window from now on. A window that opens while saved windows are waiting restores the next one.
     /// Returns how many more windows to open for the rest.
-    func attach(_ browser: BrowserModel, ownerID: UUID? = nil, restoringOtherWindows: Bool = true) -> Int {
+    func attach(_ browser: BrowserModel, ownerID: UUID? = nil, restoringOtherWindows: Bool = true, restoringSession: Bool = true) -> Int {
         guard !browser.isPrivate, !openBrowsers.contains(where: { $0 === browser }) else { return 0 }
         browsers.removeAll { $0.browser == nil }
         browsers.append(WeakBrowser(browser: browser, ownerID: ownerID))
@@ -161,6 +161,7 @@ final class SessionStore {
             observeBrowsers()
             scheduleSave()
         }
+        guard restoringSession else { return 0 }
         if let ownerID, let index = parkedWindows.firstIndex(where: { $0.profileWindowID == ownerID }) {
             browser.restoreSession(parkedWindows.remove(at: index))
             return 0

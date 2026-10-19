@@ -21,7 +21,7 @@ struct BrowserApp: App {
 
     var body: some Scene {
         WindowGroup(id: Self.windowID, for: ProfileWindowRequest.self) { $request in
-            ProfileBrowserWindow(profiles: profiles, profileID: request.profileID)
+            ProfileBrowserWindow(profiles: profiles, profileID: request.profileID, tabTransferID: request.tabTransferID)
                 .modifier(ReleaseValidationAccessibility())
                 .frame(minWidth: 680, minHeight: 440)
                 // SwiftUI selects a scene before forwarding URLs to the app delegate. Without this,
@@ -40,10 +40,10 @@ struct BrowserApp: App {
             #endif
         }
 
-        WindowGroup("Private Window", id: Self.privateWindowID) {
-            ProfileBrowserWindow(profiles: profiles, profileID: BrowserProfile.initialID, isPrivate: true)
+        WindowGroup("Private Window", id: Self.privateWindowID, for: ProfileWindowRequest.self) { $request in
+            ProfileBrowserWindow(profiles: profiles, profileID: BrowserProfile.initialID, isPrivate: true, tabTransferID: request.tabTransferID)
                 .frame(minWidth: 680, minHeight: 440)
-        }
+        } defaultValue: { ProfileWindowRequest(profileID: BrowserProfile.initialID) }
         // External links must create a normal window when only private windows remain.
         .handlesExternalEvents(matching: [])
         .windowStyle(.hiddenTitleBar)

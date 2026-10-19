@@ -26,6 +26,7 @@ struct BrowserWindow: View {
     @State private var selectedSuggestion: Int?
     @State private var addressBlurRequest = 0
     @State private var hoverCardTabID: UUID?
+    @State private var tabDrag = TabDragController()
     let isFullScreen: Bool
     @State private var addressIsFocused = false
     @State private var toolbarWidth: CGFloat = 800
@@ -62,7 +63,7 @@ struct BrowserWindow: View {
         HStack(spacing: 0) {
             if tabLayout == .vertical {
                 TabStrip(browser: browser, layout: .vertical, isFullScreen: isFullScreen, accent: accent,
-                         hoverCardTabID: $hoverCardTabID)
+                         hoverCardTabID: $hoverCardTabID, drag: tabDrag, ownsDragSpace: false)
                     .background(profileSwipeArea)
                     .frame(width: BrowserChrome.sidebarWidth)
                     .transition(.move(edge: .leading).combined(with: .opacity))
@@ -70,7 +71,7 @@ struct BrowserWindow: View {
             VStack(spacing: 0) {
                 if tabLayout == .horizontal {
                     TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen, accent: accent,
-                             hoverCardTabID: $hoverCardTabID)
+                             hoverCardTabID: $hoverCardTabID, drag: tabDrag, ownsDragSpace: false)
                         .background(profileSwipeArea)
                         .transition(.opacity)
                 }
@@ -90,6 +91,12 @@ struct BrowserWindow: View {
                 .accessibilityIdentifier("persistence-error")
             }
         }
+        .coordinateSpace(name: TabDragController.coordinateSpace)
+        .background(TabDragCoordinates(drag: tabDrag))
+        .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
+            TabDragGeometryObserver(bounds: bounds, includesWindow: true, drag: tabDrag, browser: browser)
+        }
+        .overlay { TabDragPreview(drag: tabDrag, browser: browser) }
         .overlayPreferenceValue(TabFrameKey.self) { tabFrames in
             hoverCard(tabFrames: tabFrames)
         }
@@ -142,8 +149,14 @@ struct BrowserWindow: View {
             await suggestionSearch.prepare(visits: browser.history?.visits ?? [],
                                            revision: browser.history?.revision ?? 0, bookmarks: bookmarks.bookmarks)
         }
-        .onDisappear { closeSuggestions() }
+        .onDisappear { closeSuggestions(); tabDrag.reset(); tabDrag.detachTab = nil }
         .onAppear {
+            tabDrag.detachTab = { id, point in
+                guard let token = TabWindowTransfer.prepare(tabID: id, source: browser, at: point) else { return }
+                openWindow(id: browser.isPrivate ? BrowserApp.privateWindowID : BrowserApp.windowID,
+                           value: ProfileWindowRequest(profileID: browser.profileID ?? BrowserProfile.initialID,
+                                                       tabTransferID: token))
+            }
             if browser.activeTab?.isNewTab == true {
                 browser.requestAddressFocus()
             }
@@ -314,6 +327,10 @@ struct BrowserWindow: View {
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                     .allowsHitTesting(false)
             }
+            .transformAnchorPreference(key: TabDragBoundsKey.self, value: .bounds) { value, anchor in
+                value.page = anchor
+            }
+            .overlay { TabPageDropPreview(drag: tabDrag, accent: accent) }
             .padding(.leading, leadingInset)
             .padding([.trailing, .bottom], BrowserChrome.edgeInset)
         }
@@ -404,7 +421,7 @@ struct BrowserWindow: View {
     }
 
     private func webView(for tab: BrowserTab) -> some View {
-        PageHost(content: tab.contentView)
+        PageHost(content: tab.contentView, tab: tab, browser: browser)
             .overlay {
                 if let error = tab.loadError {
                     PageErrorView(error: error, isLoading: tab.isLoading) { tab.retry() }
@@ -647,7 +664,7 @@ struct BrowserWindow: View {
             .padding(.horizontal, 10)
             .frame(height: grouped ? 30 : BrowserChrome.navigationControlHeight)
             .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .help("Private Window: history, cookies, and website data aren’t kept after it closes")
+            .help("Private Window: history is not saved; cookies and website data are removed when all windows in this session close")
             .accessibilityLabel("Private Window")
     }
 

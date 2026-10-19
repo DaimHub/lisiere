@@ -5,6 +5,7 @@ struct ProfileBrowserWindow: View {
     let profiles: ProfileStore
     let profileID: UUID
     var isPrivate = false
+    var tabTransferID: UUID? = nil
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
@@ -63,7 +64,7 @@ struct ProfileBrowserWindow: View {
             guard owner == nil else { return }
             do {
                 // Construct only after SwiftUI installs State; body recomputation must not create WebViews.
-                let controller = try ProfileWindowController(profiles: profiles, profileID: profileID, isPrivate: isPrivate)
+                let controller = try ProfileWindowController(profiles: profiles, profileID: profileID, isPrivate: isPrivate, tabTransferID: tabTransferID)
                 controller.onActivate = { browser in
                     ExternalURLRouter.shared.register(browser, openWindow: openWindow)
                 }
@@ -126,7 +127,7 @@ struct ProfilesView: View {
             }
             Section("Outside Profiles") {
                 Text("Passkeys, the default browser and app updates apply across profiles. Themes, accent colors and mascots belong to each profile. Downloaded files stay where you saved them.")
-                Text("Private windows are independent of every profile and always open dark with a fresh temporary session. They do not load saved bookmarks, history, passwords, cookies or download lists.")
+                Text("New private windows open dark with a fresh temporary session, separate from every profile. Detaching a private tab continues its existing session. They do not load saved bookmarks, history, passwords, cookies or download lists.")
             }
             if let error = profiles.loadError {
                 Section { Text(error).foregroundStyle(.red) }

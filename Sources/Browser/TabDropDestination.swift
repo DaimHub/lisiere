@@ -1,7 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Internal tab moves stay in this window. They do not depend on pasteboard metadata surviving an OS drag.
+enum TabSplitSide: Equatable { case leading, trailing }
+enum TabPageDrop: Equatable {
+    case split(TabSplitSide)
+    case newWindow
+}
+
+/// One gesture owns strip ordering, page splitting and detachment without exporting page data.
 enum TabDropTarget: Equatable {
     case tab(UUID)
     case group(UUID?)
@@ -31,6 +37,8 @@ struct TabDragFrames: Equatable {
     var regions: [TabDropRegion] = []
     var viewports: [String: CGRect] = [:]
     var horizontalViewports: Set<String> = []
+    var pageFrame: CGRect?
+    var windowFrame: CGRect?
 }
 
 struct TabDropSelection: Equatable {
@@ -76,6 +84,9 @@ final class TabDragController {
     @ObservationIgnored private(set) var selection: TabDropSelection?
     private(set) var indicator: TabDropIndicator?
     private(set) var scrollRequest: TabDragScrollRequest?
+    private(set) var pageDrop: TabPageDrop?
+    @ObservationIgnored weak var coordinateView: NSView?
+    @ObservationIgnored var detachTab: ((UUID, CGPoint) -> Void)?
     @ObservationIgnored private var frames = TabDragFrames()
     @ObservationIgnored private var cancelled = false
     @ObservationIgnored private weak var origin: BrowserModel?
@@ -116,10 +127,12 @@ final class TabDragController {
         guard self.source == source, origin === browser else { return }
         if self.location != location { self.location = location }
         scheduleGroupCollapse(browser: browser)
-        selection = destination(at: location, source: source, browser: browser)
+        let pageDrop = pageDestination(at: location, source: source, browser: browser)
+        if self.pageDrop != pageDrop { self.pageDrop = pageDrop }
+        selection = pageDrop == nil ? destination(at: location, source: source, browser: browser) : nil
         let indicator = selection?.indicator
         if self.indicator != indicator { self.indicator = indicator }
-        let scrollRequest = scrolling(at: location)
+        let scrollRequest = pageDrop == nil ? scrolling(at: location) : nil
         if self.scrollRequest != scrollRequest { self.scrollRequest = scrollRequest }
         scheduleGroupExpansion(browser: browser)
     }
@@ -257,6 +270,19 @@ final class TabDragController {
                                 after: region.horizontal ? point.x > region.frame.midX : point.y > region.frame.midY)
     }
 
+    private func pageDestination(at point: CGPoint, source: TabDragSource, browser: BrowserModel) -> TabPageDrop? {
+        guard case let .tab(id) = source, browser.isActiveInWorkspace else { return nil }
+        if let frame = frames.pageFrame, frame.contains(point), browser.canSplitTab(id) {
+            return .split(point.x < frame.midX ? .leading : .trailing)
+        }
+        // An explicit excursion avoids detaching at a rounded corner or a one-pixel edge miss.
+        if let frame = frames.windowFrame, !frame.insetBy(dx: -12, dy: -12).contains(point),
+           detachTab != nil, browser.tab(withID: id)?.canMoveBetweenWindows == true {
+            return .newWindow
+        }
+        return nil
+    }
+
     func finish(id: UUID, location: CGPoint, browser: BrowserModel) {
         finish(source: .tab(id), location: location, browser: browser)
     }
@@ -269,6 +295,19 @@ final class TabDragController {
         defer { reset() }
         guard !cancelled, origin === browser, self.source == source else { return }
         update(source: source, location: location, browser: browser)
+        if case let .tab(id) = source, let pageDrop {
+            switch pageDrop {
+            case let .split(side): browser.splitTab(id, on: side)
+            case .newWindow:
+                guard let view = coordinateView, let window = view.window else { return }
+                let point = window.convertPoint(toScreen: view.convert(location, to: nil))
+                // Clear cancellation monitors before the destination takes key-window status.
+                let detach = detachTab
+                reset()
+                detach?(id, point)
+            }
+            return
+        }
         guard let selection else { return }
         switch (source, selection.region.target) {
         case let (.tab(id), .tab(target)):
@@ -299,6 +338,7 @@ final class TabDragController {
         selection = nil
         indicator = nil
         scrollRequest = nil
+        pageDrop = nil
         origin = nil
         cancelled = false
     }
@@ -353,11 +393,15 @@ struct TabDragBounds {
     var viewports: [String: Anchor<CGRect>] = [:]
     var horizontalViewports: Set<String> = []
 
-    func resolve(in geometry: GeometryProxy) -> TabDragFrames {
+    var page: Anchor<CGRect>?
+
+    func resolve(in geometry: GeometryProxy, includesWindow: Bool = false) -> TabDragFrames {
         TabDragFrames(regions: regions.map {
             TabDropRegion(id: $0.id, target: $0.target, frame: geometry[$0.bounds], horizontal: $0.horizontal,
                           viewport: $0.viewport, priority: $0.priority)
-        }, viewports: viewports.mapValues { geometry[$0] }, horizontalViewports: horizontalViewports)
+        }, viewports: viewports.mapValues { geometry[$0] }, horizontalViewports: horizontalViewports,
+                      pageFrame: page.map { geometry[$0] },
+                      windowFrame: includesWindow ? CGRect(origin: .zero, size: geometry.size) : nil)
     }
 }
 
@@ -368,6 +412,7 @@ struct TabDragBoundsKey: PreferenceKey {
         value.regions += next.regions
         value.viewports.merge(next.viewports) { $1 }
         value.horizontalViewports.formUnion(next.horizontalViewports)
+        value.page = next.page ?? value.page
     }
 }
 
@@ -424,5 +469,45 @@ extension View {
                 do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
             }
         }
+    }
+}
+
+/// Converts the shared SwiftUI gesture coordinates into AppKit screen coordinates at release.
+struct TabDragCoordinates: NSViewRepresentable {
+    let drag: TabDragController
+    func makeNSView(context: Context) -> TabDragCoordinateView { TabDragCoordinateView() }
+    func updateNSView(_ view: TabDragCoordinateView, context: Context) { drag.coordinateView = view }
+}
+
+final class TabDragCoordinateView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+struct TabPageDropPreview: View {
+    let drag: TabDragController
+    let accent: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            if case let .split(side) = drag.pageDrop {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(accent.opacity(0.14))
+                    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(accent, lineWidth: 2) }
+                    .overlay(alignment: .top) {
+                        Label(side == .leading ? "Split Left" : "Split Right", browserIcon: .splitView)
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(10)
+                            .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+                            .padding(12)
+                    }
+                    .frame(width: geometry.size.width / 2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: side == .leading ? .leading : .trailing)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .transaction { $0.animation = nil }
     }
 }
