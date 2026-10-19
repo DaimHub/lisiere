@@ -127,6 +127,15 @@ final class TabDragController {
         TabDragWindows.shared.unregister(self)
     }
 
+    /// Selection should not request a scroll/layout pass when the tab already fits its viewport.
+    /// Missing geometry deliberately falls back to ScrollViewReader (first display or a collapsed group).
+    func isTabFullyVisible(_ id: UUID) -> Bool {
+        guard let region = frames.regions.first(where: { $0.target == .tab(id) }),
+              let name = region.viewport, let viewport = frames.viewports[name],
+              !region.frame.isEmpty, !viewport.isEmpty else { return false }
+        return viewport.insetBy(dx: -0.5, dy: -0.5).contains(region.frame)
+    }
+
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
         if let source, let location { update(source: source, location: location, browser: browser) }

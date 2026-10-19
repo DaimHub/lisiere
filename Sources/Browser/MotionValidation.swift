@@ -50,15 +50,19 @@ enum MotionValidation {
             let start = Date().timeIntervalSince1970
             var active = NSApp.isActive && window.isKeyWindow
             let interval = BrowserDiagnostics.performance.beginInterval("Motion scenario", "\(name, privacy: .public)")
+            var actions: [[String: Any]] = []
             for index in 0..<count {
+                let actionStart = Date().timeIntervalSince1970
                 action(index)
+                actions.append(["index": index, "start_epoch": actionStart,
+                                "mutation_ms": (Date().timeIntervalSince1970 - actionStart) * 1000])
                 try await Task.sleep(for: .milliseconds(300))
                 active = active && NSApp.isActive && window.isKeyWindow
             }
             try await Task.sleep(for: .milliseconds(500))
             BrowserDiagnostics.performance.endInterval("Motion scenario", interval)
             phases.append(["name": name, "start_epoch": start, "end_epoch": Date().timeIntervalSince1970,
-                           "actions": count, "window_active": active && NSApp.isActive && window.isKeyWindow])
+                           "actions": count, "action_timings": actions, "window_active": active && NSApp.isActive && window.isKeyWindow])
         }
         // Positive control: a deliberately blocked main thread during active motion must be visible
         // to Instruments. Never interpret an empty/unsupported capture as zero dropped frames.
@@ -84,11 +88,36 @@ enum MotionValidation {
         browser.activeTabID = webTab.id
         try await phase("find-bar", count: 10) { _ in webTab.isFindBarVisible.toggle() }
         try await phase("profile-switch", count: 10) { index in owner.switchTo(index.isMultiple(of: 2) ? second.id : firstID) }
+        if ProcessInfo.processInfo.environment["LISIERE_QA_MOTION_EXTENDED"] == "1" {
+            browser.open(base.appending(path: "motion"), inNewTab: true)
+            let secondWebTab = browser.activeTab!
+            try await waitForPage(secondWebTab)
+            try await Task.sleep(for: .milliseconds(600))
+            try await phase("tab-switch-web", count: 10) { index in
+                browser.activeTabID = index.isMultiple(of: 2) ? webTab.id : secondWebTab.id
+            }
+            owner.switchTo(second.id)
+            owner.browser.open(base.appending(path: "motion"))
+            try await waitForPage(owner.browser.activeTab!)
+            owner.switchTo(firstID)
+            try await Task.sleep(for: .milliseconds(600))
+            try await phase("profile-switch-web", count: 10) { index in
+                owner.switchTo(index.isMultiple(of: 2) ? second.id : firstID)
+            }
+        }
         try write(["phases": phases, "pid": ProcessInfo.processInfo.processIdentifier], to: root.appending(path: "motion-phases.json"))
         // Keep the process alive until the recorder has detached, without recording shutdown as UI work.
         let stopDeadline = ContinuousClock.now + .seconds(60)
         while !FileManager.default.fileExists(atPath: root.appending(path: "motion-stop").path), ContinuousClock.now < stopDeadline {
             try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private static func waitForPage(_ tab: BrowserTab) async throws {
+        let deadline = ContinuousClock.now + .seconds(15)
+        while tab.isLoading || tab.webView?.title != "QA motion" {
+            guard ContinuousClock.now < deadline else { throw CocoaError(.fileReadUnknown) }
+            try await Task.sleep(for: .milliseconds(25))
         }
     }
 

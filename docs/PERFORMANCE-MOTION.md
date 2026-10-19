@@ -26,7 +26,7 @@ Machine : MacBook Pro M3 Pro, écran signalant une fréquence maximale de 120 Hz
 
 L'instrument « Core Animation FPS » a été essayé séparément. Instruments le désactive sur macOS avec le message : `Disabled because macOS does not have an FPS metric for Core Animation.` Cette capture n'est pas utilisée comme résultat valide.
 
-## Résultats avant / après
+## Première étape : accueil et observation locale
 
 Capture finale avec Hitches seul : `baseline-light` puis `final-light`. Les deux contrôles positifs détectent les blocages de 100 ms et toutes les phases gardent le focus. Les valeurs sont des retards cumulés sur chaque séquence, puis le plus grand retard individuel ; ce ne sont pas des FPS.
 
@@ -56,3 +56,98 @@ Les répétitions précédentes avec Time Profiler confirment le gain de l’acc
 ## Limites
 
 Ces séquences courtes automatisent les mêmes mutations que les interactions natives ; elles ne mesurent pas toute la latence entre un geste physique et l'affichage. Le défilement de sites réels, les gestes continus au trackpad, les écrans externes et une comparaison instrumentée avec Chrome restent à mesurer. Un retard de 8,33 ms est déjà une image manquée à 120 Hz, pas la preuve d'une image affichée en 8,33 ms. Les transitions d'onglets et de profils restent les principaux points à améliorer.
+
+
+## Deuxième étape : changements d’onglet et de profil
+
+La suite de l’audit part de `c072fa8`, avec le même pilote QA enrichi de deux scénarios :
+passage entre deux pages web déjà chargées, puis entre deux profils affichant chacun une page web.
+`--extended` active ces scénarios. Les horodatages de chaque action et le temps de sa mutation synchrone
+sont conservés dans `phases.json` ; ce temps de mutation n’est pas un temps de présentation.
+
+Corrections apportées :
+
+- Chaque fenêtre conserve au maximum les interfaces de son profil actif et du profil précédent.
+  Les modèles de profil étaient déjà conservés auparavant. Les palettes, le fondu de 220 ms, les dimensions
+  et les composants natifs restent les mêmes. Les vues cachées ne reçoivent ni interaction ni accès clavier
+  via l’ancien champ d’adresse. Les panneaux temporaires sont fermés lorsque leur profil est quitté.
+- Le choix de thème a un seul propriétaire natif : AppKit applique l’apparence de la fenêtre et SwiftUI reçoit
+  la palette résolue via l’environnement. L’ancien `preferredColorScheme` réimposait un thème explicite après
+  qu’AppKit avait rendu la main au système, entraînant une seconde invalidation de l’apparence. Le matériau
+  du fond reçoit explicitement cette même palette : un ancêtre d’hébergement SwiftUI peut conserver son
+  propre thème. Le retour clair/sombre est couvert par un test du matériau natif hébergé.
+- L’accueil et l’hôte de page gardent leur identité. La mascotte et le fond s’arrêtent quand l’accueil est caché.
+- L’hôte natif garde au maximum le conteneur de la page courante et celui de la page précédente. La précédente
+  est masquée ; son WebKit peut toujours être suspendu, fermé ou transféré. Les références de suivi sont faibles.
+  Aucun WebKit supplémentaire n’est créé pour ce cache. Les captures d’aperçu ignorent les vues cachées.
+- La sélection ne demande plus de défilement lorsque l’onglet tient déjà entièrement dans son viewport.
+  Une géométrie absente ou un onglet partiellement masqué conserve le comportement de défilement habituel.
+- L’observation de la sélection, du contenu et de la barre d’outils est séparée pour éviter de reconstruire
+  tout le corps de la fenêtre. Une sélection de profil ne republie pas une liste de profils inchangée.
+
+Le compromis mémoire est borné à deux interfaces par fenêtre et deux conteneurs de page par hôte.
+Il évite la destruction/reconstruction répétée ; il ne conserve pas les WebKit d’onglets suspendus ou fermés.
+Les profils, données de formulaire et magasins WebKit restent isolés.
+
+Deux hypothèses ont été écartées par mesure : désactiver les captures d’aperçu ne réduisait pas les pics,
+et remplacer le fondu SwiftUI par un hôte natif avec Core Animation n’apportait pas de gain stable.
+Ces prototypes ne font pas partie du changement final.
+
+Le contrôle natif a également révélé deux précautions propres aux vues conservées : le moniteur de
+balayage d’un profil masqué doit consulter immédiatement l’activité du modèle, et les descendants
+accessibles de l’accueil masqué doivent être exclus. Le second point utilise le comportement
+[`AccessibilityChildBehavior.ignore`](https://developer.apple.com/documentation/swiftui/accessibilitychildbehavior/ignore)
+sur le contenu du défilement, sans supprimer son graphe visuel.
+
+### Mesures finales de la deuxième étape
+
+Référence : `switch-final-before-1` et `switch-final-before-2` (`c072fa8` avec le même pilote QA).
+Version corrigée : `switch-delivery-after-1` et `switch-delivery-after-2`, sur le même binaire Release.
+Les quatre contrôles positifs détectent les cinq blocages volontaires de 100 ms ; les fenêtres restent
+actives pendant toutes les phases. Hitches seul, aucun build ou test en parallèle.
+
+Le cumul est la **moyenne des deux séquences de dix actions**. Le maximum est le pire retard individuel
+des deux captures. Ces valeurs décrivent des retards de présentation, pas des temps de calcul ni des FPS.
+
+| Scénario | Cumul moyen avant (ms) | Cumul moyen après (ms) | Maximum avant (ms) | Maximum après (ms) |
+|---|---:|---:|---:|---:|
+| Accueil animé | 0.0 | 4.2 | 0.0 | 8.3 |
+| Dossiers horizontaux | 104.2 | 91.7 | 108.3 | 83.3 |
+| Dossiers latéraux | 179.2 | 45.8 | 16.7 | 8.3 |
+| Onglet accueil ↔ page web | 262.5 | 108.3 | 66.7 | 33.3 |
+| Nouvel onglet / fermeture | 225.0 | 200.0 | 50.0 | 50.0 |
+| Recherche dans la page | 304.2 | 312.5 | 58.3 | 50.0 |
+| Profil accueil ↔ page web | 666.7 | 229.2 | 58.3 | 58.3 |
+| Onglet web ↔ web | 308.3 | 308.3 | 33.3 | 41.7 |
+| Profil web ↔ web | 845.8 | 370.8 | 58.3 | 33.3 |
+
+Dans ces répétitions, les retards cumulés baissent d’environ **59 %** pour accueil ↔ page web,
+**66 %** pour les profils accueil ↔ page web et **56 %** pour les profils web ↔ web.
+Les cumuls individuels des profils web sont de 1116,7 puis 575,0 ms avant, contre 366,7 puis 375,0 ms après :
+la variabilité de la référence interdit d’en faire une garantie générale. Une capture intermédiaire,
+avant le dernier ajustement de palette au démarrage, donnait encore 575 ms après correction.
+
+Le changement entre deux onglets web ne progresse pas sur le cumul ; son maximum atteint encore 41,7 ms.
+Les profils accueil/web gardent un pic de 58,3 ms, et les dossiers horizontaux un pic isolé de 83,3 ms.
+La recherche ne montre pas de gain stable. **L’objectif de 120 images/s sur toute l’interface n’est pas
+atteint.** Le budget de 8,33 ms et la comparaison instrumentée avec Chrome restent des critères non validés.
+Les corrections réduisent des coûts identifiés, elles ne démontrent pas une cadence universelle.
+
+### Validation de la deuxième étape
+
+- Suite complète : **340 tests réussis**, zéro échec, zéro test ignoré
+  (`Debug-20261019-213947.xcresult`). Après le dernier ajustement de la palette système au démarrage,
+  les 30 tests d’apparence et de fenêtres de profil passent à nouveau.
+- Outillage de mesure : 12 tests réussis. Les mutations synchrones, la présence du focus et les
+  limites temporelles des scénarios sont enregistrées séparément des retards Instruments.
+- Dernière Release : compilation et signature stricte réussies. Parcours de démarrage et restauration :
+  **92 + 10 contrôles**, en mode normal puis avec Réduire les animations
+  (`switch-startup-palette-smoke/standard` et `switch-startup-palette-smoke/reduced`).
+- Contrôle natif : même fenêtre entre profils clair et sombre, retour au thème système, accueil et page web,
+  restitution du formulaire non envoyé, focus d’adresse sur nouvel onglet et recherche dans la page.
+  Le contenu de l’accueil masqué disparaît bien de l’arbre d’accessibilité. Aucun parcours VoiceOver complet
+  ni geste physique continu au trackpad n’est revendiqué.
+- Les caches sont testés pour leur limite de deux éléments, la libération du WebKit suspendu,
+  le transfert entre fenêtres, l’arrêt des animations cachées et l’exclusion des moniteurs du profil inactif.
+- Le navigateur personnel et Chrome n’ont pas été modifiés. La copie QA possède sa propre identité
+  et ses propres profils. Cette branche n’est ni intégrée à `main` ni installée dans `/Applications`.

@@ -509,7 +509,8 @@ final class BrowserTab: Identifiable {
 
     /// Captures the visible page for hover cards. Only a web view that's on screen has anything to capture.
     func captureThumbnail(afterScreenUpdates: Bool = true) {
-        guard !isNewTab, let webView, webView.window != nil,
+        guard !isNewTab, browser?.isActiveInWorkspace != false,
+              let webView, webView.window != nil, !webView.isHiddenOrHasHiddenAncestor,
               webView.bounds.width > 0, webView.bounds.height > 0 else { return }
         let configuration = WKSnapshotConfiguration()
         configuration.rect = webView.bounds
@@ -595,6 +596,8 @@ final class PageHostView: NSView {
     private weak var browser: BrowserModel?
     private var checksOwnership = false
     private var attachmentScheduled = false
+    private weak var displayedContent: NSView?
+    private weak var displayedTab: BrowserTab?
 
     func show(_ content: NSView, tab: BrowserTab? = nil, browser: BrowserModel? = nil) {
         let needsReconciliation = self.content !== content || self.tab !== tab || self.browser !== browser
@@ -626,16 +629,45 @@ final class PageHostView: NSView {
         if checksOwnership {
             guard let tab, let browser, tab.browser === browser else { return }
         }
-        guard window != nil, let content, content.superview !== self else { return }
-        subviews.forEach { $0.removeFromSuperview() }
-        content.frame = bounds
-        content.autoresizingMask = [.width, .height]
-        addSubview(content)
+        guard let window, let content else { return }
+        let previousHadFocus = displayedContent !== content && displayedContent.map { previous in
+            (window.firstResponder as? NSView)?.isDescendant(of: previous) == true
+        } == true
+        if content.superview !== self {
+            // Keep just the last page attached but hidden. Reparenting WebKit on every round trip
+            // invalidates the native view hierarchy; its existing window/layers can be reused instead.
+            // close()/suspend() remove their own web view, so this does not prevent unloading.
+            let canRetainPrevious = displayedTab.map { previous in
+                browser != nil && previous.browser === browser && browser?.tab(withID: previous.id) === previous
+            } ?? false
+            for view in subviews where view !== displayedContent || !canRetainPrevious {
+                view.removeFromSuperview()
+                view.isHidden = false
+            }
+            content.frame = bounds
+            content.autoresizingMask = [.width, .height]
+            addSubview(content)
+        }
+        for view in subviews {
+            let hidden = view !== content
+            if view.isHidden != hidden { view.isHidden = hidden }
+        }
+        displayedContent = content
+        displayedTab = tab
+        if previousHadFocus {
+            window.makeFirstResponder(nil)
+            if tab?.isNewTab == false, browser?.isActiveInWorkspace == true { tab?.focusPage() }
+        }
     }
 
     func releaseContent() {
         // A newer host may already own this same page. Never detach it from that host.
-        if content?.superview === self { content?.removeFromSuperview() }
+        for view in subviews {
+            view.removeFromSuperview()
+            view.isHidden = false
+        }
+        displayedTab = nil
+        displayedContent = nil
         content = nil
     }
 }

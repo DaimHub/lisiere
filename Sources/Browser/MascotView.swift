@@ -14,7 +14,7 @@ struct MascotView: View {
                       animated: !reduceMotion && scenePhase == .active)
         .frame(width: 120, height: 120)
         .background {
-            if !reduceMotion { MascotPointerTracker(gaze: $gaze) }
+            if !reduceMotion && scenePhase == .active { MascotPointerTracker(gaze: $gaze) }
         }
         .onChange(of: reduceMotion) { _, reduced in if reduced { gaze = .zero } }
         .allowsHitTesting(false)

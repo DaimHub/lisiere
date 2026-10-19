@@ -75,7 +75,7 @@ struct BrowserWindow: View {
                         .background(profileSwipeArea)
                         .transition(.opacity)
                 }
-                mainColumn
+                WindowSection { mainColumn }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -104,7 +104,7 @@ struct BrowserWindow: View {
             suggestionList(below: anchor)
         }
         .animation(.easeOut(duration: 0.18), value: bookmarksBarVisibility)
-        .animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
+        .modifier(PageSelectionAnimation(browser: browser))
         .animation(.snappy(duration: 0.25), value: tabLayout)
         .onChange(of: tabLayout) { _, _ in hoverCardTabID = nil }
         .background {
@@ -117,14 +117,23 @@ struct BrowserWindow: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .tint(accent)
-        // A departing profile remains visible during its fade, but cannot receive input or commands.
-        .allowsHitTesting(browser.isActiveInWorkspace)
-        .accessibilityHidden(!browser.isActiveInWorkspace)
-        .focusedSceneValue(\.browserModel, browser.isActiveInWorkspace ? browser : nil)
-        .onChange(of: browser.activeTabID) { _, _ in
+        .modifier(WorkspaceActivity(browser: browser) { active in
+            if active {
+                if browser.activeTab?.isNewTab == true { browser.requestAddressFocus() }
+                else { browser.activeTab?.focusPage() }
+            } else {
+                if !suggestions.isEmpty || suggestionTask != nil { closeSuggestions() }
+                hoverCardTabID = nil
+                addressIsFocused = false
+                isShowingDownloads = false
+                isCustomizingToolbar = false
+                if tabDrag.isDragging { tabDrag.reset() }
+            }
+        })
+        .modifier(TabSelectionObserver(browser: browser) {
             address = browser.activeTab?.url?.absoluteString ?? ""
             closeSuggestions()
-        }
+        })
         .onChange(of: addressIsFocused) { _, isFocused in
             guard !isFocused else { return }
             // A click on a suggestion takes focus first, so the list stays a moment for the click to land.
@@ -164,7 +173,8 @@ struct BrowserWindow: View {
     }
 
     private var profileSwipeArea: some View {
-        ProfileSwipeArea(enabled: !browser.isPrivate && profiles.availableProfiles.count > 1) { direction in
+        ProfileSwipeArea(enabled: !browser.isPrivate && profiles.availableProfiles.count > 1,
+                         isWorkspaceActive: { browser.isActiveInWorkspace }) { direction in
             hoverCardTabID = nil
             browser.profileWindow?.switchBy(direction)
         }
@@ -294,7 +304,7 @@ struct BrowserWindow: View {
         let leadingInset = tabLayout == .vertical ? 0 : BrowserChrome.edgeInset
 
         return VStack(spacing: 0) {
-            navigationBar
+            WindowSection { navigationBar }
                 .padding(.leading, leadingInset)
 
             if !browser.isPrivate, bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
@@ -336,16 +346,14 @@ struct BrowserWindow: View {
         }
     }
 
-    @ViewBuilder
     private func page(for tab: BrowserTab) -> some View {
-        if tab.isNewTab {
-            NewTabView(bookmarks: bookmarks, browser: browser, tab: tab) {
-                browser.activeTabID = tab.id
-                browser.requestAddressFocus()
-            }
-        } else {
-            webView(for: tab)
-        }
+        BrowserPage(bookmarks: bookmarks, browser: browser, tab: tab, accent: accent,
+                    focusAddress: {
+                        browser.activeTabID = tab.id
+                        browser.requestAddressFocus()
+                    }, updateAddress: { url in
+                        if browser.activeTabID == tab.id, !addressIsFocused { address = url?.absoluteString ?? "" }
+                    })
     }
 
     private func splitPane(for tab: BrowserTab) -> some View {
@@ -420,11 +428,7 @@ struct BrowserWindow: View {
         .animation(.easeOut(duration: 0.14), value: hoverCardTabID)
     }
 
-    private func webView(for tab: BrowserTab) -> some View {
-        BrowserWebPage(tab: tab, browser: browser, accent: accent) { url in
-            if browser.activeTabID == tab.id, !addressIsFocused { address = url?.absoluteString ?? "" }
-        }
-    }
+
 
     private var navigationBar: some View {
         let verticalInset = BrowserChrome.navigationBarVerticalInset(for: tabLayout)
@@ -740,5 +744,49 @@ struct BrowserWindow: View {
                 browser.go(to: item)
             }
         }
+    }
+}
+
+/// Isolate workspace activation from the expensive toolbar/page body. A departing profile stays
+/// visible during the fade, but its native controls must not receive pointer or accessibility input.
+struct WorkspaceActivity: ViewModifier {
+    let browser: BrowserModel
+    let changed: (Bool) -> Void
+    func body(content: Content) -> some View {
+        content
+            .allowsHitTesting(browser.isActiveInWorkspace)
+            .accessibilityHidden(!browser.isActiveInWorkspace)
+            .modifier(WorkspaceActivationObserver(browser: browser, changed: changed))
+    }
+}
+
+/// Observing activation must not reset a parent's hit-testing or accessibility visibility.
+struct WorkspaceActivationObserver: ViewModifier {
+    let browser: BrowserModel
+    let changed: (Bool) -> Void
+    func body(content: Content) -> some View {
+        content.onChange(of: browser.isActiveInWorkspace) { _, active in changed(active) }
+    }
+}
+
+/// Evaluate each region in its own observation scope. Inline computed-view helpers otherwise make
+/// changes to the selected page dirty the whole window, including drag geometry and unrelated chrome.
+private struct WindowSection<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View { content() }
+}
+
+private struct PageSelectionAnimation: ViewModifier {
+    let browser: BrowserModel
+    func body(content: Content) -> some View {
+        content.animation(.easeOut(duration: 0.18), value: browser.activeTab?.isNewTab)
+    }
+}
+
+private struct TabSelectionObserver: ViewModifier {
+    let browser: BrowserModel
+    let changed: () -> Void
+    func body(content: Content) -> some View {
+        content.onChange(of: browser.activeTabID) { _, _ in changed() }
     }
 }

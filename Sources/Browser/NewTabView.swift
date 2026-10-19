@@ -11,6 +11,9 @@ struct NewTabView: View {
     private var page: NewTabPage { (tab ?? browser.activeTab)?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
     private var mascot: Mascot { browser.preferences.mascot }
     private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
+    private var isStartPageVisible: Bool {
+        (tab ?? browser.activeTab)?.isNewTab != false && browser.isActiveInWorkspace
+    }
 
     private let horizontalPadding: CGFloat = 32
     private let tileSpacing: CGFloat = 8
@@ -28,6 +31,12 @@ struct NewTabView: View {
             if browser.isPrivate || page == .startPage {
                 startPage
             }
+        }
+        .modifier(WorkspaceActivationObserver(browser: browser) { active in
+            if !active { renamingBookmarkID = nil }
+        })
+        .onChange(of: tab?.isNewTab) { _, isNew in
+            if isNew == false { renamingBookmarkID = nil }
         }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { contentWidth = $0 }
     }
@@ -59,6 +68,9 @@ struct NewTabView: View {
             .padding(.vertical, 48)
             .frame(maxWidth: .infinity)
             .containerRelativeFrame(.vertical, alignment: .center) { height, _ in height }
+            // The native scroll area can expose descendants even when its parent is hidden.
+            .accessibilityElement(children: isStartPageVisible ? .contain : .ignore)
+            .accessibilityHidden(!isStartPageVisible)
         }
         .scrollIndicators(.never)
         .scrollBounceBehavior(.basedOnSize)

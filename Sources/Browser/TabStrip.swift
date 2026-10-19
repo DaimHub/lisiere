@@ -145,6 +145,14 @@ struct TabStrip: View {
         }
         .onDisappear { drag.reset() }
         .task(id: hoveredTabID) { await updateHoverCard() }
+        .modifier(WorkspaceActivationObserver(browser: browser) { active in
+            if !active {
+                groupEditor = nil
+                isShowingAllTabs = false
+                hoveredTabID = nil
+                suppressedHoverCardTabID = nil
+            }
+        })
         .sheet(item: $groupEditor) { request in
             TabGroupEditor(browser: browser, request: request)
         }
@@ -223,7 +231,7 @@ struct TabStrip: View {
             .tabDragViewport(viewport, horizontal: true)
             .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
-            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true) }
             .onChange(of: tabRevealRequest) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: width) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: viewportWidth) { _, _ in revealActiveTab(in: sections, using: proxy) }
@@ -231,9 +239,10 @@ struct TabStrip: View {
         }
     }
 
-    private func revealActiveTab(in sections: [BrowserModel.TabSection], using proxy: ScrollViewProxy) {
+    private func revealActiveTab(in sections: [BrowserModel.TabSection], using proxy: ScrollViewProxy, onlyIfNeeded: Bool = false) {
         guard let id = browser.activeTabID,
               sections.contains(where: { $0.cards.contains { $0.tabs.contains { $0.id == id } } }) else { return }
+        guard !onlyIfNeeded || !drag.isTabFullyVisible(id) else { return }
         proxy.scrollTo(id)
     }
 
@@ -313,7 +322,7 @@ struct TabStrip: View {
             .tabDragViewport(viewport, horizontal: false)
             .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
-            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy) }
+            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true) }
             .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .contextMenu { BrowserMenuContent(actions: stripMenuActions) }
         }

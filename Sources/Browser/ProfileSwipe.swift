@@ -39,11 +39,13 @@ struct ProfileSwipeState {
 /// A non-hit-testing native view limits the local event monitor to this window's tab strip/sidebar.
 struct ProfileSwipeArea: NSViewRepresentable {
     var enabled: Bool
+    var isWorkspaceActive: () -> Bool = { true }
     var switchProfile: (Int) -> Void
 
     func makeNSView(context: Context) -> ProfileSwipeView { ProfileSwipeView() }
     func updateNSView(_ view: ProfileSwipeView, context: Context) {
         view.enabled = enabled
+        view.isWorkspaceActive = isWorkspaceActive
         view.switchProfile = switchProfile
     }
     static func dismantleNSView(_ view: ProfileSwipeView, coordinator: ()) { view.stopMonitoring() }
@@ -51,6 +53,7 @@ struct ProfileSwipeArea: NSViewRepresentable {
 
 final class ProfileSwipeView: NSView {
     var enabled = false
+    var isWorkspaceActive: () -> Bool = { true }
     var switchProfile: ((Int) -> Void)?
     private var monitor: Any?
     private var gesture = ProfileSwipeState()
@@ -74,7 +77,7 @@ final class ProfileSwipeView: NSView {
     }
 
     private func handle(_ event: NSEvent) -> Bool {
-        guard enabled, let window, event.window === window, window.isKeyWindow,
+        guard enabled, isWorkspaceActive(), let window, event.window === window, window.isKeyWindow,
               bounds.contains(convert(event.locationInWindow, from: nil)), !isHiddenOrHasHiddenAncestor else {
             gesture = ProfileSwipeState()
             return false

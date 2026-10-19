@@ -1,4 +1,6 @@
 import AppKit
+import Observation
+import SwiftUI
 import WebKit
 import XCTest
 @testable import Browser
@@ -33,6 +35,77 @@ final class ProfileWindowTests: XCTestCase {
         let owner = try ProfileWindowController(profiles: store ?? profiles, profileID: id, isPrivate: privateMode)
         owners.append(owner)
         return owner
+    }
+
+    func testWorkspaceCacheIsBoundedAndDoesNotInvalidateTheProfileListOnSelection() throws {
+        let a = try profiles.create(name: "Cache A")
+        let b = try profiles.create(name: "Cache B")
+        let c = try profiles.create(name: "Cache C")
+        let controller = try owner(a.id)
+        let original = controller.browser
+        original.isShowingHistory = true
+        original.isShowingClearData = true
+        let changes = ProfileListChange()
+        withObservationTracking { _ = profiles.availableProfiles } onChange: { changes.value = true }
+        controller.switchTo(b.id)
+        let second = controller.browser
+        XCTAssertFalse(original.isShowingHistory)
+        XCTAssertFalse(original.isShowingClearData)
+        controller.switchTo(a.id)
+        XCTAssertFalse(changes.value, "Selection must not invalidate an unchanged profile roster")
+        XCTAssertTrue(controller.presentedBrowsers.contains { $0 === original })
+        XCTAssertTrue(controller.presentedBrowsers.contains { $0 === second })
+        controller.switchTo(c.id)
+        XCTAssertEqual(controller.presentedBrowsers.count, 2)
+        XCTAssertTrue(controller.presentedBrowsers.contains { $0 === original })
+        XCTAssertFalse(controller.presentedBrowsers.contains { $0 === second })
+        controller.switchTo(b.id)
+        XCTAssertTrue(controller.browser === second, "Evicting chrome must not discard a profile's pages")
+        controller.close()
+        XCTAssertTrue(controller.presentedBrowsers.isEmpty)
+    }
+
+    func testProfileRoundTripRetainsNativeChromeAndReleasesDepartingKeyboardFocus() async throws {
+        let a = try profiles.create(name: "Chrome A")
+        let b = try profiles.create(name: "Chrome B")
+        let controller = try owner(a.id)
+        let original = controller.browser
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1000, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: ProfileWorkspaces(profiles: profiles, owner: controller, isFullScreen: false)
+            .environment(\.scenePhase, .active))
+        host.sizingOptions = []
+        window.contentView = host
+        controller.connect(window)
+        defer { window.contentView = nil }
+        try await waitUntil { self.descendants(host, of: FocusableTextField.self).count == 1 }
+        let field = try XCTUnwrap(descendants(host, of: FocusableTextField.self).first)
+        let swipe = try XCTUnwrap(descendants(host, of: ProfileSwipeView.self).first)
+        XCTAssertTrue(swipe.isWorkspaceActive())
+        window.makeFirstResponder(field)
+        XCTAssertNotNil(field.currentEditor())
+        controller.switchTo(b.id)
+        XCTAssertFalse(swipe.isWorkspaceActive(), "An inactive cached monitor must stop consuming gestures immediately")
+        XCTAssertNil(field.currentEditor(), "A cached inactive address bar must give up the field editor immediately")
+        try await waitUntil { self.descendants(host, of: FocusableTextField.self).count == 2 }
+        let other = try XCTUnwrap(descendants(host, of: FocusableTextField.self).first { $0 !== field })
+        for _ in 0..<3 {
+            controller.switchTo(a.id)
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertTrue(controller.browser === original)
+            XCTAssertTrue(descendants(host, of: FocusableTextField.self).contains { $0 === field })
+            XCTAssertNil(other.currentEditor())
+            XCTAssertNotNil(field.currentEditor(), "Returning to the start page must focus its own address field")
+            controller.switchTo(b.id)
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertNil(field.currentEditor())
+            XCTAssertNotNil(other.currentEditor())
+        }
+        XCTAssertEqual(descendants(host, of: FocusableTextField.self).count, 2)
+    }
+
+    private func descendants<T: NSView>(_ view: NSView, of type: T.Type) -> [T] {
+        (view as? T).map { [$0] } ?? view.subviews.flatMap { descendants($0, of: type) }
     }
 
     func testPasswordFieldMessagesFollowTheDetachedPageOwner() async throws {
@@ -375,4 +448,8 @@ final class ProfileWindowTests: XCTestCase {
         context.prepareForDeletion()
     }
 
+}
+
+private final class ProfileListChange: @unchecked Sendable {
+    var value = false
 }

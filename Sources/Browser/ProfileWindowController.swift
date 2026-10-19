@@ -11,6 +11,8 @@ final class ProfileWindowController {
     let isPrivate: Bool
     private(set) var browser: BrowserModel
     private(set) var isClosed = false
+    /// Keep at most the active workspace and its predecessor warm for repeated profile switches.
+    private(set) var presentedBrowsers: [BrowserModel] = []
     let additionalWindows: Int
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored private var pendingTabTransfer: TabWindowTransfer?
@@ -32,6 +34,7 @@ final class ProfileWindowController {
             privateBrowsingData = BrowsingData(history: HistoryStore(file: nil), session: SessionStore(file: nil),
                                                dataStore: browser.websiteDataStore, favicons: browser.favicons)
             browser.profileWindow = self
+            presentedBrowsers = [browser]
             return
         }
         guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
@@ -43,6 +46,7 @@ final class ProfileWindowController {
         browsers[profileID] = browser
         browser.profileWindow = self
         profiles.register(browser)
+        presentedBrowsers = [browser]
     }
 
     func connect(_ window: NSWindow?) {
@@ -98,6 +102,15 @@ final class ProfileWindowController {
             browser.setWorkspaceActive(false)
             if let window { browser.appearance.detach(window) }
             browser.window = nil
+            // A cached native field must relinquish the shared field editor before it becomes hidden.
+            window?.makeFirstResponder(nil)
+            if !presentedBrowsers.contains(where: { $0 === next }) {
+                presentedBrowsers = [browser, next]
+            } else if presentedBrowsers.last !== next {
+                // Put the incoming surface above the outgoing one without animating a z-index
+                // through every child layer. Stable ForEach identities retain both view graphs.
+                presentedBrowsers = presentedBrowsers.filter { $0 !== next } + [next]
+            }
             browser = next
             browser.setWorkspaceActive(true)
             browser.window = window
@@ -134,6 +147,7 @@ final class ProfileWindowController {
         }
         pendingTabTransfer = nil
         browsers = [:]
+        presentedBrowsers = []
         privateBrowsingData?.releaseDataStore()
         privateBrowsingData = nil
         if profiles.lastActiveWindow === self { profiles.lastActiveWindow = nil }

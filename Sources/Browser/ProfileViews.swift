@@ -9,6 +9,7 @@ struct ProfileBrowserWindow: View {
     @State private var owner: ProfileWindowController?
     @State private var isFullScreen = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.browserReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -21,19 +22,8 @@ struct ProfileBrowserWindow: View {
                     .environment(browsingData)
                     .environment(owner.browser.preferences)
                     .environment(owner.browser.favicons)
-            } else if let owner, let id = owner.browser.profileID, let context = profiles.context(for: id) {
-                BrowserWindow(bookmarks: context.bookmarks, profiles: profiles,
-                              browser: owner.browser, isFullScreen: isFullScreen)
-                    .environment(context.browsingData)
-                    .environment(context.preferences)
-                    .environment(context.favicons)
-                    // The departing profile keeps its own palette until the fade finishes.
-                    .environment(\.colorScheme, context.preferences.appearance.colorScheme)
-                    // Only crossfade the workspace; don't interpolate its toolbar or WebKit layout.
-                    .transaction { $0.animation = nil }
-                    .id(id)
-                    .transition(reduceMotion ? .identity : .opacity)
-                    .zIndex(1)
+            } else if let owner {
+                ProfileWorkspaces(profiles: profiles, owner: owner, isFullScreen: isFullScreen)
             } else if !isPrivate, profiles.context(for: profileID) == nil {
                 ContentUnavailableView {
                     Label("Profile Unavailable", browserIcon: .profileUnavailable, size: 40)
@@ -44,11 +34,12 @@ struct ProfileBrowserWindow: View {
                 Color.clear
             }
         }
-        // Keep SwiftUI's hosting layers in sync with the native appearance applied by the controller.
-        .preferredColorScheme(isPrivate ? .dark : owner?.browser.appearance.colorScheme)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner?.browser.profileID)
+        // AppKit owns the window appearance; SwiftUI consumes the resolved palette. A preferred
+        // scheme writes back to NSWindow and fights System's nil appearance on every profile switch.
+        .focusedSceneValue(\.browserModel, owner?.browser)
         // One material stays at full opacity beneath both layers, avoiding a flash of the desktop.
         .background { WindowGlassBackground().ignoresSafeArea() }
+        .environment(\.colorScheme, isPrivate ? .dark : owner?.browser.appearance.colorScheme ?? systemColorScheme)
         .background {
             if let owner {
                 WindowChromeConfigurator(
@@ -77,6 +68,51 @@ struct ProfileBrowserWindow: View {
                 if !isPrivate { profiles.restoreOtherProfiles(except: profileID, openWindow: openWindow) }
             } catch { profiles.errorMessage = error.localizedDescription }
         }
+    }
+}
+
+struct ProfileWorkspaces: View {
+    let profiles: ProfileStore
+    let owner: ProfileWindowController
+    let isFullScreen: Bool
+    @Environment(\.browserReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            ForEach(owner.presentedBrowsers, id: \.profileID) { browser in
+                if let id = browser.profileID, let context = profiles.context(for: id) {
+                    ProfileWorkspace(profiles: profiles, context: context, browser: browser,
+                                     isFullScreen: isFullScreen)
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner.browser.profileID)
+    }
+}
+
+/// Stable identity retains native controls and the SwiftUI graph across a profile round trip.
+/// Only two workspaces are kept; parked workspaces reject input and pause their start-page motion.
+private struct ProfileWorkspace: View {
+    let profiles: ProfileStore
+    let context: ProfileContext
+    let browser: BrowserModel
+    let isFullScreen: Bool
+    @Environment(\.browserReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        BrowserWindow(bookmarks: context.bookmarks, profiles: profiles,
+                      browser: browser, isFullScreen: isFullScreen)
+            .environment(context.browsingData)
+            .environment(context.preferences)
+            .environment(context.favicons)
+            .environment(\.colorScheme, context.preferences.appearance.colorScheme)
+            .environment(\.scenePhase, browser.isActiveInWorkspace ? scenePhase : .inactive)
+            .transaction { $0.animation = nil }
+            .opacity(browser.isActiveInWorkspace ? 1 : 0)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: browser.isActiveInWorkspace)
+            .transition(reduceMotion ? .identity : .opacity)
+            .zIndex(1)
     }
 }
 

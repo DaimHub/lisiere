@@ -4,6 +4,27 @@ import Observation
 
 @MainActor
 final class TabDragTests: XCTestCase {
+    func testTabRevealSkipsOnlyFullyVisibleTabsWithCurrentViewportGeometry() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let drag = TabDragController()
+        XCTAssertFalse(drag.isTabFullyVisible(tab.id))
+        for horizontal in [true, false] {
+            var region = TabDropRegion(id: "visible-tab", target: .tab(tab.id),
+                                       frame: CGRect(x: 20, y: 20, width: 80, height: 30),
+                                       horizontal: horizontal, viewport: "tabs")
+            let viewport = CGRect(x: 10, y: 10, width: 200, height: 160)
+            drag.updateFrames(.init(regions: [region], viewports: ["tabs": viewport]), browser: browser)
+            XCTAssertTrue(drag.isTabFullyVisible(tab.id))
+            region.frame.origin = horizontal ? CGPoint(x: 190, y: 20) : CGPoint(x: 20, y: 155)
+            drag.updateFrames(.init(regions: [region], viewports: ["tabs": viewport]), browser: browser)
+            XCTAssertFalse(drag.isTabFullyVisible(tab.id), "Partially clipped tabs still need to scroll into view")
+            drag.updateFrames(.init(regions: [region]), browser: browser)
+            XCTAssertFalse(drag.isTabFullyVisible(tab.id))
+        }
+    }
+
     func testAnimatedHeaderBoundsKeepVisualObserversQuietWithoutFreezingHitTesting() throws {
         for horizontal in [false, true] {
             let browser = BrowserModel.makePrivate()

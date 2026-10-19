@@ -286,6 +286,10 @@ final class BrowserModel {
     func setWorkspaceActive(_ active: Bool) {
         isActiveInWorkspace = active
         if active { activeTab?.didBecomeSelected() }
+        else {
+            isShowingHistory = false
+            isShowingClearData = false
+        }
     }
 
     func releaseClosedWindow() {

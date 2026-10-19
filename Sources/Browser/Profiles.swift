@@ -274,7 +274,9 @@ final class ProfileStore {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: file, options: .atomic)
         }
-        self.profiles = profiles
+        // Selecting a profile does not change the list. Broadcasting it dirties every workspace,
+        // profile menu and tab strip during the same display transaction as the crossfade.
+        if self.profiles != profiles { self.profiles = profiles }
         self.selectedID = selectedID
     }
 

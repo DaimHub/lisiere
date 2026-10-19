@@ -51,6 +51,9 @@ struct BookmarksBar: View {
         .padding(.horizontal, BrowserChrome.edgeInset)
         .frame(height: Self.height)
         .animation(.snappy(duration: 0.2), value: bookmarks.bookmarks.map(\.id))
+        .modifier(WorkspaceActivationObserver(browser: browser) { active in
+            if !active { renamingBookmarkID = nil; draggedBookmarkID = nil }
+        })
     }
 
     private func item(for bookmark: Bookmark) -> some View {

@@ -13,6 +13,26 @@ final class AppearanceTests: XCTestCase {
         return defaults
     }
 
+    func testHostedWindowGlassFollowsResolvedPaletteWithoutChangingWindowAppearance() async throws {
+        let window = makeWindow()
+        window.appearance = NSAppearance(named: .aqua)
+        let host = NSHostingView(rootView: WindowGlassBackground().environment(\.colorScheme, .dark))
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        func glass(in view: NSView) -> NSVisualEffectView? {
+            if let glass = view as? NSVisualEffectView { return glass }
+            return view.subviews.lazy.compactMap { glass(in: $0) }.first
+        }
+        try await waitUntil { glass(in: host) != nil }
+        let material = try XCTUnwrap(glass(in: host))
+        for scheme in [ColorScheme.dark, .light, .dark] {
+            host.rootView = WindowGlassBackground().environment(\.colorScheme, scheme)
+            let expected: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
+            try await waitUntil { material.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == expected }
+            XCTAssertEqual(window.appearance?.name, .aqua, "The material must not override the window's owner")
+        }
+    }
+
     func testMissingAndUnknownPreferencesFollowSystem() {
         let defaults = defaults()
         for value in [nil, "future-theme"] as [String?] {

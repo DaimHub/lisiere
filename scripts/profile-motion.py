@@ -87,6 +87,7 @@ def main():
     parser.add_argument("app", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--time-profiler", action="store_true", help="Add CPU stack sampling for diagnosis; use the same instruments for before/after comparisons")
+    parser.add_argument("--extended", action="store_true", help="Also measure warm web-to-web tab and profile switches")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -99,6 +100,7 @@ def main():
         with (output / "app.log").open("w") as log:
             launch = subprocess.Popen(["open", "-W", "-a", str(app), "--stdout", str(output / "app.log"),
                                        "--stderr", str(output / "app.log"), "--env", "LISIERE_QA_VALIDATION=motion",
+                                       "--env", f"LISIERE_QA_MOTION_EXTENDED={int(args.extended)}",
                                        "--env", f"LISIERE_QA_BASE_URL=http://127.0.0.1:{server.server_port}"], stdout=log, stderr=log)
             wait_for(lambda: (root / "motion-ready.json").exists(), 45, "QA ready")
             ready = json.loads((root / "motion-ready.json").read_text())
@@ -108,13 +110,13 @@ def main():
                 # The full Animation Hitches template includes very expensive Frame Lifetimes data.
                 sampling = ["--instrument", "Time Profiler"] if args.time_profiler else []
                 recorder = subprocess.Popen(["xcrun", "xctrace", "record", "--template", "Blank", "--instrument", "Hitches",
-                                             *sampling, "--attach", str(ready["pid"]), "--time-limit", "45s",
+                                             *sampling, "--attach", str(ready["pid"]), "--time-limit", "90s" if args.extended else "45s",
                                              "--output", str(output / "motion.trace"), "--no-prompt"], stdout=record_log, stderr=record_log)
                 wait_for(lambda: "Starting recording" in (output / "record.log").read_text(), 30, "recorder start")
                 # Let attachment finish before beginning the first measured interval.
                 time.sleep(2)
                 (root / "motion-go").touch()
-                wait_for(lambda: (root / "motion-phases.json").exists(), 40, "rendered scenarios")
+                wait_for(lambda: (root / "motion-phases.json").exists(), 80 if args.extended else 40, "rendered scenarios")
                 recorder.send_signal(signal.SIGINT)
                 print("Scenarios complete; processing trace", flush=True)
                 recorder.wait(timeout=120)

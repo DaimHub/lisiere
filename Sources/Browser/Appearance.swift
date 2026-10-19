@@ -174,7 +174,8 @@ final class AppearanceStore {
     /// Native materials must switch with the profile, without waiting for a SwiftUI presentation refresh.
     func attach(_ window: NSWindow) {
         windows.add(window)
-        window.appearance = selection.appearance
+        let appearance = selection.appearance
+        if window.appearance?.name != appearance?.name { window.appearance = appearance }
     }
 
     /// Parked profiles retain their pages, but must no longer update the shared physical window.

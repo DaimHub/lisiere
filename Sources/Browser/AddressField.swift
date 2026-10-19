@@ -58,7 +58,7 @@ struct AddressField: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.parent = self
         // The field and its shared field editor inherit the same application appearance as the toolbar.
-        field.appearance = nil
+        if field.appearance != nil { field.appearance = nil }
 
         // Set through the field editor while editing, which doesn't count as the user editing.
         if let editor = field.currentEditor() as? NSTextView {

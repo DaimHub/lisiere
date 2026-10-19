@@ -11,8 +11,10 @@ struct WindowGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        // Inherit this window's profile appearance, including a return to System.
-        view.appearance = nil
+        // A SwiftUI hosting ancestor can retain its own appearance. Match the resolved profile
+        // palette explicitly, without writing a preferredColorScheme back to the whole window.
+        let name: NSAppearance.Name = context.environment.colorScheme == .dark ? .darkAqua : .aqua
+        if view.appearance?.name != name { view.appearance = NSAppearance(named: name) }
     }
 }
 
