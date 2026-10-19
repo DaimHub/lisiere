@@ -15,6 +15,13 @@ enum BrowserChrome {
     static let windowButtonSize: CGFloat = 14
     static let windowButtonSpacing: CGFloat = 23
 
+    /// Horizontal rows share the tab inset; the tab row already supplies the gap above navigation.
+    static func navigationBarVerticalInset(for layout: TabLayout) -> CGFloat {
+        layout == .horizontal
+            ? (tabRowHeight - tabHeight) / 2
+            : (navigationBarHeight - navigationControlHeight) / 2
+    }
+
     /// Height of the top row the window controls are centered in for a tab layout.
     static func titlebarHeight(for layout: TabLayout) -> CGFloat {
         layout == .vertical ? navigationBarHeight : tabRowHeight

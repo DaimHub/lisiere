@@ -441,6 +441,7 @@ struct BrowserWindow: View {
     }
 
     private var navigationBar: some View {
+        let verticalInset = BrowserChrome.navigationBarVerticalInset(for: tabLayout)
         let presentation = browser.preferences.toolbarLayout.presentation(
             width: toolbarWidth, hasDownloads: !browser.downloads.items.isEmpty, isPrivate: browser.isPrivate)
         return HStack(spacing: 6) {
@@ -454,7 +455,9 @@ struct BrowserWindow: View {
         }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { toolbarWidth = $0 }
         .padding(.trailing, BrowserChrome.edgeInset)
-        .frame(height: BrowserChrome.navigationBarHeight)
+        .frame(height: BrowserChrome.navigationControlHeight)
+        .padding(.top, tabLayout == .vertical ? verticalInset : 0)
+        .padding(.bottom, verticalInset)
         .popover(isPresented: $isShowingDownloads) { DownloadsList(downloads: browser.downloads) }
         .sheet(isPresented: $isCustomizingToolbar) { ToolbarSettings(preferences: browser.preferences) }
     }
