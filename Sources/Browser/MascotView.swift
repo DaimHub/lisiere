@@ -10,24 +10,8 @@ struct MascotView: View {
     @State private var gaze = CGSize.zero
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || scenePhase != .active)) { context in
-            let time = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
-            let bob = reduceMotion ? 0 : sin(time * 1.5) * 2
-            let phase = time.truncatingRemainder(dividingBy: 5.7)
-            let blink = reduceMotion || phase > 0.22 ? 1 : max(0.08, abs(phase - 0.11) / 0.11)
-            ZStack {
-                layer("body")
-                ZStack {
-                    layer("eyes")
-                    layer("pupils")
-                        .offset(x: mascot.eyeGeometry.centerOffset.width + gaze.width,
-                                y: mascot.eyeGeometry.centerOffset.height + gaze.height)
-                        .mask(layer("eyes"))
-                }
-                .scaleEffect(x: 1, y: blink, anchor: mascot.eyeGeometry.anchor)
-            }
-            .offset(y: bob)
-        }
+        MascotArtwork(mascot: mascot, palette: palette, gaze: gaze,
+                      animated: !reduceMotion && scenePhase == .active)
         .frame(width: 120, height: 120)
         .background {
             if !reduceMotion { MascotPointerTracker(gaze: $gaze) }
@@ -37,11 +21,120 @@ struct MascotView: View {
         .accessibilityHidden(true)
     }
 
-    private func layer(_ name: String) -> some View {
-        Image("\(mascot.imageName(for: palette))-\(name)")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 120, height: 120)
+}
+
+private struct MascotArtwork: NSViewRepresentable {
+    let mascot: Mascot
+    let palette: MascotPalette
+    let gaze: CGSize
+    let animated: Bool
+    func makeNSView(context: Context) -> MascotArtworkView { MascotArtworkView() }
+    func updateNSView(_ view: MascotArtworkView, context: Context) {
+        view.update(mascot: mascot, palette: palette, gaze: gaze, animated: animated)
+    }
+}
+
+/// The render server interpolates these transforms at the display cadence. SwiftUI no longer
+/// rebuilds the masked artwork thirty (or 120) times a second just to move and blink it.
+final class MascotArtworkView: NSView {
+    let movingLayer = CALayer()
+    let eyeLayer = CALayer()
+    private let bodyLayer = CALayer()
+    private let whitesLayer = CALayer()
+    private let pupilContainer = CALayer()
+    private let pupilLayer = CALayer()
+    private let pupilMask = CALayer()
+    private var artworkName: String?
+    private var wantsAnimation = false
+    private var animationFrameRate: Float = 0
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.addSublayer(movingLayer)
+        movingLayer.addSublayer(bodyLayer)
+        movingLayer.addSublayer(eyeLayer)
+        eyeLayer.addSublayer(whitesLayer)
+        eyeLayer.addSublayer(pupilContainer)
+        pupilContainer.addSublayer(pupilLayer)
+        pupilContainer.mask = pupilMask
+        for image in [bodyLayer, whitesLayer, pupilLayer, pupilMask] { image.contentsGravity = .resizeAspect }
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(mascot: Mascot, palette: MascotPalette, gaze: CGSize, animated: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let name = mascot.imageName(for: palette)
+        if artworkName != name {
+            artworkName = name
+            bodyLayer.contents = NSImage(named: name + "-body")
+            whitesLayer.contents = NSImage(named: name + "-eyes")
+            pupilLayer.contents = NSImage(named: name + "-pupils")
+            pupilMask.contents = NSImage(named: name + "-eyes")
+        }
+        let geometry = mascot.eyeGeometry
+        eyeLayer.anchorPoint = CGPoint(x: geometry.anchor.x, y: geometry.anchor.y)
+        // Layer coordinates follow this flipped NSView, matching SwiftUI's top-left origin.
+        pupilLayer.setAffineTransform(CGAffineTransform(translationX: geometry.centerOffset.width + gaze.width,
+                                                       y: geometry.centerOffset.height + gaze.height))
+        layoutArtwork()
+        CATransaction.commit()
+        wantsAnimation = animated
+        updateAnimations()
+    }
+
+    override func layout() { super.layout(); layoutArtwork() }
+    private func layoutArtwork() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        movingLayer.frame = bounds
+        for item in [bodyLayer, eyeLayer, whitesLayer, pupilContainer, pupilLayer, pupilMask] {
+            // Preserve pupil translation while setting its untransformed bounds/position.
+            item.bounds = CGRect(origin: .zero, size: bounds.size)
+            item.position = CGPoint(x: bounds.width * item.anchorPoint.x, y: bounds.height * item.anchorPoint.y)
+            item.contentsScale = window?.backingScaleFactor ?? 2
+        }
+        CATransaction.commit()
+    }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); updateAnimations() }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        layoutArtwork()
+        updateAnimations()
+    }
+
+    private func updateAnimations() {
+        guard wantsAnimation, window != nil else {
+            movingLayer.removeAnimation(forKey: "bob")
+            eyeLayer.removeAnimation(forKey: "blink")
+            return
+        }
+        let frameRate = Float(window?.screen?.maximumFramesPerSecond ?? 60)
+        guard movingLayer.animation(forKey: "bob") == nil || animationFrameRate != frameRate else { return }
+        animationFrameRate = frameRate
+        let range = CAFrameRateRange(minimum: min(60, frameRate), maximum: frameRate, preferred: frameRate)
+        let time = Date().timeIntervalSinceReferenceDate
+        let bob = CAKeyframeAnimation(keyPath: "transform.translation.y")
+        bob.values = (0...240).map { sin(Double($0) / 240 * .pi * 2) * 2 }
+        bob.duration = .pi * 2 / 1.5
+        bob.timeOffset = time.truncatingRemainder(dividingBy: bob.duration)
+        bob.repeatCount = .infinity
+        bob.calculationMode = .linear
+        bob.preferredFrameRateRange = range
+        movingLayer.add(bob, forKey: "bob")
+        let blink = CAKeyframeAnimation(keyPath: "transform.scale.y")
+        blink.values = [1, 0.08, 0.08, 1, 1]
+        blink.keyTimes = [0, NSNumber(value: 0.1012 / 5.7), NSNumber(value: 0.1188 / 5.7), NSNumber(value: 0.22 / 5.7), 1]
+        blink.duration = 5.7
+        blink.timeOffset = time.truncatingRemainder(dividingBy: blink.duration)
+        blink.repeatCount = .infinity
+        blink.calculationMode = .linear
+        blink.preferredFrameRateRange = range
+        eyeLayer.add(blink, forKey: "blink")
     }
 }
 

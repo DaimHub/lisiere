@@ -194,9 +194,13 @@ private struct NewTabBackground: View {
     let accent: Color
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.browserReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 15, paused: reduceMotion)) { context in
+        let palette = colors.map { $0.mix(with: accent, by: 0.24) }
+        // Update destinations once a second; SwiftUI interpolates the mesh between them at the
+        // display cadence. Rebuilding a TimelineView at every frame needlessly dirties its graph.
+        return TimelineView(.animation(minimumInterval: 1, paused: reduceMotion || scenePhase != .active)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
             let drift = Float(sin(time / 9)) * 0.08
             let sway = Float(cos(time / 11)) * 0.08
@@ -205,7 +209,8 @@ private struct NewTabBackground: View {
                 [0, 0], [0.5 + sway, 0], [1, 0],
                 [0, 0.5 + drift], [0.5 + drift, 0.5 - sway], [1, 0.5 - drift],
                 [0, 1], [0.5 - sway, 1], [1, 1],
-            ], colors: colors.map { $0.mix(with: accent, by: 0.24) })
+            ], colors: palette)
+            .animation(reduceMotion || scenePhase != .active ? nil : .linear(duration: 1), value: context.date)
             // Low enough that the window's translucent material shows through.
             .opacity(colorScheme == .dark ? 0.28 : 0.3)
         }

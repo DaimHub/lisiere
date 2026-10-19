@@ -56,7 +56,8 @@ enum ReleaseValidation {
                 owner.window?.makeKeyAndOrderFront(nil)
                 NSApp.activate()
                 try check(reduceMotion == (environment["LISIERE_QA_REDUCE_MOTION"] == "1"), "reduce-motion-environment")
-                if phase == "journey" { try await journey(profiles, owner, base) }
+                if phase == "motion" { try await MotionValidation.run(profiles: profiles, owner: owner, base: base, root: root) }
+                else if phase == "journey" { try await journey(profiles, owner, base) }
                 else if phase == "restore" { try await restore(profiles, owner, base) }
                 else { throw Failure(check: "unknown-phase") }
                 try report(phase: phase, success: true)

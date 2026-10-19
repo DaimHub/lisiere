@@ -421,40 +421,9 @@ struct BrowserWindow: View {
     }
 
     private func webView(for tab: BrowserTab) -> some View {
-        PageHost(content: tab.contentView, tab: tab, browser: browser)
-            .overlay {
-                if let error = tab.loadError {
-                    PageErrorView(error: error, isLoading: tab.isLoading) { tab.retry() }
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if tab.isFindBarVisible, browser.activeTabID == tab.id {
-                    FindBar(tab: tab, browser: browser)
-                        .padding(10)
-                        .transition(.opacity.combined(with: .offset(y: -4)))
-                }
-            }
-            .animation(.easeOut(duration: 0.15), value: tab.isFindBarVisible)
-            .overlay(alignment: .topLeading) {
-                if tab.isLoading {
-                    GeometryReader { geometry in
-                        Capsule()
-                            .fill(accent.opacity(0.5))
-                            .frame(width: max(18, geometry.size.width * tab.estimatedProgress),
-                                   height: 2)
-                    }
-                    .frame(height: 2)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 3)
-                    .animation(.easeOut(duration: 0.18), value: tab.estimatedProgress)
-                }
-            }
-            .onChange(of: tab.url) { _, url in
-                if browser.activeTabID == tab.id, !addressIsFocused { address = url?.absoluteString ?? "" }
-            }
-            .onAppear {
-                if browser.activeTabID == tab.id, !addressIsFocused { address = tab.url?.absoluteString ?? "" }
-            }
+        BrowserWebPage(tab: tab, browser: browser, accent: accent) { url in
+            if browser.activeTabID == tab.id, !addressIsFocused { address = url?.absoluteString ?? "" }
+        }
     }
 
     private var navigationBar: some View {

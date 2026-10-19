@@ -594,8 +594,11 @@ final class PageHostView: NSView {
     private weak var tab: BrowserTab?
     private weak var browser: BrowserModel?
     private var checksOwnership = false
+    private var attachmentScheduled = false
 
     func show(_ content: NSView, tab: BrowserTab? = nil, browser: BrowserModel? = nil) {
+        let needsReconciliation = self.content !== content || self.tab !== tab || self.browser !== browser
+            || content.superview !== self
         self.content = content
         self.tab = tab
         self.browser = browser
@@ -603,7 +606,13 @@ final class PageHostView: NSView {
         attachContent()
         // SwiftUI may update the departing host after its replacement. Reconcile ownership once
         // that transaction has dismantled the old host, without rebuilding/reloading the page.
-        DispatchQueue.main.async { [weak self] in self?.attachContent() }
+        guard needsReconciliation, !attachmentScheduled else { return }
+        attachmentScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.attachmentScheduled = false
+            self.attachContent()
+        }
     }
 
     override func viewDidMoveToWindow() {
