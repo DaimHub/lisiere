@@ -94,6 +94,7 @@ struct TabStrip: View {
     @State private var hoveredTabID: UUID?
     @State private var suppressedHoverCardTabID: UUID?
     @State private var tabRevealRequest = 0
+    @State private var isShowingAllTabs = false
     @State private var drag: TabDragController
     @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
@@ -423,26 +424,25 @@ struct TabStrip: View {
     }
 
     private var allTabsMenu: some View {
-        Menu {
-            ForEach(browser.tabs) { tab in
-                Button {
-                    selectTab(tab)
-                    // Selecting the current tab from the list must reveal it even if its ID is unchanged.
-                    tabRevealRequest += 1
-                } label: {
-                    BrowserMenuLabel(title: tab.title, icon: browser.activeTabID == tab.id ? .checkmark : tab.isPinned ? .pin : .globe)
-                }
-            }
+        Button {
+            hoverCardTabID = nil
+            isShowingAllTabs.toggle()
         } label: {
             Image(browserIcon: .chevronDown, size: 12)
         }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
         .buttonStyle(ChromeIconButtonStyle(size: HorizontalTabStripMetrics.overflowButtonSize))
         .help("All Tabs (\(browser.tabs.count))")
         .accessibilityLabel("All Tabs")
         .accessibilityValue("\(browser.tabs.count) tabs")
         .accessibilityIdentifier("all-tabs-menu")
+        .popover(isPresented: $isShowingAllTabs, arrowEdge: .bottom) {
+            TabSearchList(tabs: browser.tabs, activeTabID: browser.activeTabID) { tab in
+                isShowingAllTabs = false
+                selectTab(tab)
+                // Re-selecting the current tab must reveal it even when its ID is unchanged.
+                tabRevealRequest += 1
+            }
+        }
     }
 
     @ViewBuilder
