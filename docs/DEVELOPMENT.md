@@ -244,3 +244,26 @@ from geometry resolution. It also defers closed context menus, collects only the
 anchor, and reuses immutable SwiftUI icon templates without sharing mutable AppKit images. Continuous
 pointer/disclosure tests measured 13.5–21.0% lower process CPU in the local native host; this does not
 establish a display frame rate. See the verification notes for the workload and measurement limits.
+
+
+## Drag a tab onto a page or into a new window
+
+The tab strip and page share one gesture coordinate space. Dropping on the left or right half of the
+page creates a split on that side. In an existing split, a third tab replaces the selected side while
+both previous tabs remain open; dragging a member changes its side. The single current tab cannot split
+with itself. Strip reordering still moves joined split cards as a unit. Groups remain strip-only drags.
+
+Dragging a tab at least 12 points beyond the window detaches that individual tab on release. The preview
+indicates the action; Escape and losing the key window cancel it. The tab context menu exposes the same
+Move to New Window action. A one-shot scene request retains the source until the destination NSWindow
+connects, then moves the original BrowserTab and WebView, preserving history, forms and page state.
+Page hosts check current model ownership before attaching, so a departing last-tab animation cannot
+reclaim the page from its new window. Suspended tabs transfer and restore through the destination model.
+The source keeps its remaining tabs, or a new blank tab when its last tab moves. Pins and group metadata
+follow the moved tab. Pending password decisions and native page sheets must finish before detachment.
+
+The destination retains the source profile. A detached private tab continues its original temporary
+WebKit data store; independently created private windows still get fresh stores. The temporary session
+lasts until its related windows close. Password script callbacks resolve the WebView's current owner,
+including when a pop-up shares a content controller with its opener. Session restoration is skipped for
+a transfer destination so it cannot consume another window's saved tabs.

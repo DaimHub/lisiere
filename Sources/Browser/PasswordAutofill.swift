@@ -147,7 +147,10 @@ final class PasswordMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.world == PasswordAutofill.world, let browser, !browser.isPrivate,
+        // A detached page keeps its WebView and scripts. Pop-ups can share this handler,
+        // so resolve the page's current owner instead of rebinding the shared controller.
+        let owner = (message.webView as? BrowserWebView)?.tab?.browser ?? browser
+        guard message.world == PasswordAutofill.world, let browser = owner, !browser.isPrivate,
               let passwords = browser.passwords, let webView = message.webView,
               let tab = browser.tabs.first(where: { $0.webView === webView }) else { return }
         if (message.body as? [String: Any])?["type"] as? String == "fields" {

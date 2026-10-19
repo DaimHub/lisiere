@@ -77,6 +77,7 @@ struct BrowserProfile: Codable, Identifiable, Equatable {
 struct ProfileWindowRequest: Codable, Hashable {
     var id = UUID()
     let profileID: UUID
+    var tabTransferID: UUID? = nil
 }
 
 @MainActor

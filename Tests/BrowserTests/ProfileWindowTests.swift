@@ -35,6 +35,50 @@ final class ProfileWindowTests: XCTestCase {
         return owner
     }
 
+    func testPasswordFieldMessagesFollowTheDetachedPageOwner() async throws {
+        let profile = try profiles.create(name: "Password routing")
+        let source = try owner(profile.id)
+        let destination = try owner(profile.id)
+        let tab = try XCTUnwrap(source.browser.activeTab)
+        source.browser.open(URL(string: "data:text/html,<title>Fields</title><input id='field'>")!)
+        try await waitUntil { tab.pageTitle == "Fields" && !tab.isLoading }
+        XCTAssertTrue(source.browser.moveTab(tab.id, to: destination.browser))
+        tab.hasPasswordFields = false
+        _ = try await tab.webView?.evaluateJavaScript("document.body.appendChild(document.createElement('input')).type='password'")
+        try await waitUntil { tab.hasPasswordFields }
+        XCTAssertTrue(tab.browser === destination.browser)
+    }
+
+    func testDetachedTabRetainsProfileAndSessionWithoutRestoringAnUnrelatedWindow() throws {
+        let profile = try profiles.create(name: "Detach")
+        let otherProfile = try profiles.create(name: "Other")
+        let source = try owner(profile.id)
+        let other = try owner(otherProfile.id)
+        let tab = try XCTUnwrap(source.browser.activeTab)
+        let view = tab.webView
+        XCTAssertFalse(source.browser.moveTab(tab.id, to: other.browser))
+        let token = try XCTUnwrap(TabWindowTransfer.prepare(tabID: tab.id, source: source.browser, at: .zero))
+        XCTAssertNil(TabWindowTransfer.take(token, profileID: otherProfile.id, isPrivate: false))
+        let destination = try ProfileWindowController(profiles: profiles, profileID: profile.id, tabTransferID: token)
+        owners.append(destination)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: true)
+        defer { window.orderOut(nil) }
+        destination.connect(window)
+        XCTAssertTrue(destination.browser.activeTab === tab)
+        XCTAssertTrue(tab.webView === view)
+        XCTAssertEqual(destination.browser.profileID, profile.id)
+        XCTAssertEqual(destination.browser.websiteDataStore.identifier, profile.id)
+        XCTAssertEqual(destination.additionalWindows, 0)
+        XCTAssertEqual(destination.browser.tabs.count, 1)
+        XCTAssertNil(source.browser.tab(withID: tab.id))
+        XCTAssertFalse(source.browser.canReopenClosedTab)
+        XCTAssertEqual(profiles.context(for: profile.id)?.session.snapshot.windows.count, 2)
+        source.close()
+        XCTAssertTrue(tab.webView === view)
+        XCTAssertTrue(tab.browser === destination.browser)
+    }
+
     func testSwitchKeepsTheSameNSWindowAndRestoresExactTabsWithoutStealingAnotherWindow() throws {
         let a = try profiles.create(name: "A")
         let b = try profiles.create(name: "B")

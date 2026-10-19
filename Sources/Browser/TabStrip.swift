@@ -95,6 +95,7 @@ struct TabStrip: View {
     @State private var suppressedHoverCardTabID: UUID?
     @State private var tabRevealRequest = 0
     @State private var isShowingAllTabs = false
+    private let ownsDragSpace: Bool
     @State private var drag: TabDragController
     @GestureState private var dragGestureActive = false
     @State private var groupEditor: TabGroupEditorRequest?
@@ -103,8 +104,9 @@ struct TabStrip: View {
     @FocusState private var focusedGroupSection: String?
 
     init(browser: BrowserModel, layout: TabLayout, isFullScreen: Bool, accent: Color,
-         hoverCardTabID: Binding<UUID?>, drag: TabDragController = TabDragController()) {
+         hoverCardTabID: Binding<UUID?>, drag: TabDragController = TabDragController(), ownsDragSpace: Bool = true) {
         self.browser = browser
+        self.ownsDragSpace = ownsDragSpace
         self.layout = layout
         self.isFullScreen = isFullScreen
         self.accent = accent
@@ -132,11 +134,11 @@ struct TabStrip: View {
         // regardless of whether the change came from a click, menu, or spring-loaded drag.
         // Keep the pointer-following drag overlay outside this animation scope.
         .animation(folderAnimation, value: Dictionary(uniqueKeysWithValues: browser.groups.map { ($0.id, $0.isCollapsed) }))
-        .coordinateSpace(name: TabDragController.coordinateSpace)
+        .coordinateSpace(name: ownsDragSpace ? TabDragController.coordinateSpace : "tab-strip-local")
         .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
-            TabDragGeometryObserver(bounds: bounds, drag: drag, browser: browser)
+            if ownsDragSpace { TabDragGeometryObserver(bounds: bounds, drag: drag, browser: browser) }
         }
-        .overlay { TabDragPreview(drag: drag, browser: browser) }
+        .overlay { if ownsDragSpace { TabDragPreview(drag: drag, browser: browser) } }
         .onChange(of: dragGestureActive) { _, active in if !active { drag.reset() } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if notification.object as? NSWindow === browser.window, drag.isDragging { drag.cancel() }
@@ -596,6 +598,11 @@ struct TabStrip: View {
                 if browser.splitTabIDs.contains(tab.id) { browser.endSplitView(keeping: tab.id) }
                 else { browser.startSplitView(with: tab.id) }
             },
+            .init(title: "Move to New Window", icon: .window,
+                  isEnabled: drag.detachTab != nil && tab.canMoveBetweenWindows) {
+                guard let window = browser.window else { return }
+                drag.detachTab?(tab.id, CGPoint(x: window.frame.midX + 40, y: window.frame.maxY - 40))
+            },
             .init(title: "Duplicate", icon: .copy) { browser.duplicateTab(tab.id) },
             .init(title: "Copy Link", icon: .copy, isEnabled: tab.url != nil) {
                 guard let url = tab.url else { return }
@@ -618,36 +625,41 @@ struct TabStrip: View {
 
 /// Pointer motion redraws only the floating preview. Resolving every anchor belongs to layout
 /// updates, and must not run again for each pointer sample over an otherwise stationary strip.
-private struct TabDragGeometryObserver: View {
+struct TabDragGeometryObserver: View {
     let bounds: TabDragBounds
+    var includesWindow = false
     let drag: TabDragController
     let browser: BrowserModel
 
     var body: some View {
         GeometryReader { geometry in
-            let frames = bounds.resolve(in: geometry)
+            let frames = bounds.resolve(in: geometry, includesWindow: includesWindow)
             Color.clear
                 .onChange(of: frames, initial: true) { _, frames in drag.updateFrames(frames, browser: browser) }
         }.allowsHitTesting(false)
     }
 }
 
-private struct TabDragPreview: View {
+struct TabDragPreview: View {
     let drag: TabDragController
     let browser: BrowserModel
 
     var body: some View {
-        GeometryReader { _ in
+        GeometryReader { geometry in
             if let id = drag.sourceID, let tab = browser.tab(withID: id), let point = drag.location {
                 HStack(spacing: 6) {
                     TabIcon(tab: tab, isActive: false)
-                    if !tab.isPinned { Text(tab.title).font(.system(size: 12)).lineLimit(1) }
+                    if !tab.isPinned || drag.pageDrop == .newWindow {
+                        Text(drag.pageDrop == .newWindow ? "Move to New Window" : tab.title)
+                            .font(.system(size: 12)).lineLimit(1)
+                    }
                 }
                 .padding(.horizontal, 10)
-                .frame(width: tab.isPinned ? 44 : 160, height: 32)
+                .frame(width: tab.isPinned && drag.pageDrop != .newWindow ? 44 : 160, height: 32)
                 .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-                .position(x: point.x + 20, y: point.y + 20)
+                .position(x: drag.pageDrop == .newWindow ? min(max(point.x, 90), geometry.size.width - 90) : point.x + 20,
+                          y: drag.pageDrop == .newWindow ? min(max(point.y, 24), geometry.size.height - 24) : point.y + 20)
             } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
                       let point = drag.location {
                 Label(group.name, browserIcon: .tabGroup)

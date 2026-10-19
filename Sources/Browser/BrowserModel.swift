@@ -90,6 +90,55 @@ final class BrowserModel {
         if second.isNewTab { requestAddressFocus() }
     }
 
+    /// A page drop replaces only the chosen pane. The displaced tab stays open.
+    func canSplitTab(_ id: UUID) -> Bool {
+        tab(withID: id) != nil && activeTab != nil && (id != activeTabID || isSplitView)
+    }
+
+    func splitTab(_ id: UUID, on side: TabSplitSide) {
+        guard canSplitTab(id), let dragged = tab(withID: id) else { return }
+        let partnerID = isSplitView
+            ? (splitTabIDs.contains(id) ? splitTabIDs.first { $0 != id } : splitTabIDs[side == .leading ? 1 : 0])
+            : activeTabID
+        guard let partnerID, let partner = tab(withID: partnerID), partnerID != id else { return }
+        let pair = side == .leading ? [id, partnerID] : [partnerID, id]
+        if Set(pair) != Set(splitTabIDs) { splitDividerFraction = 0.5 }
+        splitTabIDs = pair
+        partner.restore()
+        dragged.restore()
+        activeTabID = id
+        if dragged.isNewTab { requestAddressFocus() }
+    }
+
+    /// Moves the live page only after a compatible destination exists. Never records a closed tab.
+    @discardableResult
+    func moveTab(_ id: UUID, to destination: BrowserModel) -> Bool {
+        guard destination !== self, destination.isActiveInWorkspace, isActiveInWorkspace,
+              profileID == destination.profileID, isPrivate == destination.isPrivate,
+              websiteDataStore === destination.websiteDataStore ||
+                (!isPrivate && websiteDataStore.identifier == destination.websiteDataStore.identifier),
+              let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].canMoveBetweenWindows,
+              destination.tab(withID: id) == nil else { return false }
+        let tab = tabs[index]
+        let blank = destination.isBlank ? destination.tabs.first : nil
+        if let groupID = tab.groupID, let group = groups.first(where: { $0.id == groupID }),
+           !destination.groups.contains(where: { $0.id == groupID }) {
+            destination.groups.append(group)
+        }
+        tabs.remove(at: index)
+        if tabs.isEmpty { addTab() }
+        else if activeTabID == id { activeTabID = tabs[min(index, tabs.count - 1)].id }
+        if let blank, !blank.isPinned, blank.groupID == nil {
+            blank.close()
+            destination.tabs = []
+        }
+        tab.openerID = nil
+        destination.tabs.append(destination.adopt(tab))
+        destination.normalizeTabOrder()
+        destination.activeTabID = id
+        return true
+    }
+
     /// Exiting split view never closes either page or discards form input/history.
     func endSplitView(keeping id: UUID? = nil) {
         let keptID = id.flatMap { splitTabIDs.contains($0) ? $0 : nil } ?? activeTabID
