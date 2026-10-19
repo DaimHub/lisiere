@@ -92,7 +92,7 @@ struct BrowserWindow: View {
             }
         }
         .coordinateSpace(name: TabDragController.coordinateSpace)
-        .background(TabDragCoordinates(drag: tabDrag))
+        .background(TabDragCoordinates(drag: tabDrag, browser: browser))
         .overlayPreferenceValue(TabDragBoundsKey.self) { bounds in
             TabDragGeometryObserver(bounds: bounds, includesWindow: true, drag: tabDrag, browser: browser)
         }

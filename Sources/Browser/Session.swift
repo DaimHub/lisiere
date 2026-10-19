@@ -193,7 +193,7 @@ final class SessionStore {
     /// Forgets a window the user closed. Closing the last one keeps the windows for reopening later.
     func detach(_ browser: BrowserModel) {
         guard !isTerminating, openBrowsers.contains(where: { $0 === browser }) else { return }
-        if openBrowsers.count == 1 {
+        if openBrowsers.count == 1, !browser.tabs.isEmpty {
             reopenableWindows = [browser.windowSession()]
         }
         browsers.removeAll { $0.browser == nil || $0.browser === browser }

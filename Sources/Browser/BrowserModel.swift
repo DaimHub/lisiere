@@ -110,15 +110,19 @@ final class BrowserModel {
         if dragged.isNewTab { requestAddressFocus() }
     }
 
+    func canMoveTab(_ id: UUID, to destination: BrowserModel) -> Bool {
+        destination !== self && destination.isActiveInWorkspace && isActiveInWorkspace &&
+            profileID == destination.profileID && isPrivate == destination.isPrivate &&
+            (websiteDataStore === destination.websiteDataStore ||
+                (!isPrivate && websiteDataStore.identifier == destination.websiteDataStore.identifier)) &&
+            tab(withID: id)?.canMoveBetweenWindows == true && destination.tab(withID: id) == nil
+    }
+
     /// Moves the live page only after a compatible destination exists. Never records a closed tab.
     @discardableResult
     func moveTab(_ id: UUID, to destination: BrowserModel) -> Bool {
-        guard destination !== self, destination.isActiveInWorkspace, isActiveInWorkspace,
-              profileID == destination.profileID, isPrivate == destination.isPrivate,
-              websiteDataStore === destination.websiteDataStore ||
-                (!isPrivate && websiteDataStore.identifier == destination.websiteDataStore.identifier),
-              let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].canMoveBetweenWindows,
-              destination.tab(withID: id) == nil else { return false }
+        guard canMoveTab(id, to: destination),
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
         let tab = tabs[index]
         let blank = destination.isBlank ? destination.tabs.first : nil
         if let groupID = tab.groupID, let group = groups.first(where: { $0.id == groupID }),
@@ -126,8 +130,7 @@ final class BrowserModel {
             destination.groups.append(group)
         }
         tabs.remove(at: index)
-        if tabs.isEmpty { addTab() }
-        else if activeTabID == id { activeTabID = tabs[min(index, tabs.count - 1)].id }
+        if activeTabID == id { activeTabID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id }
         if let blank, !blank.isPinned, blank.groupID == nil {
             blank.close()
             destination.tabs = []
@@ -136,6 +139,11 @@ final class BrowserModel {
         destination.tabs.append(destination.adopt(tab))
         destination.normalizeTabOrder()
         destination.activeTabID = id
+        // Close only after adoption, so closing the source cannot dispose of the moved WebView.
+        if tabs.isEmpty {
+            if let profileWindow { profileWindow.closeAfterTabTransfer() }
+            else { window?.close() }
+        }
         return true
     }
 

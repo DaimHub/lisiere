@@ -295,7 +295,8 @@ final class TabDragTests: XCTestCase {
             ])
             drag.updateFrames(frames, browser: browser)
             drag.update(id: source.id, location: CGPoint(x: 30, y: 14), browser: browser)
-            try await Task.sleep(for: .milliseconds(600))
+            // Wait for the setup state before testing the subsequent collapse deadlines.
+            try await waitUntil(timeout: .seconds(2)) { !browser.groups[0].isCollapsed }
             XCTAssertFalse(browser.groups[0].isCollapsed)
             let gap = horizontal ? CGPoint(x: 122, y: 14) : CGPoint(x: 30, y: 30)
             // Every part of the section cancels an already-sleeping close task.

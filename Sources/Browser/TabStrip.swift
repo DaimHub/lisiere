@@ -645,21 +645,11 @@ struct TabDragPreview: View {
     let browser: BrowserModel
 
     var body: some View {
-        GeometryReader { geometry in
-            if let id = drag.sourceID, let tab = browser.tab(withID: id), let point = drag.location {
-                HStack(spacing: 6) {
-                    TabIcon(tab: tab, isActive: false)
-                    if !tab.isPinned || drag.pageDrop == .newWindow {
-                        Text(drag.pageDrop == .newWindow ? "Move to New Window" : tab.title)
-                            .font(.system(size: 12)).lineLimit(1)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(width: tab.isPinned && drag.pageDrop != .newWindow ? 44 : 160, height: 32)
-                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-                .position(x: drag.pageDrop == .newWindow ? min(max(point.x, 90), geometry.size.width - 90) : point.x + 20,
-                          y: drag.pageDrop == .newWindow ? min(max(point.y, 24), geometry.size.height - 24) : point.y + 20)
+        GeometryReader { _ in
+            if let id = drag.sourceID, !drag.usesFloatingPreview,
+               let tab = browser.tab(withID: id), let point = drag.location {
+                TabDragCard(tab: tab, destination: drag.pageDrop)
+                    .position(x: point.x + 20, y: point.y + 20)
             } else if let id = drag.sourceGroupID, let group = browser.groups.first(where: { $0.id == id }),
                       let point = drag.location {
                 Label(group.name, browserIcon: .tabGroup)
@@ -676,6 +666,33 @@ struct TabDragPreview: View {
         // transient preview lightweight, and never animate its cleanup with the committed move.
         .transaction { $0.animation = nil }
         .allowsHitTesting(false)
+    }
+}
+
+struct TabDragCard: View {
+    let tab: BrowserTab
+    let destination: TabPageDrop?
+
+    private var action: String? {
+        switch destination {
+        case .newWindow: "Move to New Window"
+        case .existingWindow: "Move to Window"
+        case .unavailableWindow: "Cannot Move Here"
+        default: nil
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TabIcon(tab: tab, isActive: false)
+            if !tab.isPinned || action != nil {
+                Text(action ?? tab.title).font(.system(size: 12)).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(width: tab.isPinned && action == nil ? 44 : 160, height: 32)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
     }
 }
 

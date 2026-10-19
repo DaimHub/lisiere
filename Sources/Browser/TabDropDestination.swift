@@ -5,6 +5,8 @@ enum TabSplitSide: Equatable { case leading, trailing }
 enum TabPageDrop: Equatable {
     case split(TabSplitSide)
     case newWindow
+    case existingWindow
+    case unavailableWindow
 }
 
 /// One gesture owns strip ordering, page splitting and detachment without exporting page data.
@@ -86,7 +88,15 @@ final class TabDragController {
     private(set) var scrollRequest: TabDragScrollRequest?
     private(set) var pageDrop: TabPageDrop?
     @ObservationIgnored weak var coordinateView: NSView?
+    @ObservationIgnored private(set) weak var attachedBrowser: BrowserModel?
     @ObservationIgnored var detachTab: ((UUID, CGPoint) -> Void)?
+    @ObservationIgnored private(set) var floatingPreview: TabDragFloatingPreview?
+    var usesFloatingPreview: Bool { floatingPreview != nil }
+    @ObservationIgnored private weak var receivingWindow: TabDragController?
+    @ObservationIgnored private weak var incomingBrowser: BrowserModel?
+    @ObservationIgnored private var incomingTabID: UUID?
+    @ObservationIgnored private var incomingLocation: CGPoint?
+    @ObservationIgnored private var incomingDrop: IncomingDrop?
     @ObservationIgnored private var frames = TabDragFrames()
     @ObservationIgnored private var cancelled = false
     @ObservationIgnored private weak var origin: BrowserModel?
@@ -96,9 +106,33 @@ final class TabDragController {
     @ObservationIgnored private var springLoadedGroupID: UUID?
     @ObservationIgnored private var groupCollapseTask: Task<Void, Never>?
 
+    private enum IncomingDrop {
+        case split(TabSplitSide)
+        case strip(TabDropSelection?)
+    }
+
+    func connect(_ view: TabDragCoordinateView, browser: BrowserModel) {
+        guard coordinateView !== view || attachedBrowser !== browser else { return }
+        coordinateView = view
+        attachedBrowser = browser
+        view.drag = self
+        TabDragWindows.shared.register(self)
+    }
+
+    func disconnect(_ view: TabDragCoordinateView) {
+        guard coordinateView === view else { return }
+        reset()
+        coordinateView = nil
+        attachedBrowser = nil
+        TabDragWindows.shared.unregister(self)
+    }
+
     func updateFrames(_ frames: TabDragFrames, browser: BrowserModel) {
         self.frames = frames
         if let source, let location { update(source: source, location: location, browser: browser) }
+        else if let incomingBrowser, let incomingTabID, let incomingLocation {
+            _ = receive(id: incomingTabID, from: incomingBrowser, at: incomingLocation)
+        }
     }
 
     func update(id: UUID, location: CGPoint, browser: BrowserModel) {
@@ -127,6 +161,14 @@ final class TabDragController {
         guard self.source == source, origin === browser else { return }
         if self.location != location { self.location = location }
         scheduleGroupCollapse(browser: browser)
+        if updateWindowDestination(source: source, location: location, browser: browser) {
+            selection = nil
+            indicator = nil
+            scrollRequest = nil
+            cancelGroupExpansion()
+            updateFloatingPreview(source: source, location: location, browser: browser)
+            return
+        }
         let pageDrop = pageDestination(at: location, source: source, browser: browser)
         if self.pageDrop != pageDrop { self.pageDrop = pageDrop }
         selection = pageDrop == nil ? destination(at: location, source: source, browser: browser) : nil
@@ -135,6 +177,86 @@ final class TabDragController {
         let scrollRequest = pageDrop == nil ? scrolling(at: location) : nil
         if self.scrollRequest != scrollRequest { self.scrollRequest = scrollRequest }
         scheduleGroupExpansion(browser: browser)
+        updateFloatingPreview(source: source, location: location, browser: browser)
+    }
+
+    private func screenPoint(for location: CGPoint) -> CGPoint? {
+        guard let view = coordinateView, let window = view.window else { return nil }
+        return window.convertPoint(toScreen: view.convert(location, to: nil))
+    }
+
+    private func updateFloatingPreview(source: TabDragSource, location: CGPoint, browser: BrowserModel) {
+        guard case let .tab(id) = source, let tab = browser.tab(withID: id),
+              let point = screenPoint(for: location) else { return }
+        if floatingPreview == nil { floatingPreview = TabDragFloatingPreview() }
+        floatingPreview?.show(tab: tab, destination: pageDrop, at: point, appearance: browser.window?.effectiveAppearance)
+    }
+
+    private func updateWindowDestination(source: TabDragSource, location: CGPoint, browser: BrowserModel) -> Bool {
+        let target: TabDragController?
+        if case .tab = source, let point = screenPoint(for: location) {
+            target = TabDragWindows.shared.destination(at: point, excluding: self)
+        } else { target = nil }
+        if receivingWindow !== target { receivingWindow?.clearIncoming(); receivingWindow = target }
+        guard let target, case let .tab(id) = source, let point = screenPoint(for: location),
+              let view = target.coordinateView, let window = view.window else { return false }
+        let local = view.convert(window.convertPoint(fromScreen: point), from: nil)
+        pageDrop = target.receive(id: id, from: browser, at: local) ? .existingWindow : .unavailableWindow
+        return true
+    }
+
+    private func receive(id: UUID, from source: BrowserModel, at point: CGPoint) -> Bool {
+        guard !isDragging, let browser = attachedBrowser, source.canMoveTab(id, to: browser),
+              let tab = source.tab(withID: id) else { clearIncoming(); return false }
+        incomingBrowser = source
+        incomingTabID = id
+        incomingLocation = point
+        if let frame = frames.pageFrame, frame.contains(point), browser.activeTab != nil {
+            let side: TabSplitSide = point.x < frame.midX ? .leading : .trailing
+            incomingDrop = .split(side)
+            pageDrop = .split(side)
+            indicator = nil
+        } else {
+            let selection = destination(at: point, source: .tab(id), browser: browser, incomingTab: tab)
+            incomingDrop = .strip(selection)
+            pageDrop = nil
+            indicator = selection?.indicator
+        }
+        return true
+    }
+
+    private func clearIncoming() {
+        guard incomingBrowser != nil || incomingTabID != nil else { return }
+        incomingBrowser = nil
+        incomingTabID = nil
+        incomingLocation = nil
+        incomingDrop = nil
+        indicator = nil
+        pageDrop = nil
+    }
+
+    private func acceptIncoming(id: UUID, from source: BrowserModel) {
+        guard incomingBrowser === source, incomingTabID == id, let drop = incomingDrop,
+              let browser = attachedBrowser, source.canMoveTab(id, to: browser) else { clearIncoming(); return }
+        let previousActiveID = browser.activeTabID
+        clearIncoming()
+        guard source.moveTab(id, to: browser) else { return }
+        switch drop {
+        case let .split(side):
+            if let previousActiveID, browser.tab(withID: previousActiveID) != nil {
+                browser.activeTabID = previousActiveID
+                browser.splitTab(id, on: side)
+            }
+        case let .strip(selection):
+            if let selection {
+                switch selection.region.target {
+                case let .tab(target): browser.dropTab(id, beside: target, after: selection.after)
+                case let .group(group): browser.dropTab(id, into: group)
+                default: break
+                }
+            }
+        }
+        browser.window?.makeKeyAndOrderFront(nil)
     }
 
     /// Spring-load a collapsed folder after a deliberate hover. Movement inside the same header
@@ -231,7 +353,8 @@ final class TabDragController {
 
     /// Pick the most specific visible target first, then validate it. An invalid tab must not fall through
     /// to the ungrouped background, and clipped rows must not receive a drop in another scroll area.
-    private func destination(at point: CGPoint, source: TabDragSource, browser: BrowserModel) -> TabDropSelection? {
+    private func destination(at point: CGPoint, source: TabDragSource, browser: BrowserModel,
+                             incomingTab: BrowserTab? = nil) -> TabDropSelection? {
         let region = frames.regions.lazy.filter { region in
             // Keep occupied regions as blockers so a folder cannot fall through a loose tab to the background.
             switch (source, region.target) {
@@ -257,7 +380,8 @@ final class TabDragController {
         case let (.tab(sourceID), .tab(id)):
             // SwiftUI can retain an outgoing card's anchor during its collapse transition.
             // Keep it a blocker until its frame disappears, but never drop into the hidden child.
-            guard browser.canDropTab(sourceID, beside: id), let tab = browser.tab(withID: id),
+            guard let tab = browser.tab(withID: id),
+                  incomingTab.map({ $0.isPinned == tab.isPinned }) ?? browser.canDropTab(sourceID, beside: id),
                   !browser.groups.contains(where: { $0.id == tab.groupID && $0.isCollapsed }) else { return nil }
         case let (.tab, .group(id)):
             guard id == nil || browser.groups.contains(where: { $0.id == id }) else { return nil }
@@ -295,6 +419,13 @@ final class TabDragController {
         defer { reset() }
         guard !cancelled, origin === browser, self.source == source else { return }
         update(source: source, location: location, browser: browser)
+        if case let .tab(id) = source, let target = receivingWindow {
+            // Detach the receiver before reset so its validated target survives clearing source state.
+            receivingWindow = nil
+            reset()
+            target.acceptIncoming(id: id, from: browser)
+            return
+        }
         if case let .tab(id) = source, let pageDrop {
             switch pageDrop {
             case let .split(side): browser.splitTab(id, on: side)
@@ -305,6 +436,7 @@ final class TabDragController {
                 let detach = detachTab
                 reset()
                 detach?(id, point)
+            case .existingWindow, .unavailableWindow: break
             }
             return
         }
@@ -329,6 +461,11 @@ final class TabDragController {
     }
 
     func reset() {
+        receivingWindow?.clearIncoming()
+        receivingWindow = nil
+        clearIncoming()
+        floatingPreview?.close()
+        floatingPreview = nil
         cancelGroupExpansion()
         restoreSpringLoadedGroup()
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
@@ -475,11 +612,14 @@ extension View {
 /// Converts the shared SwiftUI gesture coordinates into AppKit screen coordinates at release.
 struct TabDragCoordinates: NSViewRepresentable {
     let drag: TabDragController
+    let browser: BrowserModel
     func makeNSView(context: Context) -> TabDragCoordinateView { TabDragCoordinateView() }
-    func updateNSView(_ view: TabDragCoordinateView, context: Context) { drag.coordinateView = view }
+    func updateNSView(_ view: TabDragCoordinateView, context: Context) { drag.connect(view, browser: browser) }
+    static func dismantleNSView(_ view: TabDragCoordinateView, coordinator: ()) { view.drag?.disconnect(view) }
 }
 
 final class TabDragCoordinateView: NSView {
+    weak var drag: TabDragController?
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

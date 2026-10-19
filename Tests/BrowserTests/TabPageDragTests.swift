@@ -107,7 +107,8 @@ final class TabPageDragTests: XCTestCase {
         XCTAssertTrue(tab.canGoBack)
         let draft = try await view.evaluateJavaScript("document.getElementById('draft').value") as? String
         XCTAssertEqual(draft, "keep this draft")
-        XCTAssertTrue(source.activeTab?.isNewTab == true)
+        XCTAssertTrue(source.tabs.isEmpty)
+        XCTAssertNil(source.activeTab)
         XCTAssertFalse(source.canReopenClosedTab)
         source.releaseClosedWindow()
         let cookies = await destination.websiteDataStore.httpCookieStore.allCookies()
@@ -170,7 +171,8 @@ final class TabPageDragTests: XCTestCase {
         destination.connect(window)
         XCTAssertTrue(destination.browser.activeTab === tab)
         XCTAssertTrue(tab.webView?.configuration.websiteDataStore === destination.browser.websiteDataStore)
-        XCTAssertTrue(source.browser.activeTab?.isNewTab == true)
+        XCTAssertTrue(source.isClosed)
+        XCTAssertTrue(source.browser.tabs.isEmpty)
     }
 
     func testSuspendedTabDetachesAndRestoresInItsOriginalSession() async throws {

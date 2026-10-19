@@ -108,6 +108,13 @@ final class ProfileWindowController {
         } catch { profiles.errorMessage = error.localizedDescription }
     }
 
+    func closeAfterTabTransfer() {
+        guard browser.tabs.isEmpty else { return }
+        window?.close()
+        // Also release models in hosts without the SwiftUI window-close observer (including tests).
+        close()
+    }
+
     func close() {
         guard !isClosed else { return }
         BrowserDiagnostics.lifecycle.debug("Browser window closing")
