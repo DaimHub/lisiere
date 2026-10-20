@@ -13,6 +13,27 @@ final class ProfileWindowTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
 
+    func testPresentationStartsBeforeWorkspaceNotificationsAndIsReleasedOnClose() throws {
+        let a = try profiles.create(name: "Presentation A")
+        let b = try profiles.create(name: "Presentation B")
+        let controller = try owner(a.id)
+        let original = controller.browser
+        let presenter = WorkspacePresentationProbe { profileID in
+            XCTAssertEqual(profileID, b.id)
+            XCTAssertTrue(controller.browser === original)
+            XCTAssertTrue(original.isActiveInWorkspace)
+        }
+        controller.workspacePresentation = presenter
+        controller.switchTo(b.id)
+        XCTAssertEqual(presenter.calls, 1)
+        XCTAssertEqual(controller.browser.profileID, b.id)
+        XCTAssertFalse(original.isActiveInWorkspace)
+        controller.switchTo(b.id)
+        XCTAssertEqual(presenter.calls, 1)
+        controller.close()
+        XCTAssertNil(controller.workspacePresentation)
+    }
+
     override func setUp() async throws {
         root = FileManager.default.temporaryDirectory.appending(path: "ProfileWindowTests-\(UUID())")
         suite = "ProfileWindowTests.\(UUID())"
@@ -22,6 +43,7 @@ final class ProfileWindowTests: XCTestCase {
 
     override func tearDown() async throws {
         owners.forEach { $0.close() }
+        profiles.saveBeforeQuitting()
         for profile in profiles.profiles {
             profiles.context(for: profile.id)?.prepareForDeletion()
             if !profile.isInitial { defaults.removePersistentDomain(forName: ProfileStore.defaultsDomain(for: profile.id)) }
@@ -102,6 +124,49 @@ final class ProfileWindowTests: XCTestCase {
             XCTAssertNotNil(other.currentEditor())
         }
         XCTAssertEqual(descendants(host, of: FocusableTextField.self).count, 2)
+    }
+
+    func testRetainedAddressFieldFollowsDifferentWebTabsAndProfileRoundTrip() async throws {
+        let a = try profiles.create(name: "Address A")
+        let b = try profiles.create(name: "Address B")
+        let controller = try owner(a.id)
+        let browser = controller.browser
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1000, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: ProfileWorkspaces(profiles: profiles, owner: controller, isFullScreen: false)
+            .environment(\.scenePhase, .active))
+        host.sizingOptions = []
+        window.contentView = host
+        controller.connect(window)
+        defer { window.contentView = nil }
+        try await waitUntil { self.descendants(host, of: FocusableTextField.self).count == 1 }
+        let field = try XCTUnwrap(descendants(host, of: FocusableTextField.self).first)
+        let firstURL = URL(string: "data:text/html,<title>First</title><input>")!
+        let secondURL = URL(string: "data:text/html,<title>Second</title><input>")!
+        browser.open(firstURL)
+        let first = try XCTUnwrap(browser.activeTab)
+        try await waitUntil { !first.isLoading && first.pageTitle == "First" }
+        window.makeFirstResponder(nil)
+        try await waitUntil { field.currentEditor() == nil }
+        browser.open(secondURL, inNewTab: true)
+        let second = try XCTUnwrap(browser.activeTab)
+        try await waitUntil { !second.isLoading && field.stringValue == secondURL.absoluteString }
+        for tab in [first, second, first] {
+            browser.activeTabID = tab.id
+            try await waitUntil { field.stringValue == tab.url?.absoluteString }
+            XCTAssertTrue(self.descendants(host, of: FocusableTextField.self).first === field)
+        }
+        controller.switchTo(b.id)
+        try await waitUntil { self.descendants(host, of: FocusableTextField.self).count == 2 }
+        controller.switchTo(a.id)
+        try await waitUntil { browser.isActiveInWorkspace && field.stringValue == firstURL.absoluteString }
+        XCTAssertTrue(browser.activeTab === first)
+        XCTAssertTrue(self.descendants(host, of: FocusableTextField.self).contains { $0 === field })
+        // Let the profile activation finish restoring page focus before requesting the address.
+        try await waitUntil { window.firstResponder === first.webView }
+        browser.requestAddressFocus()
+        try await waitUntil { field.currentEditor() != nil }
+        XCTAssertEqual(field.currentEditor()?.string, firstURL.absoluteString)
     }
 
     private func descendants<T: NSView>(_ view: NSView, of type: T.Type) -> [T] {
@@ -195,7 +260,9 @@ final class ProfileWindowTests: XCTestCase {
         let b = try profiles.create(name: "Split B")
         let window = try owner(a.id)
         let original = window.browser
+        original.open(URL(string: "data:text/html,<title>Split left</title>")!)
         original.startSplitView()
+        original.open(URL(string: "data:text/html,<title>Split right</title>")!)
         let ids = original.splitTabIDs
         let views = original.splitTabs.compactMap(\.webView)
         let cookie = try XCTUnwrap(HTTPCookie(properties: [.domain: "split.example", .path: "/", .name: "split", .value: "a"]))
@@ -452,4 +519,16 @@ final class ProfileWindowTests: XCTestCase {
 
 private final class ProfileListChange: @unchecked Sendable {
     var value = false
+}
+
+@MainActor
+private final class WorkspacePresentationProbe: ProfileWorkspacePresenting {
+    var calls = 0
+    let onBegin: (UUID) -> Void
+    init(onBegin: @escaping (UUID) -> Void) { self.onBegin = onBegin }
+    func beginTransition(to profileID: UUID) -> Bool {
+        calls += 1
+        onBegin(profileID)
+        return false
+    }
 }

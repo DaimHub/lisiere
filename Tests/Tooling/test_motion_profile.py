@@ -29,7 +29,8 @@ class MotionProfileTests(unittest.TestCase):
         for phase in [{"start_epoch": 99, "end_epoch": 101},
                       {"start_epoch": 100, "end_epoch": 104},
                       {"start_epoch": 100, "end_epoch": 100},
-                      {"start_epoch": 100, "end_epoch": 101, "window_active": False}]:
+                      {"start_epoch": 100, "end_epoch": 101, "window_active": False},
+                      {"start_epoch": 100, "end_epoch": 101, "window_visible": False}]:
             with self.subTest(phase=phase), self.assertRaises(RuntimeError):
                 motion.summarize(empty, 42, 100, 3, [{"name": "invalid", **phase}])
 

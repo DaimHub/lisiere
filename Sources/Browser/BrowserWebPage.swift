@@ -9,7 +9,8 @@ struct BrowserWebPage: View {
     let updateAddress: (URL?) -> Void
 
     var body: some View {
-        PageHost(content: tab.contentView, tab: tab, browser: browser)
+        PageHost(content: tab.contentView, tab: tab, browser: browser,
+                 isWorkspaceActive: browser.isActiveInWorkspace)
             .modifier(PageErrorOverlay(tab: tab))
             .modifier(PageFindOverlay(tab: tab, browser: browser))
             .modifier(PageProgressOverlay(tab: tab, accent: accent))

@@ -30,6 +30,8 @@ final class ProfileAppearanceTests: XCTestCase {
         workContext.preferences.accent = .custom
         workContext.preferences.customAccent = try XCTUnwrap(AccentColor(hex: "#19b6a4"))
         workContext.preferences.mascot = .nuage
+        first.open(URL(string: "about:blank")!)
+        second.open(URL(string: "about:blank")!)
         XCTAssertEqual(first.activeTab?.webView?.appearance?.name, .aqua)
         XCTAssertEqual(second.activeTab?.webView?.appearance?.name, .darkAqua)
         XCTAssertEqual(personal.preferences.accent, .rose)

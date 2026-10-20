@@ -1,8 +1,28 @@
 import XCTest
+import Observation
+import Synchronization
 @testable import Browser
 
 @MainActor
 final class StoreFileTests: XCTestCase {
+    func testUnchangedPersistenceStatusDoesNotInvalidateWindowsButFailuresAndRecoveryDo() {
+        let status = PersistenceStatus()
+        let url = URL(filePath: "/test/Profiles.plist")
+        let changed = Mutex(false)
+        withObservationTracking { _ = status.firstFailure(for: [url]) } onChange: { changed.withLock { $0 = true } }
+        status.record(nil, for: url)
+        XCTAssertFalse(changed.withLock { $0 })
+        let failure = StoreFile.Failure(operation: .write, code: NSFileWriteOutOfSpaceError, store: "profiles")
+        status.record(failure, for: url)
+        XCTAssertTrue(changed.withLock { $0 })
+        changed.withLock { $0 = false }
+        withObservationTracking { _ = status.firstFailure(for: [url]) } onChange: { changed.withLock { $0 = true } }
+        status.record(failure, for: url)
+        XCTAssertFalse(changed.withLock { $0 })
+        status.record(nil, for: url)
+        XCTAssertTrue(changed.withLock { $0 })
+    }
+
     func testInvalidBookmarksCannotBeOverwrittenByLaterEdits() {
         let suite = "io.github.daimhub.lisiere.tests.bookmarks.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!

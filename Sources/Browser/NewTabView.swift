@@ -5,14 +5,20 @@ struct NewTabView: View {
     let bookmarks: BookmarkStore
     let browser: BrowserModel
     var tab: BrowserTab? = nil
+    var isVisible: Bool? = nil
+    /// A retained hidden home needs only this flag, never ownership of its former web tab.
+    var showsHomePage: Bool? = nil
     let focusAddress: () -> Void
     @State private var contentWidth: CGFloat = 0
     @State private var renamingBookmarkID: UUID?
-    private var page: NewTabPage { (tab ?? browser.activeTab)?.showsHomePage == true ? .startPage : browser.preferences.newTabPage }
+    private var page: NewTabPage {
+        let showHome = showsHomePage ?? ((tab ?? browser.activeTab)?.showsHomePage == true)
+        return showHome ? .startPage : browser.preferences.newTabPage
+    }
     private var mascot: Mascot { browser.preferences.mascot }
     private var mascotPalette: MascotPalette { browser.preferences.mascotPalette }
     private var isStartPageVisible: Bool {
-        (tab ?? browser.activeTab)?.isNewTab != false && browser.isActiveInWorkspace
+        isVisible ?? ((tab ?? browser.activeTab)?.isNewTab != false && browser.isActiveInWorkspace)
     }
 
     private let horizontalPadding: CGFloat = 32
@@ -36,7 +42,7 @@ struct NewTabView: View {
             if !active { renamingBookmarkID = nil }
         })
         .onChange(of: tab?.isNewTab) { _, isNew in
-            if isNew == false { renamingBookmarkID = nil }
+            if isNew != true { renamingBookmarkID = nil }
         }
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { contentWidth = $0 }
     }

@@ -58,6 +58,7 @@ final class PrivacyTests: XCTestCase {
         let second = BrowserModel.makePrivate(downloads: DownloadManager())
         first.addTab()
 
+        first.tabs.forEach { $0.load(URL(string: "about:blank")!) }
         let stores = first.tabs.compactMap { $0.webView?.configuration.websiteDataStore }
         XCTAssertEqual(stores.count, 2)
         XCTAssertTrue(stores.allSatisfy { $0 === first.websiteDataStore })
@@ -95,6 +96,7 @@ final class PrivacyTests: XCTestCase {
         let firstCookies = first.websiteDataStore.httpCookieStore
         let secondCookies = second.websiteDataStore.httpCookieStore
         first.addTab()
+        first.open(URL(string: "about:blank")!)
         let firstTabCookies = try XCTUnwrap(first.activeTab?.webView?.configuration.websiteDataStore.httpCookieStore)
         await regularCookies.setCookie(regularCookie)
         await firstCookies.setCookie(privateCookie)
@@ -113,6 +115,7 @@ final class PrivacyTests: XCTestCase {
 
     func testPrivatePopUpsAndRestoredTabsStayPrivate() throws {
         let browser = BrowserModel.makePrivate(downloads: DownloadManager())
+        browser.open(URL(string: "about:blank")!)
         let opener = try XCTUnwrap(browser.activeTab)
         let configuration = try XCTUnwrap(opener.webView?.configuration)
 

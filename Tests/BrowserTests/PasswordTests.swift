@@ -59,8 +59,9 @@ final class PasswordTests: XCTestCase {
     }
 
     private func loadPromptForm(in tab: BrowserTab, onSubmit: String) async throws -> WKWebView {
-        let webView = try XCTUnwrap(tab.webView)
         tab.isNewTab = false
+        tab.restore()
+        let webView = try XCTUnwrap(tab.webView)
         webView.loadHTMLString("""
         <title>Sign in</title>
         <form onsubmit="event.preventDefault(); \(onSubmit)">

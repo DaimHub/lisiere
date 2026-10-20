@@ -78,27 +78,30 @@ struct ProfileWorkspaces: View {
     @Environment(\.browserReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            ForEach(owner.presentedBrowsers, id: \.profileID) { browser in
-                if let id = browser.profileID, let context = profiles.context(for: id) {
-                    ProfileWorkspace(profiles: profiles, context: context, browser: browser,
-                                     isFullScreen: isFullScreen)
-                }
-            }
+        let items: [ProfileDeckItem<ProfileWorkspaceContent>] = owner.presentedBrowsers.compactMap { browser in
+            guard let id = browser.profileID, let context = profiles.context(for: id) else { return nil }
+            return ProfileDeckItem(id: id, content: ProfileWorkspaceContent(
+                profiles: profiles, context: context, browser: browser, isFullScreen: isFullScreen))
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: owner.browser.profileID)
+        ProfileDeck(owner: owner, items: items, activeID: owner.browser.profileID, animated: !reduceMotion)
+            // The native boundary must extend into the same title-bar region as BrowserWindow.
+            // Ignoring the inset only inside its NSHostingView cannot expand the outer host.
+            .ignoresSafeArea(.container, edges: .top)
     }
 }
 
 /// Stable identity retains native controls and the SwiftUI graph across a profile round trip.
 /// Only two workspaces are kept; parked workspaces reject input and pause their start-page motion.
-private struct ProfileWorkspace: View {
+private struct ProfileWorkspaceContent: View, Equatable {
     let profiles: ProfileStore
     let context: ProfileContext
     let browser: BrowserModel
     let isFullScreen: Bool
-    @Environment(\.browserReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.profiles === rhs.profiles && lhs.context === rhs.context && lhs.browser === rhs.browser
+            && lhs.isFullScreen == rhs.isFullScreen
+    }
 
     var body: some View {
         BrowserWindow(bookmarks: context.bookmarks, profiles: profiles,
@@ -106,13 +109,18 @@ private struct ProfileWorkspace: View {
             .environment(context.browsingData)
             .environment(context.preferences)
             .environment(context.favicons)
+            .environment(\.workspaceVisibilityManagedByHost, true)
             .environment(\.colorScheme, context.preferences.appearance.colorScheme)
+            .modifier(WorkspaceScenePhase(browser: browser))
+    }
+}
+
+private struct WorkspaceScenePhase: ViewModifier {
+    let browser: BrowserModel
+    @Environment(\.scenePhase) private var scenePhase
+    func body(content: Content) -> some View {
+        content
             .environment(\.scenePhase, browser.isActiveInWorkspace ? scenePhase : .inactive)
-            .transaction { $0.animation = nil }
-            .opacity(browser.isActiveInWorkspace ? 1 : 0)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: browser.isActiveInWorkspace)
-            .transition(reduceMotion ? .identity : .opacity)
-            .zIndex(1)
     }
 }
 

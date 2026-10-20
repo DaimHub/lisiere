@@ -14,6 +14,7 @@ enum Mascot: String, CaseIterable, Identifiable {
 
     static let storageKey = "mascot"
     static let defaultChoice = Mascot.lutin
+    @MainActor private static var appliedDockIconName: String?
 
     var id: Self { self }
     func imageName(for palette: MascotPalette) -> String { "Mascot-\(rawValue)\(palette.assetSuffix)" }
@@ -39,13 +40,18 @@ enum Mascot: String, CaseIterable, Identifiable {
 
     @MainActor
     func applyDockIcon(palette: MascotPalette = .current()) {
+        let name = iconName(for: palette)
+        // Switching profiles often keeps the same mascot. Reassigning even the default
+        // icon asks AppKit and the Dock to regenerate a tile during the window transition.
+        guard Self.appliedDockIconName != name else { return }
         // nil restores the compiled Icon Composer icon, including system appearance variants.
         // AppKit only changes the running Dock tile; Finder keeps the signed bundle's icon.
         guard self != Self.defaultChoice || palette != .black else {
             NSApp.applicationIconImage = nil
+            Self.appliedDockIconName = name
             return
         }
-        guard let image = NSImage(named: iconName(for: palette)) else { return }
+        guard let image = NSImage(named: name) else { return }
         // Composer's PNG export fills its canvas. The compiled macOS icon has a 100 px
         // inset at 1024 px; use the same footprint for alternate Dock tiles.
         let dockImage = NSImage(size: NSSize(width: 1024, height: 1024), flipped: false) { bounds in
@@ -53,6 +59,7 @@ enum Mascot: String, CaseIterable, Identifiable {
             return true
         }
         NSApp.applicationIconImage = dockImage
+        Self.appliedDockIconName = name
     }
 }
 

@@ -4,6 +4,50 @@ import Observation
 
 @MainActor
 final class BrowserModelTests: XCTestCase {
+    func testStripSelectionNotifiesOnlyAffectedTabsAndTracksSplitAndClosure() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        let first = try XCTUnwrap(browser.activeTab)
+        browser.addTab()
+        let second = try XCTUnwrap(browser.activeTab)
+        browser.addTab()
+        let third = try XCTUnwrap(browser.activeTab)
+        let changes = SelectionObservationCounter()
+        withObservationTracking { _ = first.stripSelection } onChange: {
+            MainActor.assumeIsolated { changes.count += 1 }
+        }
+        browser.activeTabID = second.id
+        browser.activeTabID = third.id
+        XCTAssertEqual(changes.count, 0, "An unrelated card must not observe a global selection change")
+        XCTAssertEqual(first.stripSelection, .background)
+        XCTAssertEqual(second.stripSelection, .background)
+        XCTAssertEqual(third.stripSelection, .active)
+
+        browser.startSplitView(with: first.id)
+        XCTAssertEqual(first.stripSelection, .active)
+        XCTAssertEqual(third.stripSelection, .splitPartner)
+        XCTAssertEqual(changes.count, 1)
+        browser.activeTabID = second.id
+        XCTAssertEqual(first.stripSelection, .background)
+        XCTAssertEqual(third.stripSelection, .background)
+        browser.activeTabID = third.id
+        XCTAssertEqual(first.stripSelection, .splitPartner)
+        XCTAssertEqual(third.stripSelection, .active)
+
+        let unchanged = SelectionObservationCounter()
+        withObservationTracking { _ = third.stripSelection } onChange: {
+            MainActor.assumeIsolated { unchanged.count += 1 }
+        }
+        browser.setPinned(true, for: third.id)
+        XCTAssertEqual(unchanged.count, 0, "Reordering the active card must not republish its role")
+        browser.closeTab(first.id)
+        XCTAssertEqual(first.stripSelection, .background)
+        XCTAssertEqual(third.stripSelection, .active)
+        XCTAssertFalse(browser.isSplitView)
+        browser.activeTabID = UUID()
+        XCTAssertTrue(browser.tabs.allSatisfy { $0.stripSelection == .background })
+    }
+
     func testOrganizingTabsDoesNotInvalidateUnchangedPageSelection() throws {
         for split in [false, true] {
             let browser = BrowserModel.makePrivate()
@@ -80,12 +124,49 @@ final class BrowserModelTests: XCTestCase {
 
         XCTAssertTrue(browser.activeTab?.isNewTab == true)
         XCTAssertNil(browser.activeTab?.url)
+        XCTAssertNil(browser.activeTab?.webView)
+        XCTAssertFalse(browser.activeTab?.isSuspended ?? true)
 
         browser.addTab()
 
         XCTAssertEqual(browser.tabs.count, 2)
         XCTAssertTrue(browser.activeTab?.isNewTab == true)
         XCTAssertNil(browser.activeTab?.url)
+        XCTAssertNil(browser.activeTab?.webView)
+        browser.switchTab(by: -1)
+        XCTAssertNil(browser.activeTab?.webView, "Selecting a native start page must not allocate WebKit")
+    }
+
+    func testFirstNavigationCreatesWebKitInTheOwningStoreAndSurvivesSuspension() throws {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        let tab = try XCTUnwrap(browser.activeTab)
+        let container = tab.contentView
+        browser.open(URL(string: "data:text/html,<title>First navigation</title>")!)
+        let webView = try XCTUnwrap(tab.webView)
+        XCTAssertTrue(webView.configuration.websiteDataStore === browser.websiteDataStore)
+        XCTAssertTrue(webView.superview === container)
+        XCTAssertFalse(tab.isNewTab)
+        XCTAssertFalse(tab.isSuspended)
+        tab.suspend()
+        XCTAssertTrue(tab.isSuspended)
+        tab.restore()
+        XCTAssertNotNil(tab.webView)
+        XCTAssertTrue(tab.webView?.configuration.websiteDataStore === browser.websiteDataStore)
+        XCTAssertTrue(tab.contentView === container)
+    }
+
+    func testDuplicatedAndRestoredStartPagesStayNativeUntilNavigation() {
+        let browser = BrowserModel.makePrivate()
+        defer { browser.releaseClosedWindow() }
+        browser.duplicateTab(browser.activeTabID!)
+        browser.startSplitView()
+        XCTAssertTrue(browser.tabs.allSatisfy { $0.webView == nil && !$0.isSuspended })
+        browser.restoreSession(WindowSession(tabs: [
+            TabSession(url: nil, title: "", interactionState: nil),
+            TabSession(url: nil, title: "", interactionState: nil)
+        ], selectedIndex: 1))
+        XCTAssertTrue(browser.tabs.allSatisfy { $0.webView == nil && !$0.isSuspended })
     }
 
     func testTabShortcutsWrapAndSelectByNumber() {

@@ -1,5 +1,6 @@
 import WebKit
 import XCTest
+import Synchronization
 @testable import Browser
 
 @MainActor
@@ -97,7 +98,70 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertNotNil(profiles.loadError)
         XCTAssertNil(profiles.context(for: BrowserProfile.initialID))
         XCTAssertThrowsError(try profiles.create(name: "New"))
+        XCTAssertThrowsError(try profiles.select(BrowserProfile.initialID, persistImmediately: false))
+        profiles.saveBeforeQuitting()
         XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testDeferredSelectionDoesNotWaitForDiskAndCannotOverwriteLaterEdits() async throws {
+        let (root, defaults) = fixture()
+        let blockNextWrite = Mutex(false)
+        let writeTimedOut = Mutex(false)
+        let gate = DispatchSemaphore(value: 0)
+        let entered = expectation(description: "Selection write reached the background queue")
+        let file = StoreFile(url: root.appending(path: "Profiles.plist")) { data, url in
+            let block = blockNextWrite.withLock { value in defer { value = false }; return value }
+            if block {
+                XCTAssertFalse(Thread.isMainThread)
+                entered.fulfill()
+                if gate.wait(timeout: .now() + 5) == .timedOut { writeTimedOut.withLock { $0 = true } }
+            }
+            try data.write(to: url, options: .atomic)
+        }
+        let profiles = ProfileStore(root: root, defaults: defaults, manifestFile: file)
+        let a = try profiles.create(name: "A")
+        let b = try profiles.create(name: "B")
+        blockNextWrite.withLock { $0 = true }
+        defer { gate.signal() }
+        try profiles.select(a.id, persistImmediately: false)
+        XCTAssertEqual(profiles.selectedID, a.id)
+        await fulfillment(of: [entered], timeout: 2)
+        XCTAssertFalse(writeTimedOut.withLock { $0 }, "The UI must return while storage is still blocked")
+        try profiles.select(b.id, persistImmediately: false)
+        XCTAssertEqual(profiles.selectedID, b.id)
+        gate.signal()
+        try profiles.rename(b.id, to: "Renamed B")
+        let renamed = ProfileStore(root: root, defaults: defaults)
+        XCTAssertEqual(renamed.selectedID, b.id)
+        XCTAssertEqual(renamed.name(b.id), "Renamed B")
+        try profiles.select(a.id, persistImmediately: false)
+        profiles.saveBeforeQuitting()
+        XCTAssertEqual(ProfileStore(root: root, defaults: defaults).selectedID, a.id)
+    }
+
+    func testDeferredSelectionFailurePreservesRegistryAndCanBeRetried() async throws {
+        let (root, defaults) = fixture()
+        let failWrites = Mutex(false)
+        let file = StoreFile(url: root.appending(path: "Profiles.plist")) { data, url in
+            if failWrites.withLock({ $0 }) { throw CocoaError(.fileWriteOutOfSpace) }
+            try data.write(to: url, options: .atomic)
+        }
+        let profiles = ProfileStore(root: root, defaults: defaults, manifestFile: file)
+        let a = try profiles.create(name: "A")
+        let original = try XCTUnwrap(file.readNow())
+        failWrites.withLock { $0 = true }
+        try profiles.select(a.id, persistImmediately: false)
+        XCTAssertEqual(file.readNow(), original)
+        XCTAssertEqual(file.lastFailure?.operation, .write)
+        for _ in 0..<100 where profiles.persistenceFailure == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(profiles.persistenceFailure?.store, "profiles")
+        XCTAssertEqual(profiles.persistenceFailure?.canRetry, true)
+        failWrites.withLock { $0 = false }
+        profiles.retryPersistence()
+        XCTAssertNil(file.lastFailure)
+        XCTAssertEqual(ProfileStore(root: root, defaults: defaults).selectedID, a.id)
+        for _ in 0..<100 where profiles.persistenceFailure != nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertNil(profiles.persistenceFailure)
     }
 
     func testDeletionRequiresClosedWindowsAndKeepsOtherProfileData() async throws {
@@ -116,7 +180,7 @@ final class ProfileStoreTests: XCTestCase {
         browser.releaseClosedWindow()
         await context.history.waitUntilLoaded()
         context.history.recordVisit(to: URL(string: "https://example.com")!, title: "A")
-        try profiles.select(a.id)
+        try profiles.select(a.id, persistImmediately: false)
         try await profiles.delete(a.id)
         // Late save callbacks must not resurrect deleted files.
         context.history.saveNow()
@@ -136,6 +200,8 @@ final class ProfileStoreTests: XCTestCase {
         let b = try profiles.create(name: "B")
         let first = try XCTUnwrap(profiles.context(for: a.id)).makeBrowser(downloads: DownloadManager())
         let second = try XCTUnwrap(profiles.context(for: b.id)).makeBrowser(downloads: DownloadManager())
+        first.open(URL(string: "about:blank")!)
+        second.open(URL(string: "about:blank")!)
         let firstTab = first.activeTabID
         try profiles.select(a.id)
         try profiles.select(b.id)

@@ -15,6 +15,7 @@ final class ProfileWindowController {
     private(set) var presentedBrowsers: [BrowserModel] = []
     let additionalWindows: Int
     @ObservationIgnored weak var window: NSWindow?
+    @ObservationIgnored weak var workspacePresentation: (any ProfileWorkspacePresenting)?
     @ObservationIgnored private var pendingTabTransfer: TabWindowTransfer?
     @ObservationIgnored private var browsers: [UUID: BrowserModel] = [:]
     @ObservationIgnored var onActivate: ((BrowserModel) -> Void)?
@@ -69,7 +70,7 @@ final class ProfileWindowController {
         guard !isClosed, let id = browser.profileID else { return }
         profiles.lastActiveWindow = self
         browser.preferences.mascot.applyDockIcon(palette: browser.preferences.mascotPalette)
-        do { try profiles.select(id) } catch { profiles.errorMessage = error.localizedDescription }
+        do { try profiles.select(id, persistImmediately: false) } catch { profiles.errorMessage = error.localizedDescription }
     }
 
     func switchBy(_ direction: Int) {
@@ -83,7 +84,7 @@ final class ProfileWindowController {
         defer { BrowserDiagnostics.performance.endInterval("Profile switch", interval) }
         do {
             guard let context = profiles.context(for: profileID) else { throw ProfileStore.Failure.missingProfile }
-            try profiles.select(profileID)
+            try profiles.select(profileID, persistImmediately: false)
             let next: BrowserModel
             if let retained = browsers[profileID] {
                 next = retained
@@ -97,6 +98,10 @@ final class ProfileWindowController {
             }
             if !isPrivate, let previousID = browser.profileID {
                 profiles.context(for: previousID)?.session.setParked(true, for: browser)
+            }
+            if let workspacePresentation {
+                next.prepareWorkspacePresentation()
+                workspacePresentation.beginTransition(to: profileID)
             }
             ExternalURLRouter.shared.unregister(browser)
             browser.setWorkspaceActive(false)
@@ -152,6 +157,7 @@ final class ProfileWindowController {
         privateBrowsingData = nil
         if profiles.lastActiveWindow === self { profiles.lastActiveWindow = nil }
         window = nil
+        workspacePresentation = nil
         onActivate = nil
     }
 }

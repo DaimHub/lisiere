@@ -13,10 +13,12 @@ final class SplitViewTests: XCTestCase {
     func testNewPaneAndExistingTabReuseExactlyTwoPages() throws {
         let browser = BrowserModel.makePrivate()
         defer { browser.releaseClosedWindow() }
+        browser.open(page("First"))
         let first = try XCTUnwrap(browser.activeTab)
         let firstView = first.webView
         browser.startSplitView()
         let second = try XCTUnwrap(browser.activeTab)
+        browser.open(page("Second"))
         XCTAssertEqual(browser.splitTabIDs, [first.id, second.id])
         XCTAssertEqual(browser.tabs.count, 2)
         XCTAssertTrue(first.webView === firstView)
@@ -223,6 +225,7 @@ final class SplitViewTests: XCTestCase {
         let other = BrowserModel.makePrivate()
         defer { browser.releaseClosedWindow(); other.releaseClosedWindow() }
         browser.startSplitView()
+        browser.splitTabs.forEach { $0.load(page("Private")) }
         let cookie = try XCTUnwrap(HTTPCookie(properties: [.domain: "split.example", .path: "/", .name: "session", .value: "split-only"]))
         let leftStore = try XCTUnwrap(browser.splitTabs.first?.webView?.configuration.websiteDataStore)
         let rightStore = try XCTUnwrap(browser.splitTabs.last?.webView?.configuration.websiteDataStore)
@@ -243,6 +246,10 @@ final class SplitViewTests: XCTestCase {
         browser.startSplitView()
         let left = browser.splitTabs[0]
         let right = browser.splitTabs[1]
+        for tab in [left, right] {
+            tab.isNewTab = false
+            tab.restore()
+        }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
                               styleMask: [.titled], backing: .buffered, defer: true)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -269,6 +276,7 @@ final class SplitViewTests: XCTestCase {
         try await waitUntil { first.webView?.window === window }
         browser.startSplitView()
         let second = try XCTUnwrap(browser.activeTab)
+        browser.open(page("Second"))
         try await waitUntil { first.webView?.window === window && second.webView?.window === window }
 
         try await waitUntil { self.nativeSplit(in: window.contentView)?.arrangedSubviews.count == 2 }

@@ -34,7 +34,9 @@ struct BrowserApp: App {
         .windowStyle(.hiddenTitleBar)
         .restorationBehavior(.disabled)
         .commands {
-            BrowserCommands(profiles: profiles, updater: .shared)
+            if !MotionValidation.omitsCommands {
+                BrowserCommands(profiles: profiles, updater: .shared)
+            }
             #if DEBUG
             BrowserDevelopmentCommands()
             #endif

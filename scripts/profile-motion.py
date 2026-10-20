@@ -24,7 +24,7 @@ def wait_for(condition, seconds, label):
         time.sleep(0.1)
 
 
-def export(output, pid, phases, time_profiler=False):
+def export(output, pid, phases, time_profiler=False, swiftui_body=False):
     trace = output / "motion.trace"
     toc_path = output / "toc.xml"
     subprocess.run(["xcrun", "xctrace", "export", "--input", str(trace), "--toc", "--output", str(toc_path)], check=True)
@@ -36,14 +36,26 @@ def export(output, pid, phases, time_profiler=False):
     toc.write(toc_path, encoding="unicode")
     origin = datetime.fromisoformat(toc.findtext(".//summary/start-date")).timestamp()
     duration = float(toc.findtext(".//summary/duration"))
-    for table in ["hitches"] + (["time-profile"] if time_profiler else []):
+    tables = ["hitches"] + (["time-profile"] if time_profiler else [])
+    if swiftui_body:
+        tables.append("swiftui-body-interval")
+    for table in tables:
         subprocess.run(["xcrun", "xctrace", "export", "--input", str(trace), "--xpath",
                         f'/trace-toc/run[@number="1"]/data/table[@schema="{table}"]',
                         "--output", str(output / f"{table}.xml")], check=True)
     results = summarize(ET.parse(output / "hitches.xml"), pid, origin, duration, phases)
     control = next(item for item in results if item["name"] == "detector-control")
-    report = {"pid": pid, "recording_seconds": duration,
-              "instruments": ["Hitches"] + (["Time Profiler"] if time_profiler else []),
+    ready = json.loads((output / "ready.json").read_text())
+    workload = "distinct-urls" if ready.get("distinct_urls", False) else "same-url"
+    report = {"pid": pid, "recording_seconds": duration, "workload": workload,
+              "interaction_driver_version": ready.get("interaction_driver_version", 1),
+              "native_page_control": ready.get("native_page_control", False),
+              "display_link_control": ready.get("display_link_control", False),
+              "profile_idle_control": ready.get("profile_idle_control", False),
+              "omits_commands": ready.get("omits_commands", False),
+              "omitted_chrome": ready.get("omitted_chrome", ""),
+              "instruments": ["Hitches"] + (["Time Profiler"] if time_profiler else [])
+                             + (["View Body (Legacy)"] if swiftui_body else []),
               "detector_verified": control["max_hitch_ms"] >= 50, "scenarios": results,
               "limitations": "Short local samples under Instruments. Hitches are delayed presentation, not FPS. No physical gesture or Chrome comparison."}
     (output / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -74,6 +86,8 @@ def summarize(xml, pid, origin, duration, phases):
             raise RuntimeError(f"Scenario outside recording: {phase['name']}")
         if phase.get("window_active") is False:
             raise RuntimeError(f"QA window lost focus: {phase['name']}")
+        if phase.get("window_visible") is False:
+            raise RuntimeError(f"QA window was occluded: {phase['name']}")
         delays = [delay for timestamp, delay in events if start <= timestamp < end]
         results.append({**phase, "hitches": len(delays), "total_hitch_ms": sum(delays),
                         "max_hitch_ms": max(delays, default=0),
@@ -87,8 +101,23 @@ def main():
     parser.add_argument("app", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--time-profiler", action="store_true", help="Add CPU stack sampling for diagnosis; use the same instruments for before/after comparisons")
+    parser.add_argument("--swiftui-body", action="store_true", help="Add the lighter legacy SwiftUI body instrument for view-update attribution")
     parser.add_argument("--extended", action="store_true", help="Also measure warm web-to-web tab and profile switches")
+    parser.add_argument("--distinct-urls", action="store_true", help="Use different addresses for warm web tabs/profiles; compare only captures using the same workload")
+    parser.add_argument("--native-page-control", action="store_true", help="Add a diagnostic native page swap with unchanged chrome selection; requires --extended")
+    parser.add_argument("--display-link-control", action="store_true", help="Diagnostic only: request the screen maximum callback rate with a native display link; callbacks are not presented FPS")
+    parser.add_argument("--profile-idle-control", action="store_true", help="Use 800 ms between profile switches so parked pages must wake on every return; compare only like workloads")
+    parser.add_argument("--omit-commands", action="store_true", help="Diagnostic only: omit app commands to isolate their SwiftUI graph updates")
+    parser.add_argument("--omit-chrome", choices=["tabs", "navigation", "all"], help="Diagnostic only: replace chrome regions with equal-size empty space for extended web-switch scenarios")
     args = parser.parse_args()
+    if args.distinct_urls and not args.extended:
+        parser.error("--distinct-urls requires --extended")
+    if args.native_page_control and not args.extended:
+        parser.error("--native-page-control requires --extended")
+    if args.profile_idle_control and not args.extended:
+        parser.error("--profile-idle-control requires --extended")
+    if args.omit_chrome and not args.extended:
+        parser.error("--omit-chrome requires --extended")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     app, qa_id = validation.prepare(args.app.resolve(), output)
@@ -101,14 +130,34 @@ def main():
             launch = subprocess.Popen(["open", "-W", "-a", str(app), "--stdout", str(output / "app.log"),
                                        "--stderr", str(output / "app.log"), "--env", "LISIERE_QA_VALIDATION=motion",
                                        "--env", f"LISIERE_QA_MOTION_EXTENDED={int(args.extended)}",
+                                       "--env", f"LISIERE_QA_MOTION_DISTINCT_URLS={int(args.distinct_urls)}",
+                                       "--env", f"LISIERE_QA_NATIVE_PAGE_CONTROL={int(args.native_page_control)}",
+                                       "--env", f"LISIERE_QA_DISPLAY_LINK_CONTROL={int(args.display_link_control)}",
+                                       "--env", f"LISIERE_QA_PROFILE_IDLE_CONTROL={int(args.profile_idle_control)}",
+                                       "--env", f"LISIERE_QA_OMIT_COMMANDS={int(args.omit_commands)}",
+                                       "--env", f"LISIERE_QA_OMIT_CHROME={args.omit_chrome or ''}",
                                        "--env", f"LISIERE_QA_BASE_URL=http://127.0.0.1:{server.server_port}"], stdout=log, stderr=log)
             wait_for(lambda: (root / "motion-ready.json").exists(), 45, "QA ready")
             ready = json.loads((root / "motion-ready.json").read_text())
+            if args.distinct_urls and not ready.get("distinct_urls", False):
+                raise RuntimeError("This Release does not support the requested distinct-URL workload")
+            if args.native_page_control and not ready.get("native_page_control", False):
+                raise RuntimeError("This Release does not support the requested native page control")
+            if args.display_link_control and not ready.get("display_link_control", False):
+                raise RuntimeError("This Release does not support the requested display-link control")
+            if args.profile_idle_control and not ready.get("profile_idle_control", False):
+                raise RuntimeError("This Release does not support the requested profile-idle control")
+            if args.omit_commands and not ready.get("omits_commands", False):
+                raise RuntimeError("This Release does not support the requested command control")
+            if args.omit_chrome and ready.get("omitted_chrome") != args.omit_chrome:
+                raise RuntimeError("This Release does not support the requested chrome control")
             (output / "ready.json").write_text(json.dumps(ready, indent=2) + "\n")
             print(f"QA ready: {ready}", flush=True)
             with (output / "record.log").open("w") as record_log:
                 # The full Animation Hitches template includes very expensive Frame Lifetimes data.
                 sampling = ["--instrument", "Time Profiler"] if args.time_profiler else []
+                if args.swiftui_body:
+                    sampling += ["--instrument", "View Body (Legacy)"]
                 recorder = subprocess.Popen(["xcrun", "xctrace", "record", "--template", "Blank", "--instrument", "Hitches",
                                              *sampling, "--attach", str(ready["pid"]), "--time-limit", "90s" if args.extended else "45s",
                                              "--output", str(output / "motion.trace"), "--no-prompt"], stdout=record_log, stderr=record_log)
@@ -126,7 +175,7 @@ def main():
             launch.wait(timeout=15)
         data = json.loads((root / "motion-phases.json").read_text())
         (output / "phases.json").write_text(json.dumps(data, indent=2) + "\n")
-        export(output, ready["pid"], data["phases"], args.time_profiler)
+        export(output, ready["pid"], data["phases"], args.time_profiler, args.swiftui_body)
     finally:
         if recorder is not None and recorder.poll() is None:
             recorder.terminate()

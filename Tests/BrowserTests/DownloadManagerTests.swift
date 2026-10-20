@@ -40,6 +40,8 @@ final class DownloadManagerTests: XCTestCase {
         let downloads = DownloadManager(directory: directory)
         let browser = BrowserModel(downloads: downloads)
         let tab = try XCTUnwrap(browser.activeTab)
+        tab.isNewTab = false
+        tab.restore()
         let webView = try XCTUnwrap(tab.webView)
         webView.loadHTMLString("<title>Files</title><a id=file download=note.txt href='data:text/plain,hello'>Get</a>",
                                baseURL: URL(string: "https://example.com")!)

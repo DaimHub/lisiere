@@ -181,6 +181,9 @@ final class ProfileStore {
     @ObservationIgnored weak var lastActiveWindow: ProfileWindowController?
     private(set) var deletingID: UUID?
     @ObservationIgnored private let root: URL?
+    @ObservationIgnored private let manifestFile: StoreFile?
+    @ObservationIgnored private var selectionNeedsFlush = false
+    @ObservationIgnored private var terminationObservation: NotificationObservation?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let restoresWindows: Bool?
     @ObservationIgnored private let dataStoreFactory: (BrowserProfile) -> WKWebsiteDataStore
@@ -194,14 +197,19 @@ final class ProfileStore {
 
     init(root: URL? = StoreFile.applicationSupport(named: "Profiles.plist").url.deletingLastPathComponent(),
          defaults: UserDefaults = .standard, restoresWindows: Bool? = nil,
+         manifestFile: StoreFile? = nil,
          dataStoreFactory: @escaping (BrowserProfile) -> WKWebsiteDataStore = {
              profile in
              autoreleasepool { profile.isInitial ? .default() : WKWebsiteDataStore(forIdentifier: profile.id) }
          }) {
         self.root = root
+        self.manifestFile = manifestFile ?? root.map { StoreFile(url: $0.appending(path: "Profiles.plist")) }
         self.defaults = defaults
         self.restoresWindows = restoresWindows
         self.dataStoreFactory = dataStoreFactory
+        terminationObservation = NotificationObservation(name: NSApplication.willTerminateNotification) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveBeforeQuitting() }
+        }
         guard let file = manifestURL, FileManager.default.fileExists(atPath: file.path) else { return }
         do {
             let saved = try PropertyListDecoder().decode(Manifest.self, from: Data(contentsOf: file))
@@ -230,7 +238,21 @@ final class ProfileStore {
         return availableProfiles.first { session(for: $0.id)?.hasPendingWindows == true }?.id ?? selectedID
     }
 
-    private var manifestURL: URL? { root?.appending(path: "Profiles.plist") }
+    private var manifestURL: URL? { manifestFile?.url }
+
+    var persistenceFailure: StoreFile.Failure? {
+        PersistenceStatus.shared.firstFailure(for: [manifestURL].compactMap { $0 })
+    }
+
+    func retryPersistence() {
+        guard loadError == nil else { return }
+        try? save(profiles, selectedID: selectedID)
+    }
+
+    func saveBeforeQuitting() {
+        guard selectionNeedsFlush, loadError == nil else { return }
+        try? save(profiles, selectedID: selectedID)
+    }
     func profile(_ id: UUID) -> BrowserProfile? { profiles.first { $0.id == id } }
     func name(_ id: UUID) -> String { profile(id)?.name ?? "Profile" }
 
@@ -269,11 +291,13 @@ final class ProfileStore {
 
     private func save(_ profiles: [BrowserProfile], selectedID: UUID) throws {
         guard loadError == nil else { throw Failure.invalidManifest }
-        if let file = manifestURL {
+        if let manifestFile {
             let data = try PropertyListEncoder.binary.encode(Manifest(profiles: profiles, selectedID: selectedID))
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: file, options: .atomic)
+            // Use the same serial writer as selection, so a queued old selection cannot overwrite
+            // a renamed profile, a new profile, or the durable tombstone required before deletion.
+            try manifestFile.writeNow(data).get()
         }
+        selectionNeedsFlush = false
         // Selecting a profile does not change the list. Broadcasting it dirties every workspace,
         // profile menu and tab strip during the same display transaction as the crossfade.
         if self.profiles != profiles { self.profiles = profiles }
@@ -331,9 +355,23 @@ final class ProfileStore {
         try save(updated, selectedID: selectedID)
     }
 
-    func select(_ id: UUID) throws {
+    func select(_ id: UUID, persistImmediately: Bool = true) throws {
+        guard loadError == nil else { throw Failure.invalidManifest }
         guard profile(id)?.pendingDeletion == false else { throw Failure.missingProfile }
-        if selectedID != id { try save(profiles, selectedID: id) }
+        guard selectedID != id else {
+            if persistImmediately && selectionNeedsFlush { try save(profiles, selectedID: id) }
+            return
+        }
+        if persistImmediately {
+            try save(profiles, selectedID: id)
+        } else {
+            // A switch only remembers the preferred profile; it creates or deletes no user data.
+            // Keep atomic I/O off the display transaction and flush the final choice on normal quit.
+            let data = try PropertyListEncoder.binary.encode(Manifest(profiles: profiles, selectedID: id))
+            selectedID = id
+            selectionNeedsFlush = true
+            manifestFile?.write { data }
+        }
     }
 
     func register(_ browser: BrowserModel) {

@@ -23,7 +23,10 @@ final class NotificationObservation: @unchecked Sendable {
 final class PersistenceStatus {
     static let shared = PersistenceStatus()
     private(set) var failures: [URL: StoreFile.Failure] = [:]
-    func record(_ failure: StoreFile.Failure?, for url: URL) { failures[url] = failure }
+    func record(_ failure: StoreFile.Failure?, for url: URL) {
+        guard failures[url] != failure else { return }
+        failures[url] = failure
+    }
     func firstFailure(for urls: [URL]) -> StoreFile.Failure? {
         urls.compactMap { failures[$0] }.first
     }

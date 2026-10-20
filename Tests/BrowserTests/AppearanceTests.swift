@@ -249,6 +249,7 @@ final class AppearanceTests: XCTestCase {
         let store = AppearanceStore(defaults: defaults(), appliesToApplication: false)
         store.selection = .dark
         let browser = BrowserModel(appearance: store)
+        browser.open(URL(string: "about:blank")!)
         let opener = try XCTUnwrap(browser.activeTab)
         let configuration = try XCTUnwrap(opener.webView?.configuration)
         let popUp = browser.openChildTab(of: opener, configuration: configuration, select: false)

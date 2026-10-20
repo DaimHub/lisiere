@@ -76,7 +76,7 @@ final class BrowserModel {
             guard id != first.id, let existing = tab(withID: id) else { return }
             second = existing
         } else {
-            second = makeTab()
+            second = makeStartPage()
             second.groupID = first.groupID
             tabs.append(second)
             normalizeTabOrder()
@@ -255,10 +255,18 @@ final class BrowserModel {
     /// unchanged page identities must not invalidate the toolbar, page host and their layout graph.
     private func updateSelectedPages() {
         let selected = tab(withID: activeTabID)
+        let previouslySelected = [activeTab].compactMap { $0 } + splitTabs
         if activeTab !== selected { activeTab = selected }
         let panes = splitTabIDs.compactMap { tab(withID: $0) }
         if panes.count != splitTabs.count || !zip(panes, splitTabs).allSatisfy({ $0 === $1 }) {
             splitTabs = panes
+        }
+        // At most the old/new active pages and their split partners can change role.
+        // Guarded writes also preserve observations when tabs are merely reordered.
+        for tab in previouslySelected + [selected].compactMap({ $0 }) + panes where tab.browser === self {
+            let role: BrowserTab.StripSelection = tab === selected ? .active
+                : (isSplitView && panes.contains(where: { $0 === tab }) ? .splitPartner : .background)
+            tab.updateStripSelection(role)
         }
     }
 
@@ -275,11 +283,24 @@ final class BrowserModel {
         adopt(BrowserTab(configuration: configuration ?? makeConfiguration(), appearance: appearance))
     }
 
+    private func makeStartPage() -> BrowserTab {
+        adopt(BrowserTab(startPageWith: appearance))
+    }
+
     private func adopt(_ tab: BrowserTab) -> BrowserTab {
         tab.browser = self
         if let controller = tab.webView?.configuration.userContentController { contentBlocker.attach(controller) }
         if !isPrivate { tab.favicon = favicons.cachedIcon(for: tab.url) }
         return tab
+    }
+
+    /// Unpark existing native pages before committing the incoming workspace's fade.
+    /// This does not activate the model, restore suspended tabs, or grant page requests.
+    func prepareWorkspacePresentation() {
+        let pages = isSplitView ? splitTabs : [activeTab].compactMap { $0 }
+        for tab in pages where tab.browser === self {
+            (tab.contentView.superview as? PageHostView)?.setWorkspaceActive(true, animated: false)
+        }
     }
 
     /// A closed window must release every WebKit view before its profile can be deleted.
@@ -305,7 +326,7 @@ final class BrowserModel {
     }
 
     func addTab(in groupID: UUID? = nil) {
-        let tab = makeTab()
+        let tab = makeStartPage()
         tab.groupID = validGroupID(groupID)
         expandGroup(tab.groupID)
         tabs.append(tab)
@@ -329,7 +350,7 @@ final class BrowserModel {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let original = tabs[index]
         // The copy starts suspended, so selecting it restores the original's history and scroll position.
-        let tab = original.url == nil ? makeTab()
+        let tab = original.url == nil ? makeStartPage()
             : adopt(BrowserTab(url: original.url, title: original.pageTitle, interactionState: original.interactionState, appearance: appearance))
         tab.groupID = original.groupID
         tabs.insert(tab, at: index + 1)
@@ -708,7 +729,7 @@ final class BrowserModel {
         var seen = Set<UUID>()
         groups = session.groups.filter { seen.insert($0.id).inserted }
         tabs = session.tabs.map { saved in
-            let tab = saved.url == nil ? makeTab()
+            let tab = saved.url == nil ? makeStartPage()
                 : adopt(BrowserTab(url: saved.url, title: saved.title, interactionState: saved.interactionState, appearance: appearance))
             tab.isPinned = saved.isPinned
             tab.restorePinnedFavicon()

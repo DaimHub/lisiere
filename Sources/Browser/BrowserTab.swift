@@ -7,7 +7,7 @@ import WebKit
 @Observable
 final class BrowserTab: Identifiable {
     let id = UUID()
-    /// The page's web view, or `nil` while the tab is suspended to free its memory.
+    /// The page's web view, or `nil` before a start page navigates or while a web page is suspended.
     private(set) var webView: WKWebView?
     /// Hosts the web view, and the Web Inspector when it's docked, so both move together between windows and tabs.
     let contentView = NSView()
@@ -16,6 +16,13 @@ final class BrowserTab: Identifiable {
     /// Pinning protects the tab from closure, not from background memory reclamation.
     var isPinned = false
     var groupID: UUID?
+    enum StripSelection { case background, active, splitPartner }
+    /// Only cards whose role changes need to update their selection presentation.
+    private(set) var stripSelection = StripSelection.background
+
+    func updateStripSelection(_ value: StripSelection) {
+        if stripSelection != value { stripSelection = value }
+    }
     /// The tab whose page opened this one, so its links and pop-ups open next to each other.
     @ObservationIgnored var openerID: UUID?
     /// Whether another page's script opened this one, and can still reach it through `window.opener`.
@@ -77,6 +84,13 @@ final class BrowserTab: Identifiable {
         install(BrowserWebView(frame: .zero, configuration: configuration))
     }
 
+    /// Native start pages need no WebKit process. The first navigation uses the owning
+    /// browser's configuration, including its data store, password handler and content blocker.
+    init(startPageWith appearance: AppearanceStore) {
+        self.appearance = appearance
+        pageDelegate.tab = self
+    }
+
     /// A suspended tab for a page's saved history, such as a duplicated or reopened tab, which loads when it's selected.
     init(url: URL?, title: String, interactionState: Any?, appearance: AppearanceStore = .shared) {
         self.appearance = appearance
@@ -91,7 +105,7 @@ final class BrowserTab: Identifiable {
     }
 
     var isSuspended: Bool {
-        webView == nil
+        !isNewTab && webView == nil
     }
 
     /// The tab's history and scroll position, whether or not it's suspended.
@@ -480,6 +494,10 @@ final class BrowserTab: Identifiable {
     /// Gives the page keyboard focus.
     func focusPage() {
         guard let webView, let window = webView.window else { return }
+        if browser?.isActiveInWorkspace == true {
+            (contentView.superview as? PageHostView)?.setWorkspaceActive(true, animated: false)
+        }
+        guard window.firstResponder !== webView else { return }
         window.makeFirstResponder(webView)
     }
 
@@ -578,12 +596,15 @@ struct PageHost: NSViewRepresentable {
     let content: NSView
     var tab: BrowserTab? = nil
     var browser: BrowserModel? = nil
+    var isWorkspaceActive = true
+    @Environment(\.browserReduceMotion) private var reduceMotion
 
     func makeNSView(context: Context) -> PageHostView {
         PageHostView()
     }
 
     func updateNSView(_ view: PageHostView, context: Context) {
+        view.setWorkspaceActive(isWorkspaceActive, animated: !reduceMotion)
         view.show(content, tab: tab, browser: browser)
     }
 
@@ -598,6 +619,39 @@ final class PageHostView: NSView {
     private var attachmentScheduled = false
     private weak var displayedContent: NSView?
     private weak var displayedTab: BrowserTab?
+    private var workspaceActive = true
+    private var pageParked = false
+    private var visibilityRevision = 0
+
+    func setWorkspaceActive(_ active: Bool, animated: Bool) {
+        guard workspaceActive != active || (!active && !animated && !pageParked) else { return }
+        workspaceActive = active
+        visibilityRevision += 1
+        if active {
+            pageParked = false
+            attachContent()
+        } else if !animated {
+            hideParkedPage()
+        } else {
+            let revision = visibilityRevision
+            // Keep the live page through the 220 ms fade and rapid profile round trips. Parking
+            // immediately after the fade otherwise changes WebKit visibility just before reuse.
+            // Once switching settles, native visibility lets WebKit throttle the parked page.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, !self.workspaceActive, self.visibilityRevision == revision else { return }
+                self.hideParkedPage()
+            }
+        }
+    }
+
+    private func hideParkedPage() {
+        if let focused = window?.firstResponder as? NSView, focused.isDescendant(of: self) {
+            window?.makeFirstResponder(nil)
+        }
+        pageParked = true
+        // Only mutate our owned page wrappers, not the representable root SwiftUI controls.
+        for view in subviews where !view.isHidden { view.isHidden = true }
+    }
 
     func show(_ content: NSView, tab: BrowserTab? = nil, browser: BrowserModel? = nil) {
         let needsReconciliation = self.content !== content || self.tab !== tab || self.browser !== browser
@@ -633,34 +687,44 @@ final class PageHostView: NSView {
         let previousHadFocus = displayedContent !== content && displayedContent.map { previous in
             (window.firstResponder as? NSView)?.isDescendant(of: previous) == true
         } == true
+        let needsAttachment = content.superview !== self
         if content.superview !== self {
+            content.frame = bounds
+            content.autoresizingMask = [.width, .height]
+            addSubview(content)
+        }
+        if content.isHidden && !pageParked { content.isHidden = false }
+        // Transfer focus directly before hiding/removing the old page. Hiding focus asks AppKit
+        // to search the whole SwiftUI key-view graph; clearing then focusing dirties it twice.
+        if previousHadFocus {
+            if tab?.isNewTab == false, browser?.isActiveInWorkspace == true { tab?.focusPage() }
+            if let previous = displayedContent,
+               (window.firstResponder as? NSView)?.isDescendant(of: previous) == true {
+                window.makeFirstResponder(nil)
+            }
+        }
+        if needsAttachment {
             // Keep just the last page attached but hidden. Reparenting WebKit on every round trip
             // invalidates the native view hierarchy; its existing window/layers can be reused instead.
             // close()/suspend() remove their own web view, so this does not prevent unloading.
             let canRetainPrevious = displayedTab.map { previous in
                 browser != nil && previous.browser === browser && browser?.tab(withID: previous.id) === previous
             } ?? false
-            for view in subviews where view !== displayedContent || !canRetainPrevious {
+            for view in subviews where view !== content && (view !== displayedContent || !canRetainPrevious) {
                 view.removeFromSuperview()
                 view.isHidden = false
             }
-            content.frame = bounds
-            content.autoresizingMask = [.width, .height]
-            addSubview(content)
         }
         for view in subviews {
-            let hidden = view !== content
+            let hidden = view !== content || pageParked
             if view.isHidden != hidden { view.isHidden = hidden }
         }
         displayedContent = content
         displayedTab = tab
-        if previousHadFocus {
-            window.makeFirstResponder(nil)
-            if tab?.isNewTab == false, browser?.isActiveInWorkspace == true { tab?.focusPage() }
-        }
     }
 
     func releaseContent() {
+        visibilityRevision += 1
         // A newer host may already own this same page. Never detach it from that host.
         for view in subviews {
             view.removeFromSuperview()
@@ -677,6 +741,7 @@ final class BrowserWebView: WKWebView {
     weak var tab: BrowserTab?
 
     override func becomeFirstResponder() -> Bool {
+        guard tab?.browser?.isActiveInWorkspace != false else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted, let tab, let browser = tab.browser, browser.isActiveInWorkspace,
            browser.isTabVisible(tab.id), browser.activeTabID != tab.id {

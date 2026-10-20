@@ -33,8 +33,11 @@ struct BrowserWindow: View {
     @State private var isShowingDownloads = false
     @State private var isCustomizingToolbar = false
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var nativeOpenWindow
+    @Environment(\.openSettings) private var nativeOpenSettings
+    @Environment(\.workspaceSceneActions) private var workspaceSceneActions
+    private var openWindow: OpenWindowAction { workspaceSceneActions?.openWindow ?? nativeOpenWindow }
+    private var openSettings: OpenSettingsAction { workspaceSceneActions?.openSettings ?? nativeOpenSettings }
     @Environment(BrowsingData.self) private var browsingData
     private var bookmarksBarVisibility: BookmarksBarVisibility { browser.preferences.bookmarksBarVisibility }
     private var tabLayout: TabLayout { browser.preferences.tabLayout }
@@ -70,20 +73,26 @@ struct BrowserWindow: View {
             }
             VStack(spacing: 0) {
                 if tabLayout == .horizontal {
-                    TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen, accent: accent,
-                             hoverCardTabID: $hoverCardTabID, drag: tabDrag, ownsDragSpace: false)
-                        .background(profileSwipeArea)
-                        .transition(.opacity)
+                    if ["tabs", "all"].contains(MotionValidation.omittedChrome) {
+                        Color.clear.frame(height: BrowserChrome.tabRowHeight)
+                    } else {
+                        TabStrip(browser: browser, layout: .horizontal, isFullScreen: isFullScreen, accent: accent,
+                                 hoverCardTabID: $hoverCardTabID, drag: tabDrag, ownsDragSpace: false)
+                            .background(profileSwipeArea)
+                            .transition(.opacity)
+                    }
                 }
                 WindowSection { mainColumn }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !browser.isPrivate, let profileID, let context = profiles.context(for: profileID),
-               let failure = context.persistenceFailure {
+               let failure = context.persistenceFailure ?? profiles.persistenceFailure {
                 HStack(spacing: 12) {
                     Text(failure.message).font(.callout).fixedSize(horizontal: false, vertical: true)
-                    if failure.canRetry { Button("Retry") { context.retryPersistence() } }
+                    if failure.canRetry {
+                        Button("Retry") { context.retryPersistence(); profiles.retryPersistence() }
+                    }
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,6 +299,10 @@ struct BrowserWindow: View {
     }
 
     private func closeSuggestions() {
+        // Selection calls this even when the address field was never edited. Changing the
+        // request State in that case needlessly invalidates the entire window's view value.
+        guard suggestionTask != nil || !suggestions.isEmpty || !queuedAddressCommands.isEmpty
+            || selectedSuggestion != nil || !typedAddress.isEmpty else { return }
         suggestionTask?.cancel()
         suggestionTask = nil
         suggestionRequest += 1
@@ -304,7 +317,15 @@ struct BrowserWindow: View {
         let leadingInset = tabLayout == .vertical ? 0 : BrowserChrome.edgeInset
 
         return VStack(spacing: 0) {
-            WindowSection { navigationBar }
+            WindowSection {
+                if ["navigation", "all"].contains(MotionValidation.omittedChrome) {
+                    Color.clear.frame(height: BrowserChrome.navigationControlHeight
+                                      + BrowserChrome.navigationBarVerticalInset(for: tabLayout)
+                                      * (tabLayout == .vertical ? 2 : 1))
+                } else {
+                    navigationBar
+                }
+            }
                 .padding(.leading, leadingInset)
 
             if !browser.isPrivate, bookmarksBarVisibility.isVisible(onNewTab: browser.activeTab?.isNewTab ?? true) {
@@ -541,7 +562,7 @@ struct BrowserWindow: View {
     }
 
     private var allActionsMenu: some View {
-        Menu { BrowserMenuContent(actions: allActions) } label: {
+        Menu { DeferredBrowserMenuContent(actions: { allActions }) } label: {
             Image(browserIcon: .more)
         }
         .menuStyle(.button)
@@ -752,11 +773,21 @@ struct BrowserWindow: View {
 struct WorkspaceActivity: ViewModifier {
     let browser: BrowserModel
     let changed: (Bool) -> Void
+    @Environment(\.workspaceVisibilityManagedByHost) private var visibilityManagedByHost
     func body(content: Content) -> some View {
-        content
-            .allowsHitTesting(browser.isActiveInWorkspace)
-            .accessibilityHidden(!browser.isActiveInWorkspace)
-            .modifier(WorkspaceActivationObserver(browser: browser, changed: changed))
+        Group {
+            if visibilityManagedByHost {
+                content
+                    // SwiftUI exposes virtual accessibility elements independently of the
+                    // surrounding NSView, so native hit filtering alone is insufficient.
+                    .accessibilityHidden(!browser.isActiveInWorkspace)
+            } else {
+                content
+                    .allowsHitTesting(browser.isActiveInWorkspace)
+                    .accessibilityHidden(!browser.isActiveInWorkspace)
+            }
+        }
+        .modifier(WorkspaceActivationObserver(browser: browser, changed: changed))
     }
 }
 

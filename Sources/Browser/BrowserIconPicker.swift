@@ -32,9 +32,11 @@ struct BrowserIconPicker<Value: Hashable>: NSViewRepresentable {
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.selection = $selection
         context.coordinator.update(button, options: options, selected: selection)
-        button.isEnabled = isEnabled
-        button.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
-        button.contentTintColor = NSColor(tint)
+        if button.isEnabled != isEnabled { button.isEnabled = isEnabled }
+        let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+        if button.appearance?.name != appearance { button.appearance = NSAppearance(named: appearance) }
+        let color = NSColor(tint)
+        if button.contentTintColor != color { button.contentTintColor = color }
         button.setAccessibilityLabel(title)
     }
 
@@ -50,7 +52,8 @@ struct BrowserIconPicker<Value: Hashable>: NSViewRepresentable {
         init(selection: Binding<Value>) { self.selection = selection }
 
         func update(_ button: NSPopUpButton, options: [Option], selected: Value) {
-            if self.options != options || button.menu == nil {
+            let menuChanged = self.options != options || button.menu == nil
+            if menuChanged {
                 self.options = options
                 let menu = NSMenu()
                 menu.autoenablesItems = false
@@ -63,8 +66,12 @@ struct BrowserIconPicker<Value: Hashable>: NSViewRepresentable {
                 }
                 button.menu = menu
             }
-            button.selectItem(at: options.firstIndex { $0.value == selected } ?? -1)
-            button.invalidateIntrinsicContentSize()
+            let index = options.firstIndex { $0.value == selected } ?? -1
+            let selectionChanged = button.indexOfSelectedItem != index
+            if selectionChanged { button.selectItem(at: index) }
+            // A parent view can update without changing this picker. Keep the native
+            // size cache until either its menu contents or displayed selection changes.
+            if menuChanged || selectionChanged { button.invalidateIntrinsicContentSize() }
         }
 
         @objc func select(_ sender: NSPopUpButton) {

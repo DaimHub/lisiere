@@ -231,7 +231,9 @@ struct TabStrip: View {
             .tabDragViewport(viewport, horizontal: true)
             .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
-            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true) }
+            .modifier(ActiveTabRevealObserver(browser: browser) {
+                revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true)
+            })
             .onChange(of: tabRevealRequest) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: width) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .onChange(of: viewportWidth) { _, _ in revealActiveTab(in: sections, using: proxy) }
@@ -322,14 +324,15 @@ struct TabStrip: View {
             .tabDragViewport(viewport, horizontal: false)
             .tabDragAutoScroll(viewport, drag: drag, proxy: proxy, reduceMotion: reduceMotion)
             .onAppear { revealActiveTab(in: sections, using: proxy) }
-            .onChange(of: browser.activeTabID) { _, _ in revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true) }
+            .modifier(ActiveTabRevealObserver(browser: browser) {
+                revealActiveTab(in: sections, using: proxy, onlyIfNeeded: true)
+            })
             .onChange(of: browser.tabs.map(\.isPinned)) { _, _ in revealActiveTab(in: sections, using: proxy) }
             .contextMenu { BrowserMenuContent(actions: stripMenuActions) }
         }
     }
 
     private func groupHeader(_ group: TabGroup, section: BrowserModel.TabSection) -> some View {
-        let isSelected = section.cards.contains { $0.tabs.contains { browser.isTabVisible($0.id) } }
         return Button { browser.toggleGroupCollapsed(group.id) } label: {
             HStack(spacing: 6) {
                 Image(browserIcon: .forward, size: 10)
@@ -344,7 +347,7 @@ struct TabStrip: View {
             .padding(.horizontal, 7)
             .frame(width: layout == .horizontal ? 120 : nil, height: 28)
         }
-        .buttonStyle(TabGroupButtonStyle(tint: group.color.tint, isSelected: isSelected,
+        .buttonStyle(TabGroupButtonStyle(tint: group.color.tint, selectionTabs: section.cards.flatMap(\.tabs),
                                         isFocused: focusedGroupSection == section.id,
                                         isDragging: drag.isDragging,
                                         isDropTarget: drag.indicator?.id == section.id))
@@ -483,11 +486,9 @@ struct TabStrip: View {
     }
 
     private func tabItem(for tab: BrowserTab, width: CGFloat?, joined: Bool = false) -> some View {
-        let isActive = browser.activeTabID == tab.id
         let isHovered = hoveredTabID == tab.id
 
         return TabItem(tab: tab,
-                       isActive: isActive,
                        isHovered: isHovered,
                        width: width,
                        height: layout == .vertical
@@ -707,7 +708,8 @@ struct TabDragCard: View {
 
 private struct TabItem: View {
     let tab: BrowserTab
-    let isActive: Bool
+    // Observe this card's derived role here, not while constructing the surrounding ForEach.
+    private var isActive: Bool { tab.stripSelection == .active }
     let isHovered: Bool
     /// A fixed width in the tab strip, or `nil` to fill the sidebar.
     let width: CGFloat?
@@ -906,7 +908,8 @@ struct ChromeIconButtonStyle: ButtonStyle {
 /// Each section owns its hover state, including when a group appears in both pin and ordinary lists.
 private struct TabGroupButtonStyle: ButtonStyle {
     let tint: Color
-    let isSelected: Bool
+    let selectionTabs: [BrowserTab]
+    private var isSelected: Bool { selectionTabs.contains { $0.stripSelection != .background } }
     let isFocused: Bool
     let isDragging: Bool
     let isDropTarget: Bool
@@ -956,6 +959,15 @@ private struct SidebarNewTabButtonStyle: ButtonStyle {
                         isHovered ? Color.primary.opacity(0.07) : Color.clear, in: shape)
             .contentShape(shape)
             .onHover { isHovered = $0 }
+    }
+}
+
+/// Scrolling observes selection without rebuilding the scroll content.
+private struct ActiveTabRevealObserver: ViewModifier {
+    let browser: BrowserModel
+    let reveal: () -> Void
+    func body(content: Content) -> some View {
+        content.onChange(of: browser.activeTabID) { _, _ in reveal() }
     }
 }
 

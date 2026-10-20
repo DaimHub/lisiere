@@ -135,7 +135,8 @@ final class StoreFile: @unchecked Sendable {
     @discardableResult
     private func report(_ operation: Failure.Operation, error: NSError? = nil) -> Failure {
         let name = url.lastPathComponent == "Session.plist" ? "tabs" :
-            url.lastPathComponent == "History.plist" ? "history" : "browsing data"
+            url.lastPathComponent == "History.plist" ? "history" :
+            url.lastPathComponent == "Profiles.plist" ? "profiles" : "browsing data"
         let failure = Failure(operation: operation, code: error?.code ?? 0, store: name)
         let changed = failureState.withLock { previous in
             defer { previous = failure }

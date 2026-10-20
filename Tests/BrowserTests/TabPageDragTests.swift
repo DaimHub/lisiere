@@ -158,6 +158,7 @@ final class TabPageDragTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         let profiles = ProfileStore(root: nil, defaults: defaults)
         let source = try ProfileWindowController(profiles: profiles, profileID: BrowserProfile.initialID, isPrivate: true)
+        source.browser.open(URL(string: "about:blank")!)
         let tab = try XCTUnwrap(source.browser.activeTab)
         let token = try XCTUnwrap(TabWindowTransfer.prepare(tabID: tab.id, source: source.browser, at: CGPoint(x: 500, y: 500)))
         let destination = try ProfileWindowController(profiles: profiles, profileID: BrowserProfile.initialID,
@@ -194,6 +195,7 @@ final class TabPageDragTests: XCTestCase {
     func testDepartingHostCannotStealLastTabBackFromItsNewWindow() async throws {
         let source = BrowserModel.makePrivate()
         let destination = BrowserModel(websiteDataStore: source.websiteDataStore)
+        source.open(URL(string: "about:blank")!)
         let tab = try XCTUnwrap(source.activeTab)
         let oldWindow = NSWindow(contentRect: bounds, styleMask: [.titled], backing: .buffered, defer: true)
         let newWindow = NSWindow(contentRect: bounds, styleMask: [.titled], backing: .buffered, defer: true)

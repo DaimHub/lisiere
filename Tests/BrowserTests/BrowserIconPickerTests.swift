@@ -5,6 +5,30 @@ import XCTest
 
 @MainActor
 final class BrowserIconPickerTests: XCTestCase {
+    func testUnchangedPopupKeepsItsSizeCacheButNewLabelsAndSelectionResize() {
+        let coordinator = BrowserIconPicker<String>.Coordinator(selection: .constant("a"))
+        let button = SizeTrackingPopup(frame: .zero, pullsDown: false)
+        let options: [BrowserIconPicker<String>.Option] = [
+            .init(value: "a", title: "A", icon: .globe),
+            .init(value: "b", title: "A much longer profile label", icon: .briefcase)
+        ]
+        coordinator.update(button, options: options, selected: "a")
+        let menu = button.menu
+        button.sizeInvalidations = 0
+        for _ in 0..<20 { coordinator.update(button, options: options, selected: "a") }
+        XCTAssertEqual(button.sizeInvalidations, 0, "An unchanged picker must not trigger another native layout")
+        XCTAssertTrue(button.menu === menu)
+        coordinator.update(button, options: options, selected: "b")
+        XCTAssertEqual(button.indexOfSelectedItem, 1)
+        XCTAssertGreaterThan(button.sizeInvalidations, 0)
+        let previousWidth = button.intrinsicContentSize.width
+        coordinator.update(button, options: [
+            .init(value: "b", title: "A renamed profile with an even longer displayed label", icon: .code)
+        ], selected: "b")
+        XCTAssertGreaterThan(button.intrinsicContentSize.width, previousWidth)
+        XCTAssertEqual(button.titleOfSelectedItem, "A renamed profile with an even longer displayed label")
+    }
+
     func testPopupPreservesTemplateImagesAndSelectionAcrossProfileChanges() throws {
         var selected = "personal"
         let coordinator = BrowserIconPicker<String>.Coordinator(selection: Binding(
@@ -61,5 +85,14 @@ final class BrowserIconPickerTests: XCTestCase {
         coordinator.select(button)
         XCTAssertEqual(current, "b")
         XCTAssertEqual(previous, "a")
+    }
+}
+
+@MainActor
+private final class SizeTrackingPopup: NSPopUpButton {
+    var sizeInvalidations = 0
+    override func invalidateIntrinsicContentSize() {
+        sizeInvalidations += 1
+        super.invalidateIntrinsicContentSize()
     }
 }

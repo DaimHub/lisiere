@@ -30,7 +30,7 @@ extension View {
 
 /// Build action lists when SwiftUI needs the menu, not during every tab/layout update.
 /// The AppKit overlay also calls the same factory at opening, so both paths see live state.
-private struct DeferredBrowserMenuContent: View {
+struct DeferredBrowserMenuContent: View {
     let actions: () -> [BrowserContextAction]
     var body: some View { BrowserMenuContent(actions: actions()) }
 }
